@@ -159,15 +159,15 @@ public class PinyonShiftActivity extends SDLActivity {
         try (BufferedReader reader = new BufferedReader(
                 new FileReader("/sys/class/kgsl/kgsl-3d0/gpu_model"))) {
             String line = reader.readLine();
-            Matcher match = line != null ? Pattern.compile("Adreno(\\d{3})").matcher(line) : null;
+            Matcher match = line != null ? Pattern.compile("Adreno.*?(\\d{3})").matcher(line) : null;
             if (match != null && match.find()) {
                 return match.group(1);
             }
         } catch (IOException ignored) {
             // Not readable here: the SoC below.
         }
-        if (Build.VERSION.SDK_INT >= 31) {
-            switch (Build.SOC_MODEL) {
+        if (Build.VERSION.SDK_INT >= 31 && Build.SOC_MODEL != null) {
+            switch (Build.SOC_MODEL.toUpperCase(Locale.ROOT)) {
                 case "SM8250": case "SM8250-AB": case "SM8250-AC": return "650";
                 case "SM8350": return "660";
                 case "SM8450": case "SM8475": return "730";
@@ -176,11 +176,25 @@ public class PinyonShiftActivity extends SDLActivity {
                 case "SM8650": return "750";
                 case "SM7475": return "725";
                 case "SM7550": return "720";
+                case "SM7635": case "SM7635-AB": return "810";
                 case "SM7675": return "732";
                 case "SM8750": return "830";
                 default: break;
             }
         }
+        String hw = (Build.HARDWARE != null ? Build.HARDWARE : "") + " " + (Build.BOARD != null ? Build.BOARD : "");
+        hw = hw.toUpperCase(Locale.ROOT);
+        if (hw.contains("SM7635") || hw.contains("VOLCANO")) return "810";
+        if (hw.contains("SM8250")) return "650";
+        if (hw.contains("SM8350")) return "660";
+        if (hw.contains("SM8450") || hw.contains("SM8475")) return "730";
+        if (hw.contains("SM8550") || hw.contains("QCS8550")) return "740";
+        if (hw.contains("SM8635")) return "735";
+        if (hw.contains("SM8650")) return "750";
+        if (hw.contains("SM7475")) return "725";
+        if (hw.contains("SM7550")) return "720";
+        if (hw.contains("SM7675")) return "732";
+        if (hw.contains("SM8750")) return "830";
         return null;
     }
 

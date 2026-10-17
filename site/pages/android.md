@@ -14,7 +14,7 @@ A developer alpha. The Android build is the same recompiled game, cross-compiled
 - A Windows PC where the game is already built and plays.
 - About 15 GB free on the PC's install drive. The launcher downloads the pinned Android SDK, NDK and JDK 17 when the PC has none, after you accept the Android SDK license.
 - An arm64 device with Android 13 or later and a Vulkan 1.3 driver, about 8 GB free, on the same network as the PC.
-- Tuned for Snapdragon 8 Gen 2 or newer (Adreno 740 and up).
+- Tuned for Snapdragon 8 Gen 2 or newer (Adreno 740 and up). Supports Snapdragon 8-series (Adreno 650/660/730/740/750/830) and 7-series chips including Snapdragon 7s Gen 3 (Adreno 810).
 
 ## Standalone Setup on Device
 
@@ -40,7 +40,7 @@ Modern phones and handhelds feature wide aspect ratios (such as 20:9 or 19.5:9 o
 
 The **Drivers** tab in the mobile launcher manages Vulkan drivers before starting the game:
 
-- **Auto**: Recommends the optimal tested driver for your GPU (Mesa Turnip Gen8 V37 for Adreno 6xx, 7xx, and 8xx).
+- **Auto**: Recommends the optimal tested driver for your GPU (Mesa Turnip Gen8 V37 for Adreno 6xx, 7xx, and 8xx, including Snapdragon 7s Gen 3).
 - **System Default**: Uses the vendor's pre-installed Vulkan driver.
 - **Import Driver (.zip)**: Unpacks any adrenotools or custom Turnip driver archive directly on device.
 - **GPU Turbo Clocks**: Locks Adreno GPU to peak frequency states during gameplay.
