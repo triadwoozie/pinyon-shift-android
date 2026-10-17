@@ -36,6 +36,7 @@
 #include <rex/ui/windowed_app_context.h>
 #include <rex/ui/window.h>
 
+#include <SDL3/SDL_hints.h>
 #if !defined(_WIN32) && !defined(__ANDROID__)
 #include <SDL3/SDL_video.h>
 #endif
@@ -482,6 +483,12 @@ void OnHostGpuLoss() {
 
 }  // namespace
 
+static PinyonShiftApp* s_pinyon_shift_instance = nullptr;
+
+PinyonShiftApp* PinyonShiftApp::Instance() {
+  return s_pinyon_shift_instance;
+}
+
 std::unique_ptr<rex::ui::WindowedApp> PinyonShiftApp::Create(
     rex::ui::WindowedAppContext& context) {
   if (!pinyon_shift::diagnostics::InitializeEarly()) {
@@ -491,8 +498,13 @@ std::unique_ptr<rex::ui::WindowedApp> PinyonShiftApp::Create(
     std::_Exit(EXIT_FAILURE);
 #endif
   }
-  return std::unique_ptr<PinyonShiftApp>(
+#if defined(__ANDROID__)
+  SDL_SetHint("SDL_ACCELEROMETER_AS_JOYSTICK", "0");
+#endif
+  auto app = std::unique_ptr<PinyonShiftApp>(
       new PinyonShiftApp(context, "pinyon_shift", PPCImageConfig));
+  s_pinyon_shift_instance = app.get();
+  return app;
 }
 
 void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
@@ -757,9 +769,29 @@ void PinyonShiftApp::OnPostLoadXexImage() {
   pinyon_shift::diagnostics::RecordEvent("xex.loaded", {{"title_id", title}});
 }
 
-PinyonShiftApp::~PinyonShiftApp() = default;
+PinyonShiftApp::~PinyonShiftApp() {
+  if (s_pinyon_shift_instance == this) {
+    s_pinyon_shift_instance = nullptr;
+  }
+}
+
+void PinyonShiftApp::TriggerPhoto() {
+  pinyon_shift::ui::SavePhoto(runtime() && runtime()->graphics_system()
+                                  ? runtime()->graphics_system()->presenter()
+                                  : nullptr);
+}
 
 void PinyonShiftApp::ToggleGameMenu() {
+  if (window()) {
+    window()->app_context().CallInUIThreadDeferred([this] {
+      if (host_ui_ && host_ui_->is_open()) {
+        host_ui_->Close();
+        return;
+      }
+      OpenSettingsMenu();
+    });
+    return;
+  }
   if (host_ui_ && host_ui_->is_open()) {
     host_ui_->Close();
     return;

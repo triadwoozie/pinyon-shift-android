@@ -154,6 +154,10 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
 }
 
 void TouchPad::OnTouchEvent(rex::ui::TouchEvent& e) {
+#if defined(__ANDROID__)
+  (void)e;
+  return;
+#else
   const auto* window = e.target();
   if (!window) {
     return;
@@ -205,6 +209,7 @@ void TouchPad::OnTouchEvent(rex::ui::TouchEvent& e) {
     }
   }
   Changed();
+#endif
 }
 
 void TouchPad::Changed() {
@@ -219,23 +224,39 @@ void TouchPad::Changed() {
 }
 
 bool TouchPad::Visible() const {
+#if defined(__ANDROID__)
+  return false;
+#else
   std::lock_guard lock(mutex_);
   return !suspended_ && last_touch_ != std::chrono::steady_clock::time_point{} &&
          std::chrono::steady_clock::now() - last_touch_ < kVisibleAfterTouch;
+#endif
 }
 
-void TouchPad::SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask, float look_x, float look_y) {
+void TouchPad::SetPadState(float steer, float throttle, float brake, float look_x, float look_y, uint32_t buttons) {
   std::lock_guard lock(mutex_);
-  mobile_override_active_ = (steer_x != 0.0f || throttle != 0.0f || brake != 0.0f || button_mask != 0 || look_x != 0.0f || look_y != 0.0f);
+  mobile_override_active_ = true;
+  mobile_steer_x_ = steer;
+  mobile_steer_y_ = 0.0f;
+  mobile_throttle_ = throttle;
+  mobile_brake_ = brake;
+  mobile_look_x_ = look_x;
+  mobile_look_y_ = look_y;
+  mobile_buttons_ = buttons;
+  last_touch_ = std::chrono::steady_clock::now();
+}
+
+void TouchPad::SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask, float look_x, float look_y, float steer_y) {
+  std::lock_guard lock(mutex_);
+  mobile_override_active_ = true;
   mobile_steer_x_ = steer_x;
+  mobile_steer_y_ = steer_y;
   mobile_throttle_ = throttle;
   mobile_brake_ = brake;
   mobile_look_x_ = look_x;
   mobile_look_y_ = look_y;
   mobile_buttons_ = button_mask;
-  if (mobile_override_active_) {
-    last_touch_ = std::chrono::steady_clock::now();
-  }
+  last_touch_ = std::chrono::steady_clock::now();
 }
 
 rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
@@ -244,6 +265,20 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
   if (suspended_) {
     return pad;
   }
+#if defined(__ANDROID__)
+  pad.thumb_lx = int16_t(std::clamp(mobile_steer_x_, -1.0f, 1.0f) * 32767.0f);
+  if (mobile_steer_y_ != 0.0f) {
+    pad.thumb_ly = int16_t(std::clamp(mobile_steer_y_, -1.0f, 1.0f) * 32767.0f);
+  } else {
+    pad.thumb_ly = 0;
+  }
+  pad.right_trigger = uint8_t(std::clamp(mobile_throttle_, 0.0f, 1.0f) * 255.0f);
+  pad.left_trigger = uint8_t(std::clamp(mobile_brake_, 0.0f, 1.0f) * 255.0f);
+  pad.thumb_rx = int16_t(std::clamp(mobile_look_x_, -1.0f, 1.0f) * 32767.0f);
+  pad.thumb_ry = int16_t(std::clamp(mobile_look_y_, -1.0f, 1.0f) * 32767.0f);
+  pad.buttons = uint16_t(mobile_buttons_);
+  return pad;
+#else
   if (mobile_override_active_) {
     pad.thumb_lx = int16_t(std::clamp(mobile_steer_x_, -1.0f, 1.0f) * 32767.0f);
     pad.right_trigger = uint8_t(std::clamp(mobile_throttle_, 0.0f, 1.0f) * 255.0f);
@@ -253,6 +288,7 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
     pad.buttons = mobile_buttons_;
     return pad;
   }
+#endif
   uint16_t buttons = 0;
   for (const auto& [id, finger] : fingers_) {
     switch (finger.control) {
@@ -345,12 +381,44 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
 
 #if defined(__ANDROID__)
 #include <jni.h>
+#include <fmt/format.h>
+#include "pinyon_shift_app.h"
+
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetPadState(
+    JNIEnv*, jclass, jfloat steer, jfloat throttle, jfloat brake, jfloat lookX, jfloat lookY, jint buttons) {
+  pinyon_shift::ui::TouchPad::Get().SetPadState(
+      float(steer), float(throttle), float(brake), float(lookX), float(lookY), uint32_t(buttons));
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetMobileOverrides(
-    JNIEnv*, jclass, jfloat steer_x, jfloat throttle, jfloat brake, jint button_mask, jfloat look_x, jfloat look_y) {
+    JNIEnv*, jclass, jfloat steer_x, jfloat throttle, jfloat brake, jint button_mask, jfloat look_x, jfloat look_y, jfloat steer_y) {
   pinyon_shift::ui::TouchPad::Get().SetMobileOverrides(
-      float(steer_x), float(throttle), float(brake), uint16_t(button_mask), float(look_x), float(look_y));
+      float(steer_x), float(throttle), float(brake), uint16_t(button_mask), float(look_x), float(look_y), float(steer_y));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAction(
+    JNIEnv*, jclass, jint actionId, jfloat value) {
+  if (actionId == 1) {
+    if (auto* app = PinyonShiftApp::Instance()) {
+      app->TriggerPhoto();
+    }
+  } else if (actionId == 2) {
+    if (auto* app = PinyonShiftApp::Instance()) {
+      app->ToggleGameMenu();
+    }
+  } else if (actionId == 3) {
+    if (value >= 0.0f) {
+      std::string limit = std::to_string(int(value));
+      rex::cvar::SetFlagByName("host_present_fps_limit", limit.c_str());
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_render_fps_limit", limit.c_str());
+    } else {
+      std::string env = fmt::format("{:.2f}", std::abs(value));
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", env.c_str());
+    }
+  }
 }
 
 extern "C" JNIEXPORT void JNICALL

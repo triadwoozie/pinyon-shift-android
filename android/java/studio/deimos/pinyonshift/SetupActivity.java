@@ -148,78 +148,47 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         }
     }
 
-    private int dp(float value) {
-        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
-    }
-
+    private int dp(float v) { return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics())); }
     private LinearLayout.LayoutParams lp(int w, int h) { return new LinearLayout.LayoutParams(w, h); }
     private LinearLayout.LayoutParams lpWeight1() { return new LinearLayout.LayoutParams(0, WC, 1.0f); }
-
-    private GradientDrawable cardBg(int color, float radiusDp) { return cardBg(color, radiusDp, 0, 0); }
-    private GradientDrawable cardBg(int color, float radiusDp, int strokeColor, int strokeDp) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(dp(radiusDp));
-        if (strokeDp > 0) d.setStroke(dp(strokeDp), strokeColor);
+    private GradientDrawable cardBg(int c, float r) { return cardBg(c, r, 0, 0); }
+    private GradientDrawable cardBg(int c, float r, int sc, int s) {
+        GradientDrawable d = new GradientDrawable(); d.setColor(c); d.setCornerRadius(dp(r));
+        if (s > 0) d.setStroke(dp(s), sc);
         return d;
     }
-
-    private RippleDrawable ripple(int normal, int ripple, float radiusDp) {
-        GradientDrawable mask = new GradientDrawable();
-        mask.setColor(Color.WHITE);
-        mask.setCornerRadius(dp(radiusDp));
-        return new RippleDrawable(ColorStateList.valueOf(ripple), cardBg(normal, radiusDp), mask);
+    private RippleDrawable ripple(int n, int r, float rad) {
+        GradientDrawable m = new GradientDrawable(); m.setColor(Color.WHITE); m.setCornerRadius(dp(rad));
+        return new RippleDrawable(ColorStateList.valueOf(r), cardBg(n, rad), m);
     }
-
-    private LinearLayout createCard(LinearLayout parent, int paddingDp) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(cardBg(COLOR_CARD, 20, COLOR_CARD_STROKE, 1));
-        int p = dp(paddingDp);
-        card.setPadding(p, p, p, p);
-        LinearLayout.LayoutParams l = lp(MP, WC);
-        l.bottomMargin = dp(12);
-        card.setLayoutParams(l);
-        if (parent != null) parent.addView(card);
-        return card;
+    private LinearLayout createCard(LinearLayout parent, int p) {
+        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(cardBg(COLOR_CARD, 20, COLOR_CARD_STROKE, 1));
+        int pad = dp(p); c.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams l = lp(MP, WC); l.bottomMargin = dp(12); c.setLayoutParams(l);
+        if (parent != null) parent.addView(c);
+        return c;
     }
-
-    private LinearLayout addSection(LinearLayout c, String title) {
-        LinearLayout card = createCard(c, 16);
-        card.addView(label(title, 14, Color.WHITE, true));
-        return card;
+    private LinearLayout addSection(LinearLayout c, String t) {
+        LinearLayout card = createCard(c, 16); card.addView(label(t, 14, Color.WHITE, true)); return card;
     }
-
-    private TextView label(String text, float sp, int color, boolean bold) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(sp);
-        tv.setTextColor(color);
-        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
+    private TextView label(String t, float sp, int c, boolean b) {
+        TextView tv = new TextView(this); tv.setText(t); tv.setTextSize(sp); tv.setTextColor(c);
+        if (b) tv.setTypeface(Typeface.DEFAULT_BOLD);
         return tv;
     }
-
     private EditText createField(String hint, int inputType) {
-        EditText et = new EditText(this);
-        et.setHint(hint);
-        et.setHintTextColor(COLOR_TEXT_DIM);
-        et.setTextColor(Color.WHITE);
-        et.setTextSize(13);
-        et.setInputType(inputType);
+        EditText et = new EditText(this); et.setHint(hint); et.setHintTextColor(COLOR_TEXT_DIM);
+        et.setTextColor(Color.WHITE); et.setTextSize(13); et.setInputType(inputType);
         et.setBackground(cardBg(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
         et.setPadding(dp(12), dp(8), dp(12), dp(8));
         return et;
     }
-
     private void toast(final String msg) {
-        runOnUiThread(new Runnable() {
-            @Override public void run() { Toast.makeText(SetupActivity.this, msg, Toast.LENGTH_SHORT).show(); }
-        });
+        runOnUiThread(new Runnable() { @Override public void run() { Toast.makeText(SetupActivity.this, msg, Toast.LENGTH_SHORT).show(); } });
     }
-
-    private void confirmDialog(String title, String msg, String pos, DialogInterface.OnClickListener ok) {
-        new AlertDialog.Builder(this).setTitle(title).setMessage(msg)
-                .setPositiveButton(pos, ok).setNegativeButton("Cancel", null).show();
+    private void confirmDialog(String t, String m, String p, DialogInterface.OnClickListener ok) {
+        new AlertDialog.Builder(this).setTitle(t).setMessage(m).setPositiveButton(p, ok).setNegativeButton("Cancel", null).show();
     }
 
     Drawable getSymbol(String name) {
@@ -493,7 +462,10 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         String mfg = Build.MANUFACTURER;
         if (mfg != null && mfg.length() > 0) mfg = Character.toUpperCase(mfg.charAt(0)) + mfg.substring(1).toLowerCase(Locale.ROOT);
         String adreno = PinyonShiftActivity.adrenoModel();
-        addInfoCard(content, "Hardware & Platform", (mfg != null ? mfg + " " : "") + Build.MODEL + " · Android " + Build.VERSION.RELEASE,
+        Intent bi = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        int bTemp = bi != null ? bi.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) : 0;
+        String tStr = bTemp > 0 ? String.format(Locale.ROOT, " · %.1f°C", bTemp / 10.0f) : "";
+        addInfoCard(content, "Hardware & Platform", (mfg != null ? mfg + " " : "") + Build.MODEL + " · Android " + Build.VERSION.RELEASE + tStr,
                 adreno != null ? "Adreno " + adreno : "Vulkan GPU", colorAccent, 0xFF1A241D);
         addInfoCard(content, "Storage & Environment", "Free Storage: " + size(base.getUsableSpace()), "Save Protected ✓", COLOR_SUCCESS, 0xFF14281E);
 
@@ -600,13 +572,13 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         catch (Exception e) { toast("No file picker"); }
     }
 
-    static final String[] ASPECT_ITEMS = {"Widescreen (Hor+)  [Recommended]", "Fit (16:9 Letterbox)", "Stretch (Fullscreen)", "Crop (Zoom)"}, ASPECT_VALS = {"hor_plus", "letterbox", "stretch", "crop"};
-    static final String[] RES_ITEMS = {"1x · 720p Native", "1.5x · 1080p", "2x · 1440p"}; static final int[] RES_VALS = {1, 2, 2};
-    static final String[] FPS_ITEMS = {"60 FPS", "45 FPS", "40 FPS", "30 FPS", "120 FPS", "Unlocked"}; static final int[] FPS_VALS = {60, 45, 40, 30, 120, 0};
-    static final String[] PRESET_ITEMS = {"Potato (Max FPS)", "Balanced (Standard)", "Ultra (Full Visuals)"}, PRESET_VALS = {"potato", "balanced", "ultra"};
-    static final String[] UPSCALER_ITEMS = {"AMD FSR 1.0 (Spatial)", "CAS (Adaptive Sharpening)", "Bilinear"}, UPSCALER_VALS = {"fsr", "cas", "bilinear"};
-    static final String[] CTRL_ITEMS = {"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic (Virtual Pad)", "Gamepad (External)"}, CTRL_VALS = {"tilt_a", "tilt_b", "classic", "gamepad"};
-    static final String[] OPACITY_ITEMS = {"100% · Fully Visible", "75%", "50%", "25%", "Hidden · Clean HUD"}; static final int[] OPACITY_VALS = {100, 75, 50, 25, 0};
+    static final String[] ASPECT_ITEMS = {"Widescreen (Hor+)", "Fit (16:9)", "Stretch", "Crop"}, ASPECT_VALS = {"hor_plus", "letterbox", "stretch", "crop"};
+    static final String[] RES_ITEMS = {"720p (Native)", "540p + FSR", "360p + FSR", "1080p", "1440p"}; static final int[] RES_VALS = {720, 540, 360, 1080, 1440};
+    static final String[] FPS_ITEMS = {"30 FPS (Native)", "60 FPS", "45 FPS", "40 FPS", "120 FPS", "Unlocked"}; static final int[] FPS_VALS = {30, 60, 45, 40, 120, 0};
+    static final String[] PRESET_ITEMS = {"Balanced", "Potato", "Ultra"}, PRESET_VALS = {"balanced", "potato", "ultra"};
+    static final String[] UPSCALER_ITEMS = {"AMD FSR 1.0", "CAS", "Bilinear"}, UPSCALER_VALS = {"fsr", "cas", "bilinear"};
+    static final String[] CTRL_ITEMS = {"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic Pad", "Gamepad"}, CTRL_VALS = {"tilt_a", "tilt_b", "classic", "gamepad"};
+    static final String[] OPACITY_ITEMS = {"100%", "75%", "50%", "25%", "Hidden"}; static final int[] OPACITY_VALS = {100, 75, 50, 25, 0};
 
     private View buildSettingsTab() {
         LinearLayout content = new LinearLayout(this);
@@ -617,6 +589,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         resScaleSummary = addSettingSelector(disp, "Internal Resolution", "res_scale");
         fpsCapSummary = addSettingSelector(disp, "Target Framerate", "fps");
         addSwitchRow(disp, "Vertical Sync (VSync)", "Lock to display refresh rate", PREF_VSYNC, true);
+        addSwitchRow(disp, "Performance Overlay", "Show live FPS, frame ms & temp", "fps_overlay", true);
         presetSummary = addSettingSelector(disp, "Graphics Preset", "preset");
         upscalerSummary = addSettingSelector(disp, "Upscaler (FSR / CAS)", "upscaler");
         themeSummary = addSettingSelector(disp, "Theme Accent", "theme");
@@ -632,7 +605,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         touchOpacitySummary = addSettingSelector(ctrl, "Touch Controls Opacity", "touch_opacity");
         addSettingSelector(ctrl, "Touch Controls Guide", "touch_guide").setText("View 4-Layer Gesture Map");
         addSwitchRow(ctrl, "Steering Horizon", "Subtle tilt bar at bottom center", "touch_horizon", true);
-        addSwitchRow(ctrl, "Auto-Throttle", "Auto acceleration (zones brake)", PREF_AUTO_THROTTLE, false);
+        addSwitchRow(ctrl, "Auto-Throttle", "Auto acceleration (zones brake)", PREF_AUTO_THROTTLE, true);
         addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts & pedals", PREF_HAPTICS, true);
         addSwitchRow(ctrl, "Smart Auto-Clutch", "Auto-blip LB on shifts", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
         addSwitchRow(ctrl, "Center Gesture Shift", "Flick up/down to shift", PinyonShiftActivity.PREF_GESTURE_SHIFT, true);
@@ -760,7 +733,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         else if ("touch_guide".equals(tag)) PinyonShiftActivity.showTouchGuide(this);
         else if ("theme".equals(tag)) {
             showIntChoiceDialog("Theme Accent", "theme_accent",
-                    new String[]{"Pinyon Green (Original PC)", "Horizon Amber", "Alpine White", "Cyber Cyan", "Sunset Orange", "System Dynamic (Material 3)"},
+                    new String[]{"Pinyon Green", "Amber", "Alpine", "Cyan", "Sunset", "Dynamic"},
                     new int[]{COLOR_ACCENT_DEFAULT, 0xFFF1AE36, COLOR_FOG, 0xFF5CE1E6, 0xFFFF7043, sysAccent});
         }
         else if ("driver".equals(tag)) switchTab(1);
@@ -777,18 +750,16 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
 
     private void refreshSettingsTab() {
         String asp = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
-        setSummary(aspectModeSummary, "hor_plus".equals(asp) ? "Widescreen (Hor+) · No Distortion"
-                : "letterbox".equals(asp) ? "Fit (16:9 Letterbox)" : "stretch".equals(asp) ? "Stretch Fullscreen" : "Crop");
-        setSummary(resScaleSummary, prefs.getInt(PREF_RES_SCALE, 1) == 2 ? "2x (1440p)" : "1x (720p Native)");
-        int c = prefs.getInt(PREF_FPS_CAP, 60);
+        setSummary(aspectModeSummary, "hor_plus".equals(asp) ? "Widescreen (Hor+)" : "letterbox".equals(asp) ? "Fit (16:9)" : "stretch".equals(asp) ? "Stretch" : "Crop");
+        int r = prefs.getInt(PREF_RES_SCALE, 720);
+        setSummary(resScaleSummary, r == 540 ? "540p + FSR" : r == 360 ? "360p + FSR" : r == 1440 ? "1440p (2x)" : r == 1080 ? "1080p (1.5x)" : "720p Native");
+        int c = prefs.getInt(PREF_FPS_CAP, 30);
         setSummary(fpsCapSummary, c > 0 ? c + " FPS" : "Unlocked");
         String p = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
-        setSummary(presetSummary, "potato".equals(p) ? "Potato (Max FPS)" : "ultra".equals(p) ? "Ultra" : "Balanced");
+        setSummary(presetSummary, "potato".equals(p) ? "Potato" : "ultra".equals(p) ? "Ultra" : "Balanced");
         String u = prefs.getString(PREF_UPSCALER, "fsr");
         setSummary(upscalerSummary, "fsr".equals(u) ? "AMD FSR 1.0" : "cas".equals(u) ? "CAS" : "Bilinear");
-        setSummary(themeSummary, colorAccent == COLOR_ACCENT_DEFAULT ? "Pinyon Green (Original PC)"
-                : colorAccent == 0xFFF1AE36 ? "Horizon Amber" : colorAccent == COLOR_FOG ? "Alpine White"
-                : colorAccent == 0xFF5CE1E6 ? "Cyber Cyan" : colorAccent == 0xFFFF7043 ? "Sunset Orange" : "System Dynamic");
+        setSummary(themeSummary, colorAccent == 0xFFF1AE36 ? "Horizon Amber" : colorAccent == COLOR_ACCENT_DEFAULT ? "Pinyon Green" : "Custom Accent");
         String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
         setSummary(controlSummary, "tilt_a".equals(ctrl) ? "Tilt A (RR3 Gyro)" : "tilt_b".equals(ctrl) ? "Tilt B (RR3 Touch)" : "classic".equals(ctrl) ? "Classic" : "Gamepad");
         int op = prefs.getInt("touch_opacity", 100);
@@ -934,7 +905,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
             String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
             boolean vsync = prefs.getBoolean(PREF_VSYNC, true);
-            int fps = prefs.getInt(PREF_FPS_CAP, 60);
+            int fps = prefs.getInt(PREF_FPS_CAP, 30);
 
             String presetStr = ("potato".equals(preset) ? "Potato" : "ultra".equals(preset) ? "Ultra" : "Balanced")
                     + " · " + upscaler.toUpperCase(Locale.ROOT);
@@ -967,18 +938,27 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         if ("crop".equals(aspect)) args.add("--present_crop=true");
 
         args.add("--android_gpu_driver=" + prefs.getString(PREF_SELECTED_DRIVER, "auto"));
-        int scale = prefs.getInt(PREF_RES_SCALE, 1);
+        int res = prefs.getInt(PREF_RES_SCALE, 720);
+        int scale = (res >= 1080) ? 2 : 1;
         args.add("--draw_resolution_scale_x=" + scale);
         args.add("--draw_resolution_scale_y=" + scale);
+        if (res == 540) {
+            args.add("--window_width=960");
+            args.add("--window_height=540");
+        } else if (res == 360) {
+            args.add("--window_width=640");
+            args.add("--window_height=360");
+        }
         args.add("--vsync=" + prefs.getBoolean(PREF_VSYNC, true));
-        int fps = prefs.getInt(PREF_FPS_CAP, 60);
-        args.add("--framerate_limit=" + fps);
+        int fps = prefs.getInt(PREF_FPS_CAP, 30);
+        args.add("--host_present_fps_limit=" + fps);
         args.add("--pinyon_shift_fh1_render_fps_limit=" + fps);
 
         String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
         boolean potato = "potato".equals(preset);
-        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.25" : "ultra".equals(preset) ? "1.0" : "0.5"));
-        args.add("--pinyon_shift_fh1_shadows=" + !potato);
+        boolean ultra = "ultra".equals(preset);
+        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : ultra ? "1.0" : "0.25"));
+        args.add("--pinyon_shift_fh1_shadows=" + ultra);
 
         String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
         args.add("--present_effect=" + ("fsr".equals(upscaler) ? "fsr" : "cas".equals(upscaler) ? "cas" : "bilinear"));

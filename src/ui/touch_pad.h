@@ -45,8 +45,9 @@ class TouchPad final : public rex::ui::WindowInputListener {
 
   void OnTouchEvent(rex::ui::TouchEvent& e) override;
 
-  // Direct mobile inputs from Real Racing 3 touch and gyro steering in Java.
-  void SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask, float look_x = 0.0f, float look_y = 0.0f);
+  // Direct mobile inputs from Android Java overlay.
+  void SetPadState(float steer, float throttle, float brake, float look_x, float look_y, uint32_t buttons);
+  void SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask, float look_x = 0.0f, float look_y = 0.0f, float steer_y = 0.0f);
 
   bool Visible() const;
   std::vector<Shape> Shapes(float width, float height) const;
@@ -93,6 +94,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   bool suspended_ = false;
   bool mobile_override_active_ = false;
   float mobile_steer_x_ = 0.0f;
+  float mobile_steer_y_ = 0.0f;
   float mobile_throttle_ = 0.0f;
   float mobile_brake_ = 0.0f;
   float mobile_look_x_ = 0.0f;
