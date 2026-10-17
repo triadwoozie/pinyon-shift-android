@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/ui/ui_event.h>
 #include <rex/ui/window.h>
@@ -223,10 +224,29 @@ bool TouchPad::Visible() const {
          std::chrono::steady_clock::now() - last_touch_ < kVisibleAfterTouch;
 }
 
+void TouchPad::SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask) {
+  std::lock_guard lock(mutex_);
+  mobile_override_active_ = (steer_x != 0.0f || throttle != 0.0f || brake != 0.0f || button_mask != 0);
+  mobile_steer_x_ = steer_x;
+  mobile_throttle_ = throttle;
+  mobile_brake_ = brake;
+  mobile_buttons_ = button_mask;
+  if (mobile_override_active_) {
+    last_touch_ = std::chrono::steady_clock::now();
+  }
+}
+
 rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
   rex::input::X_INPUT_GAMEPAD pad = {};
   std::lock_guard lock(mutex_);
   if (suspended_) {
+    return pad;
+  }
+  if (mobile_override_active_) {
+    pad.thumb_lx = int16_t(std::clamp(mobile_steer_x_, -1.0f, 1.0f) * 32767.0f);
+    pad.right_trigger = uint8_t(std::clamp(mobile_throttle_, 0.0f, 1.0f) * 255.0f);
+    pad.left_trigger = uint8_t(std::clamp(mobile_brake_, 0.0f, 1.0f) * 255.0f);
+    pad.buttons = mobile_buttons_;
     return pad;
   }
   uint16_t buttons = 0;
@@ -281,6 +301,9 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
 std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
   std::vector<Shape> shapes;
   std::lock_guard lock(mutex_);
+  if (mobile_override_active_) {
+    return shapes;
+  }
   for (const Layout& control : Controls()) {
     Shape shape;
     Place(control, width, height, shape.x, shape.y);
@@ -315,3 +338,27 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
 }
 
 }  // namespace pinyon_shift::ui
+
+#if defined(__ANDROID__)
+#include <jni.h>
+
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetMobileOverrides(
+    JNIEnv*, jclass, jfloat steer_x, jfloat throttle, jfloat brake, jint button_mask) {
+  pinyon_shift::ui::TouchPad::Get().SetMobileOverrides(
+      float(steer_x), float(throttle), float(brake), uint16_t(button_mask));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetCVar(
+    JNIEnv* env, jclass, jstring name, jstring value) {
+  if (!name || !value) return;
+  const char* n = env->GetStringUTFChars(name, nullptr);
+  const char* v = env->GetStringUTFChars(value, nullptr);
+  if (n && v) {
+    rex::cvar::SetFlagByName(n, v);
+  }
+  if (n) env->ReleaseStringUTFChars(name, n);
+  if (v) env->ReleaseStringUTFChars(value, v);
+}
+#endif

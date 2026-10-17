@@ -15,10 +15,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
-import android.provider.OpenableColumns;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -69,17 +67,8 @@ import java.util.Map;
 
 /**
  * Standalone Mobile Hub and Launcher for Pinyon Shift (Android).
- *
- * Full feature parity with the desktop launcher directly on device:
- * - Standalone game file import from device storage (or PC Wi-Fi sync)
- * - In-launcher GPU Driver Swapper (Mesa Turnip Gen8, System Vulkan, Custom ZIPs)
- * - Display Scaling & Native Hor+ Widescreen scaling for mobile aspect ratios
- * - Graphics and resolution scaling (720p, 1080p, 1440p)
- * - Save data backup, restore and management
- * - Material 3 mobile interface honoring the original Horizon aesthetic
  */
 public class SetupActivity extends Activity implements View.OnClickListener {
-    private static final String TAG = "PinyonShiftSetup";
     private static final int HTTP_PORT = 47615;
     private static final int DISCOVERY_PORT = 47616;
     private static final int REQUEST_FOLDER = 0x5055;
@@ -98,11 +87,19 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     static final String ARGUMENTS_FILE = "state/config/android-arguments.txt";
     private static final String CONFIG_TOML = "state/config/pinyon-shift.toml";
     private static final String SETUP_ACTION = "studio.deimos.pinyonshift.SETUP";
+
     private static final String PREF_SELECTED_DRIVER = "selected_driver";
     private static final String PREF_ASPECT_MODE = "aspect_mode";
     private static final String PREF_RES_SCALE = "res_scale";
     private static final String PREF_VSYNC = "vsync";
     private static final String PREF_FPS_CAP = "fps_cap";
+    private static final String PREF_GRAPHICS_PRESET = "graphics_preset";
+    private static final String PREF_UPSCALER = "upscaler";
+    private static final String PREF_CONTROL_SCHEME = "control_scheme";
+    private static final String PREF_AUTO_THROTTLE = "auto_throttle";
+    private static final String PREF_THERMAL_PACER = "thermal_pacer";
+    private static final String PREF_HAPTICS = "haptics";
+    private static final String PREF_TBDR_TILES = "tbdr_tiles";
     private static final String PREF_SKIP_MOVIES = "skip_movies";
     private static final String PREF_CLUB_OFFLINE = "club_offline";
     private static final String PREF_TREASURE_MAP = "treasure_map";
@@ -126,8 +123,12 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private TextView aspectModeSummary;
     private TextView resScaleSummary;
     private TextView fpsCapSummary;
+    private TextView presetSummary;
+    private TextView upscalerSummary;
+    private TextView controlSummary;
     private TextView folderPathText;
     private LinearLayout backupListContainer;
+    private LinearLayout activeBadgesLayout;
 
     private TextView discoveryText;
     private EditText addressField;
@@ -197,6 +198,14 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 getResources().getDisplayMetrics()));
     }
 
+    private LinearLayout.LayoutParams lp(int w, int h) {
+        return new LinearLayout.LayoutParams(w, h);
+    }
+
+    private LinearLayout.LayoutParams lpWeight1() {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+    }
+
     private GradientDrawable cardBackground(int color, float radiusDp, int strokeColor, int strokeDp) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
@@ -219,12 +228,20 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         card.setBackground(cardBackground(COLOR_CARD, 16, COLOR_CARD_STROKE, 1));
         int p = dp(paddingDp);
         card.setPadding(p, p, p, p);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(12));
-        card.setLayoutParams(lp);
+        LinearLayout.LayoutParams l = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        l.setMargins(0, 0, 0, dp(12));
+        card.setLayoutParams(l);
         if (parent != null) parent.addView(card);
         return card;
+    }
+
+    private TextView label(String text, float sp, int color, boolean bold) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        tv.setTextColor(color);
+        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
+        return tv;
     }
 
     private Button createM3Button(String text, boolean primary) {
@@ -242,50 +259,30 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
     private void buildMaterial3Layout() {
         LinearLayout root = new LinearLayout(this);
+        root.setFitsSystemWindows(true);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(COLOR_BG);
-        root.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.setLayoutParams(lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(12), dp(16), dp(10));
         header.setBackgroundColor(COLOR_SURFACE);
+        header.setPadding(dp(20), dp(14), dp(20), dp(14));
 
-        TextView title = new TextView(this);
-        title.setText("PINYON SHIFT");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(COLOR_ACCENT);
+        TextView title = label("PINYON SHIFT", 18, COLOR_ACCENT, true);
+        header.addView(title, lpWeight1());
 
-        TextView sub = new TextView(this);
-        sub.setText(" · FH1");
-        sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        sub.setTextColor(COLOR_MUTED);
-
-        LinearLayout titleGroup = new LinearLayout(this);
-        titleGroup.setOrientation(LinearLayout.HORIZONTAL);
-        titleGroup.setGravity(Gravity.CENTER_VERTICAL);
-        titleGroup.addView(title);
-        titleGroup.addView(sub);
-        header.addView(titleGroup, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        String adreno = PinyonShiftActivity.adrenoModel();
-        String soc = Build.VERSION.SDK_INT >= 31 ? Build.SOC_MODEL : Build.HARDWARE;
-        TextView chip = new TextView(this);
-        chip.setText((adreno != null ? "Adreno " + adreno : "Vulkan") + (soc != null ? " · " + soc : ""));
-        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        chip.setTextColor(COLOR_TEXT_DIM);
-        chip.setBackground(cardBackground(COLOR_CARD, 10, COLOR_CARD_STROKE, 1));
-        chip.setPadding(dp(8), dp(4), dp(8), dp(4));
-        header.addView(chip);
+        TextView sub = label("Standalone Mobile Hub", 12, COLOR_MUTED, false);
+        header.addView(sub);
         root.addView(header);
 
         tabContentContainer = new FrameLayout(this);
-        root.addView(tabContentContainer, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        LinearLayout.LayoutParams clp = lp(ViewGroup.LayoutParams.MATCH_PARENT, 0);
+        clp.weight = 1.0f;
+        tabContentContainer.setLayoutParams(clp);
 
+        tabPages.clear();
         tabPages.add(buildPlayTab());
         tabPages.add(buildDriversTab());
         tabPages.add(buildSettingsTab());
@@ -293,60 +290,58 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         for (int i = 0; i < tabPages.size(); i++) {
             View page = tabPages.get(i);
-            page.setVisibility(i == 0 ? View.VISIBLE : View.GONE);
+            page.setVisibility(i == currentTab ? View.VISIBLE : View.GONE);
             tabContentContainer.addView(page);
         }
+        root.addView(tabContentContainer);
 
         root.addView(buildBottomNavBar());
         setContentView(root);
     }
 
-    private View wrapScrollable(View content) {
+    private ScrollView wrapScrollable(View content) {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        int p = dp(14);
-        content.setPadding(p, p, p, dp(24));
+        scroll.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        int p = dp(16);
+        content.setPadding(p, p, p, p);
         scroll.addView(content);
         return scroll;
     }
 
-    private View buildBottomNavBar() {
+    private LinearLayout buildBottomNavBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setBackgroundColor(COLOR_SURFACE);
-        bar.setPadding(dp(6), dp(4), dp(6), dp(4));
+        bar.setElevation(dp(8));
+        bar.setPadding(0, dp(6), 0, dp(6));
 
-        String[] labels = {"Play", "Drivers", "Settings", "Content"};
-        String[] icons = {"▶", "⚙", "✦", "📁"};
+        navItems.clear();
+        final String[] titles = {"Play", "Drivers", "Settings", "Content"};
+        final String[] icons = {"▶", "⚙", "⚡", "📁"};
 
-        for (int i = 0; i < labels.length; i++) {
-            final int idx = i;
+        for (int i = 0; i < titles.length; i++) {
+            final int index = i;
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setClickable(true);
-            item.setBackground(rippleDrawable(Color.TRANSPARENT, Color.argb(40, 255, 255, 255), 12));
-            item.setPadding(0, dp(4), 0, dp(4));
+            item.setPadding(dp(4), dp(4), dp(4), dp(4));
 
-            TextView iv = new TextView(this);
-            iv.setText(icons[i]);
-            iv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-            iv.setGravity(Gravity.CENTER);
+            TextView icon = label(icons[i], 18, COLOR_TEXT_DIM, false);
+            icon.setGravity(Gravity.CENTER);
+            TextView lbl = label(titles[i], 11, COLOR_TEXT_DIM, false);
+            lbl.setGravity(Gravity.CENTER);
 
-            TextView lv = new TextView(this);
-            lv.setText(labels[i]);
-            lv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-            lv.setTypeface(Typeface.DEFAULT_BOLD);
-            lv.setGravity(Gravity.CENTER);
-
-            item.addView(iv);
-            item.addView(lv);
+            item.addView(icon);
+            item.addView(lbl);
             item.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(View v) { switchTab(idx); }
+                public void onClick(View v) { switchTab(index); }
             });
+
+            bar.addView(item, lpWeight1());
             navItems.add(item);
-            bar.addView(item, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
         }
         updateNavSelection();
         return bar;
@@ -377,16 +372,9 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         LinearLayout hero = createCard(content, 18);
         hero.setBackground(cardBackground(COLOR_CARD, 18, COLOR_ACCENT, 1));
+        hero.addView(label("Forza Horizon (2012)", 20, Color.WHITE, true));
 
-        TextView ht = new TextView(this);
-        ht.setText("Forza Horizon (2012)");
-        ht.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        ht.setTypeface(Typeface.DEFAULT_BOLD);
-        ht.setTextColor(Color.WHITE);
-        hero.addView(ht);
-
-        gameStatusText = new TextView(this);
-        gameStatusText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        gameStatusText = label("", 12, COLOR_TEXT_DIM, false);
         gameStatusText.setPadding(0, dp(4), 0, dp(14));
         hero.addView(gameStatusText);
 
@@ -406,51 +394,32 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         hero.addView(launchButton);
 
         LinearLayout badges = createCard(content, 14);
-        TextView bt = new TextView(this);
-        bt.setText("Active Launch Profile");
-        bt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        bt.setTypeface(Typeface.DEFAULT_BOLD);
-        bt.setTextColor(COLOR_MUTED);
+        TextView bt = label("Active Launch Profile", 13, COLOR_MUTED, true);
         bt.setPadding(0, 0, 0, dp(8));
         badges.addView(bt);
 
-        String aspect = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
-        String driver = prefs.getString(PREF_SELECTED_DRIVER, "auto");
-        TextView b1 = createBadgeView("Driver: " + driver);
-        TextView b2 = createBadgeView("Scaling: " + ("hor_plus".equals(aspect) ? "Widescreen Hor+" : aspect));
-        badges.addView(b1);
-        badges.addView(b2);
+        activeBadgesLayout = new LinearLayout(this);
+        activeBadgesLayout.setOrientation(LinearLayout.VERTICAL);
+        badges.addView(activeBadgesLayout);
 
         LinearLayout specs = createCard(content, 14);
-        TextView st = new TextView(this);
-        st.setText("Hardware");
-        st.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        st.setTypeface(Typeface.DEFAULT_BOLD);
-        st.setTextColor(COLOR_MUTED);
-        specs.addView(st);
+        specs.addView(label("Hardware", 13, COLOR_MUTED, true));
 
-        TextView sb = new TextView(this);
         String adreno = PinyonShiftActivity.adrenoModel();
-        sb.setText(Build.MANUFACTURER + " " + Build.MODEL + " · "
-                + (adreno != null ? "Adreno " + adreno : "GPU") + " · Android " + Build.VERSION.RELEASE);
-        sb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        sb.setTextColor(COLOR_TEXT_DIM);
+        TextView sb = label(Build.MANUFACTURER + " " + Build.MODEL + " · "
+                + (adreno != null ? "Adreno " + adreno : "GPU") + " · Android " + Build.VERSION.RELEASE, 12, COLOR_TEXT_DIM, false);
         specs.addView(sb);
 
         return wrapScrollable(content);
     }
 
     private TextView createBadgeView(String text) {
-        TextView b = new TextView(this);
-        b.setText(text);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        b.setTextColor(Color.WHITE);
+        TextView b = label(text, 12, Color.WHITE, false);
         b.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
         b.setPadding(dp(8), dp(6), dp(8), dp(6));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(6));
-        b.setLayoutParams(lp);
+        LinearLayout.LayoutParams l = lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        l.setMargins(0, dp(4), 0, 0);
+        b.setLayoutParams(l);
         return b;
     }
 
@@ -459,57 +428,22 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout card = createCard(content, 16);
-        TextView al = new TextView(this);
-        al.setText("Active GPU Driver");
-        al.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        al.setTextColor(COLOR_MUTED);
-        card.addView(al);
+        card.addView(label("Vulkan GPU Driver", 14, Color.WHITE, true));
 
-        activeDriverText = new TextView(this);
-        activeDriverText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        activeDriverText.setTypeface(Typeface.DEFAULT_BOLD);
-        activeDriverText.setTextColor(COLOR_ACCENT);
-        activeDriverText.setPadding(0, dp(2), 0, dp(6));
+        activeDriverText = label("", 12, COLOR_ACCENT, false);
+        activeDriverText.setPadding(0, dp(4), 0, dp(12));
         card.addView(activeDriverText);
 
-        String adreno = PinyonShiftActivity.adrenoModel();
-        String rec = PinyonShiftActivity.recommendedDriver(adreno);
-        TextView rl = new TextView(this);
-        rl.setText("Recommended: " + (rec != null ? rec : "System Default"));
-        rl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        rl.setTextColor(COLOR_TEXT_DIM);
-        card.addView(rl);
+        driverListContainer = new LinearLayout(this);
+        driverListContainer.setOrientation(LinearLayout.VERTICAL);
+        card.addView(driverListContainer);
 
-        Button importBtn = createM3Button("+ Import Driver (.zip)", false);
+        Button importBtn = createM3Button("+  Import Driver (.zip / .adpkg)", false);
         importBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { importDriverZip(); }
         });
         card.addView(importBtn);
-
-        LinearLayout listCard = createCard(content, 16);
-        TextView lt = new TextView(this);
-        lt.setText("Available Drivers");
-        lt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        lt.setTypeface(Typeface.DEFAULT_BOLD);
-        lt.setTextColor(Color.WHITE);
-        listCard.addView(lt);
-
-        driverListContainer = new LinearLayout(this);
-        driverListContainer.setOrientation(LinearLayout.VERTICAL);
-        driverListContainer.setPadding(0, dp(8), 0, 0);
-        listCard.addView(driverListContainer);
-
-        LinearLayout tweaks = createCard(content, 16);
-        TextView tt = new TextView(this);
-        tt.setText("Driver Optimizations");
-        tt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        tt.setTypeface(Typeface.DEFAULT_BOLD);
-        tt.setTextColor(Color.WHITE);
-        tweaks.addView(tt);
-
-        addSwitchRow(tweaks, "GPU Turbo Clocks", "Max Adreno clocks", PREF_GPU_TURBO, false);
-        addSwitchRow(tweaks, "No-Preamble Shaders", "Lower draw latency in Turnip", PREF_NO_PREAMBLE, true);
 
         return wrapScrollable(content);
     }
@@ -517,64 +451,58 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private void refreshDriversList() {
         if (driverListContainer == null) return;
         driverListContainer.removeAllViews();
-        String sel = prefs.getString(PREF_SELECTED_DRIVER, "auto");
+
+        String selected = prefs.getString(PREF_SELECTED_DRIVER, "auto");
         String adreno = PinyonShiftActivity.adrenoModel();
         String rec = PinyonShiftActivity.recommendedDriver(adreno);
+        activeDriverText.setText("Active: " + selected + ("auto".equals(selected) && rec != null ? " (" + rec + ")" : ""));
 
-        if (activeDriverText != null) {
-            activeDriverText.setText("auto".equals(sel) ? "Auto (" + (rec != null ? rec : "System") + ")"
-                    : "".equals(sel) ? "System Default" : sel);
-        }
+        addDriverItem("System Default Driver", "auto", "System Vulkan stack (Turnip if Adreno)", "auto".equals(selected));
 
-        addDriverItem("Auto (Recommended)", "auto", "Best driver for GPU", "auto".equals(sel), false);
-        addDriverItem("System Default", "", "Device vendor Vulkan", "".equals(sel), false);
-
-        File[] found = driversDir.listFiles();
-        if (found != null) {
-            Arrays.sort(found);
-            for (File d : found) {
-                if (!d.isDirectory() || d.getName().startsWith(".")) continue;
-                String n = d.getName();
-                boolean b = n.equals("turnip-gen8-v37");
-                addDriverItem(n, n, b ? "Mesa Turnip Gen8 v37" : "Custom Driver", n.equals(sel), !b);
+        File[] dirs = driversDir.listFiles();
+        if (dirs != null) {
+            Arrays.sort(dirs);
+            for (File d : dirs) {
+                if (d.isDirectory() && new File(d, "meta.json").isFile()) {
+                    String name = d.getName();
+                    addDriverItem(name, name, "Turnip / AdrenoTools package", name.equals(selected));
+                }
             }
         }
     }
 
-    private void addDriverItem(final String name, final String id, String desc, boolean sel, boolean canDel) {
+    private void addDriverItem(final String name, final String id, String desc, boolean isSelected) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(cardBackground(sel ? Color.rgb(38, 46, 56) : COLOR_SURFACE, 10,
-                sel ? COLOR_ACCENT : COLOR_CARD_STROKE, 1));
+        int bg = isSelected ? Color.argb(40, 241, 174, 54) : COLOR_SURFACE;
+        int stroke = isSelected ? COLOR_ACCENT : COLOR_CARD_STROKE;
+        row.setBackground(cardBackground(bg, 12, stroke, 1));
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        rlp.setMargins(0, 0, 0, dp(8));
-        row.setLayoutParams(rlp);
+        LinearLayout.LayoutParams l = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        l.setMargins(0, 0, 0, dp(8));
+        row.setLayoutParams(l);
 
-        LinearLayout tg = new LinearLayout(this);
-        tg.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout textGroup = new LinearLayout(this);
+        textGroup.setOrientation(LinearLayout.VERTICAL);
+        textGroup.addView(label(name + (isSelected ? "  ✓" : ""), 13, isSelected ? COLOR_ACCENT : Color.WHITE, true));
+        textGroup.addView(label(desc, 11, COLOR_TEXT_DIM, false));
+        row.addView(textGroup, lpWeight1());
 
-        TextView tv = new TextView(this);
-        tv.setText((sel ? "● " : "○ ") + name);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setTextColor(sel ? COLOR_ACCENT : Color.WHITE);
-        tg.addView(tv);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.edit().putString(PREF_SELECTED_DRIVER, id).apply();
+                refreshDriversList();
+                applySettings();
+            }
+        });
 
-        TextView dv = new TextView(this);
-        dv.setText(desc);
-        dv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        dv.setTextColor(COLOR_TEXT_DIM);
-        tg.addView(dv);
-        row.addView(tg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        if (canDel) {
+        if (!"auto".equals(id) && !"turnip-gen8-v37".equals(id)) {
             Button del = new Button(this);
             del.setText("✕");
-            del.setTextColor(Color.rgb(244, 67, 54));
-            del.setBackground(rippleDrawable(Color.TRANSPARENT, Color.argb(40, 244, 67, 54), 8));
+            del.setTextColor(Color.rgb(230, 80, 80));
+            del.setBackgroundColor(Color.TRANSPARENT);
             del.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) { deleteDriver(id); }
@@ -582,28 +510,22 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             row.addView(del);
         }
 
-        row.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                prefs.edit().putString(PREF_SELECTED_DRIVER, id).apply();
-                refreshDriversList();
-            }
-        });
         driverListContainer.addView(row);
     }
 
-    private void deleteDriver(final String name) {
+    private void deleteDriver(final String id) {
         new AlertDialog.Builder(this)
                 .setTitle("Delete Driver")
-                .setMessage("Remove '" + name + "'?")
+                .setMessage("Remove " + id + "?")
                 .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
-                        deleteTree(new File(driversDir, name));
-                        if (name.equals(prefs.getString(PREF_SELECTED_DRIVER, ""))) {
+                        PinyonShiftActivity.deleteTree(new File(driversDir, id));
+                        if (id.equals(prefs.getString(PREF_SELECTED_DRIVER, "auto"))) {
                             prefs.edit().putString(PREF_SELECTED_DRIVER, "auto").apply();
                         }
                         refreshDriversList();
+                        applySettings();
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -614,8 +536,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
-                "application/zip", "application/x-zip-compressed", "application/octet-stream"});
+        String[] mimes = {"application/zip", "application/x-zip-compressed", "application/octet-stream"};
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes);
         try { startActivityForResult(intent, REQUEST_DRIVER_ZIP); }
         catch (Exception e) { Toast.makeText(this, "No file picker", Toast.LENGTH_SHORT).show(); }
     }
@@ -625,12 +547,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout disp = createCard(content, 16);
-        TextView dt = new TextView(this);
-        dt.setText("Display & Resolution");
-        dt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        dt.setTypeface(Typeface.DEFAULT_BOLD);
-        dt.setTextColor(Color.WHITE);
-        disp.addView(dt);
+        disp.addView(label("Display & Resolution", 14, Color.WHITE, true));
 
         aspectModeSummary = addSettingSelector(disp, "Display Scaling Mode", "Widescreen (Hor+)",
                 new View.OnClickListener() {
@@ -644,20 +561,43 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                     public void onClick(View v) { showResDialog(); }
                 });
 
-        fpsCapSummary = addSettingSelector(disp, "Framerate & Sync", "60 FPS (VSync)",
+        fpsCapSummary = addSettingSelector(disp, "Target Framerate", "60 FPS (VSync)",
                 new View.OnClickListener() {
                     @Override
                     public void onClick(View v) { showFpsDialog(); }
                 });
 
-        LinearLayout game = createCard(content, 16);
-        TextView gt = new TextView(this);
-        gt.setText("Game Features");
-        gt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        gt.setTypeface(Typeface.DEFAULT_BOLD);
-        gt.setTextColor(Color.WHITE);
-        game.addView(gt);
+        presetSummary = addSettingSelector(disp, "Graphics Preset", "Balanced",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) { showPresetDialog(); }
+                });
 
+        upscalerSummary = addSettingSelector(disp, "Upscaler (FSR / CAS)", "AMD FSR 1.0",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) { showUpscalerDialog(); }
+                });
+
+        LinearLayout mobile = createCard(content, 16);
+        mobile.addView(label("Mobile Engine Optimizations", 14, Color.WHITE, true));
+        addSwitchRow(mobile, "TBDR Tile Passes", "Preserve on-chip tile memory (reduces thermals)", PREF_TBDR_TILES, true);
+        addSwitchRow(mobile, "Thermal Frame Pacer", "Auto-throttle target FPS at >= 42°C", PREF_THERMAL_PACER, true);
+        addSwitchRow(mobile, "No Driver Preamble", "Skip redundant command buffer preambles", PREF_NO_PREAMBLE, true);
+        addSwitchRow(mobile, "GPU Turbo Boost", "Aggressive GPU power governor", PREF_GPU_TURBO, false);
+
+        LinearLayout ctrl = createCard(content, 16);
+        ctrl.addView(label("Controls & Haptics", 14, Color.WHITE, true));
+        controlSummary = addSettingSelector(ctrl, "Control Scheme", "Tilt A (RR3 Gyro)",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) { showControlDialog(); }
+                });
+        addSwitchRow(ctrl, "Auto-Throttle", "Automatic acceleration (pedal zones brake)", PREF_AUTO_THROTTLE, false);
+        addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts, handbrake and pedals", PREF_HAPTICS, true);
+
+        LinearLayout game = createCard(content, 16);
+        game.addView(label("Game Features", 14, Color.WHITE, true));
         addSwitchRow(game, "Skip Opening Movies", "Skip intro splash videos", PREF_SKIP_MOVIES, true);
         addSwitchRow(game, "1000 Club Offline", "Local challenge evaluation", PREF_CLUB_OFFLINE, true);
         addSwitchRow(game, "Unlock Treasure Map", "Show all barn finds & signs", PREF_TREASURE_MAP, true);
@@ -672,32 +612,18 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setBackground(rippleDrawable(COLOR_SURFACE, Color.argb(40, 255, 255, 255), 10));
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(6), 0, 0);
-        row.setLayoutParams(lp);
+        LinearLayout.LayoutParams l = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        l.setMargins(0, dp(6), 0, 0);
+        row.setLayoutParams(l);
 
         LinearLayout tg = new LinearLayout(this);
         tg.setOrientation(LinearLayout.VERTICAL);
-
-        TextView tv = new TextView(this);
-        tv.setText(title);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setTextColor(Color.WHITE);
-        tg.addView(tv);
-
-        TextView vv = new TextView(this);
-        vv.setText(val);
-        vv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        vv.setTextColor(COLOR_ACCENT);
+        tg.addView(label(title, 13, Color.WHITE, true));
+        TextView vv = label(val, 11, COLOR_ACCENT, false);
         tg.addView(vv);
-        row.addView(tg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        row.addView(tg, lpWeight1());
 
-        TextView arr = new TextView(this);
-        arr.setText("›");
-        arr.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        arr.setTextColor(COLOR_TEXT_DIM);
+        TextView arr = label("›", 16, COLOR_TEXT_DIM, false);
         row.addView(arr);
 
         row.setOnClickListener(clk);
@@ -713,19 +639,9 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         LinearLayout tg = new LinearLayout(this);
         tg.setOrientation(LinearLayout.VERTICAL);
-
-        TextView tv = new TextView(this);
-        tv.setText(title);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        tv.setTextColor(Color.WHITE);
-        tg.addView(tv);
-
-        TextView sv = new TextView(this);
-        sv.setText(sub);
-        sv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        sv.setTextColor(COLOR_TEXT_DIM);
-        tg.addView(sv);
-        row.addView(tg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        tg.addView(label(title, 13, Color.WHITE, false));
+        tg.addView(label(sub, 11, COLOR_TEXT_DIM, false));
+        row.addView(tg, lpWeight1());
 
         Switch sw = new Switch(this);
         sw.setChecked(prefs.getBoolean(key, def));
@@ -740,22 +656,15 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         parent.addView(row);
     }
 
-    private void showAspectDialog() {
-        final String[] m = {"Widescreen (Hor+)  [Recommended]\nWidens FOV to match phone screen with no distortion",
-                "Fit (16:9 Letterbox)\nStandard 16:9 with pillarboxes",
-                "Stretch (Fullscreen)\nStretches 16:9 output",
-                "Crop (Zoom)\nCrops into overscan"};
-        final String[] k = {"hor_plus", "letterbox", "stretch", "crop"};
+    private void showChoiceDialog(String title, final String prefKey, final String[] items, final String[] values, String currentVal) {
         int cur = 0;
-        String ck = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
-        for (int i = 0; i < k.length; i++) if (k[i].equals(ck)) cur = i;
-
+        for (int i = 0; i < values.length; i++) if (values[i].equals(currentVal)) cur = i;
         new AlertDialog.Builder(this)
-                .setTitle("Display Scaling Mode")
-                .setSingleChoiceItems(m, cur, new DialogInterface.OnClickListener() {
+                .setTitle(title)
+                .setSingleChoiceItems(items, cur, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
-                        prefs.edit().putString(PREF_ASPECT_MODE, k[w]).apply();
+                        prefs.edit().putString(prefKey, values[w]).apply();
                         d.dismiss();
                         refreshSettingsTab();
                     }
@@ -764,18 +673,22 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 .show();
     }
 
+    private void showAspectDialog() {
+        showChoiceDialog("Display Scaling Mode", PREF_ASPECT_MODE,
+                new String[]{"Widescreen (Hor+)  [Recommended]", "Fit (16:9 Letterbox)", "Stretch (Fullscreen)", "Crop (Zoom)"},
+                new String[]{"hor_plus", "letterbox", "stretch", "crop"},
+                prefs.getString(PREF_ASPECT_MODE, "hor_plus"));
+    }
+
     private void showResDialog() {
-        final String[] res = {"1x · 720p Native (1280x720) [Best battery]",
-                "1.5x · 1080p (1920x1080) [Crisp visuals]",
-                "2x · 1440p (2560x1440) [Quad HD]"};
-        final int[] s = {1, 2, 2};
-        int cur = prefs.getInt(PREF_RES_SCALE, 1) == 2 ? 1 : 0;
+        final String[] res = {"1x · 720p Native (1280x720) [Best battery]", "1.5x · 1080p (1920x1080)", "2x · 1440p (2560x1440) [Quad HD]"};
+        int cur = prefs.getInt(PREF_RES_SCALE, 1) == 2 ? 2 : 0;
         new AlertDialog.Builder(this)
                 .setTitle("Resolution Scaling")
                 .setSingleChoiceItems(res, cur, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
-                        prefs.edit().putInt(PREF_RES_SCALE, w == 0 ? 1 : 2).apply();
+                        prefs.edit().putInt(PREF_RES_SCALE, w == 2 ? 2 : 1).apply();
                         d.dismiss();
                         refreshSettingsTab();
                     }
@@ -785,13 +698,13 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void showFpsDialog() {
-        final String[] f = {"60 FPS (VSync)", "30 FPS (Battery saver)", "Unlocked (VRR)"};
-        final int[] caps = {60, 30, 0};
+        final String[] f = {"60 FPS (VSync)", "45 FPS (Smooth)", "40 FPS (120Hz 1/3)", "30 FPS (Battery saver)", "120 FPS (High Refresh)", "Unlocked"};
+        final int[] caps = {60, 45, 40, 30, 120, 0};
         int cap = prefs.getInt(PREF_FPS_CAP, 60);
-        int cur = cap == 30 ? 1 : (cap == 0 ? 2 : 0);
-
+        int cur = 0;
+        for (int i = 0; i < caps.length; i++) if (caps[i] == cap) cur = i;
         new AlertDialog.Builder(this)
-                .setTitle("Framerate & Sync")
+                .setTitle("Target Framerate")
                 .setSingleChoiceItems(f, cur, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
@@ -802,6 +715,27 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void showPresetDialog() {
+        showChoiceDialog("Graphics Preset", PREF_GRAPHICS_PRESET,
+                new String[]{"Potato (Max FPS · Drops reflections/shadows)", "Balanced (Standard Horizon visuals)", "Ultra (Full reflections + shadows)"},
+                new String[]{"potato", "balanced", "ultra"},
+                prefs.getString(PREF_GRAPHICS_PRESET, "balanced"));
+    }
+
+    private void showUpscalerDialog() {
+        showChoiceDialog("Upscaler", PREF_UPSCALER,
+                new String[]{"AMD FSR 1.0 (Spatial Upscale + CAS)", "CAS (Contrast Adaptive Sharpening)", "Bilinear (Standard filter)"},
+                new String[]{"fsr", "cas", "bilinear"},
+                prefs.getString(PREF_UPSCALER, "fsr"));
+    }
+
+    private void showControlDialog() {
+        showChoiceDialog("Control Scheme", PREF_CONTROL_SCHEME,
+                new String[]{"Tilt A · RR3 Gyro Steering + Touch Zones", "Tilt B · RR3 Touch Steer + Touch Zones", "Classic · On-Screen Virtual Pad", "Gamepad · External Controller"},
+                new String[]{"tilt_a", "tilt_b", "classic", "gamepad"},
+                prefs.getString(PREF_CONTROL_SCHEME, "tilt_a"));
     }
 
     private void refreshSettingsTab() {
@@ -816,7 +750,19 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         if (fpsCapSummary != null) {
             int c = prefs.getInt(PREF_FPS_CAP, 60);
-            fpsCapSummary.setText(c > 0 ? c + " FPS (VSync)" : "Unlocked");
+            fpsCapSummary.setText(c > 0 ? c + " FPS" : "Unlocked");
+        }
+        if (presetSummary != null) {
+            String p = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
+            presetSummary.setText("potato".equals(p) ? "Potato (Max FPS)" : "ultra".equals(p) ? "Ultra" : "Balanced");
+        }
+        if (upscalerSummary != null) {
+            String u = prefs.getString(PREF_UPSCALER, "fsr");
+            upscalerSummary.setText("fsr".equals(u) ? "AMD FSR 1.0" : "cas".equals(u) ? "CAS" : "Bilinear");
+        }
+        if (controlSummary != null) {
+            String c = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
+            controlSummary.setText("tilt_a".equals(c) ? "Tilt A (RR3 Gyro)" : "tilt_b".equals(c) ? "Tilt B (RR3 Touch)" : "classic".equals(c) ? "Classic" : "Gamepad");
         }
         applySettings();
     }
@@ -826,116 +772,75 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout game = createCard(content, 16);
-        TextView gt = new TextView(this);
-        gt.setText("Game Data Files");
-        gt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        gt.setTypeface(Typeface.DEFAULT_BOLD);
-        gt.setTextColor(Color.WHITE);
-        game.addView(gt);
+        game.addView(label("Game Data Files", 14, Color.WHITE, true));
 
-        folderPathText = new TextView(this);
-        folderPathText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        folderPathText.setTextColor(COLOR_TEXT_DIM);
+        folderPathText = label("", 11, COLOR_TEXT_DIM, false);
         folderPathText.setPadding(0, dp(4), 0, dp(8));
         game.addView(folderPathText);
 
-        Button ib = createM3Button("Choose Extracted Game Folder", true);
-        ib.setOnClickListener(new View.OnClickListener() {
+        Button importFolderBtn = createM3Button("📁  Select Game Folder (default.xex)", false);
+        importFolderBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { chooseFolder(); }
         });
-        game.addView(ib);
+        game.addView(importFolderBtn);
+
+        LinearLayout wifi = createCard(content, 16);
+        wifi.addView(label("Sync from PC (Wi-Fi)", 14, Color.WHITE, true));
+
+        discoveryText = label("Looking for PC launcher on local Wi-Fi...", 11, COLOR_MUTED, false);
+        discoveryText.setPadding(0, dp(4), 0, dp(8));
+        wifi.addView(discoveryText);
+
+        addressField = new EditText(this);
+        addressField.setHint("PC Address (e.g. 192.168.1.50:47615)");
+        addressField.setHintTextColor(COLOR_TEXT_DIM);
+        addressField.setTextColor(Color.WHITE);
+        addressField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        addressField.setInputType(InputType.TYPE_CLASS_TEXT);
+        addressField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
+        addressField.setPadding(dp(12), dp(8), dp(12), dp(8));
+        wifi.addView(addressField);
+
+        codeField = new EditText(this);
+        codeField.setHint("6-digit Pair Code from PC screen");
+        codeField.setHintTextColor(COLOR_TEXT_DIM);
+        codeField.setTextColor(Color.WHITE);
+        codeField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        codeField.setInputType(InputType.TYPE_CLASS_NUMBER);
+        codeField.setFilters(new InputFilter[] {new InputFilter.LengthFilter(6)});
+        codeField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
+        codeField.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout.LayoutParams clp = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.setMargins(0, dp(6), 0, dp(10));
+        codeField.setLayoutParams(clp);
+        wifi.addView(codeField);
+
+        groupsBox = new LinearLayout(this);
+        groupsBox.setOrientation(LinearLayout.VERTICAL);
+        wifi.addView(groupsBox);
+
+        copyButton = createM3Button("Connect & Transfer", true);
+        copyButton.setOnClickListener(this);
+        wifi.addView(copyButton);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
         progress.setVisibility(View.GONE);
-        game.addView(progress);
+        LinearLayout.LayoutParams plp = lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(8));
+        plp.setMargins(0, dp(12), 0, dp(4));
+        progress.setLayoutParams(plp);
+        wifi.addView(progress);
 
-        progressText = new TextView(this);
-        progressText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        progressText.setTextColor(COLOR_MUTED);
-        game.addView(progressText);
+        progressText = label("", 11, COLOR_TEXT_DIM, false);
+        wifi.addView(progressText);
 
-        LinearLayout save = createCard(content, 16);
-        TextView st = new TextView(this);
-        st.setText("Save Backups & Profile");
-        st.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        st.setTypeface(Typeface.DEFAULT_BOLD);
-        st.setTextColor(Color.WHITE);
-        save.addView(st);
-
-        Button bb = createM3Button("Backup Current Save", false);
-        bb.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                backUpSave();
-                refreshBackupsList();
-                Toast.makeText(SetupActivity.this, "Save backed up", Toast.LENGTH_SHORT).show();
-            }
-        });
-        save.addView(bb);
+        LinearLayout backupCard = createCard(content, 16);
+        backupCard.addView(label("Save Backups", 14, Color.WHITE, true));
 
         backupListContainer = new LinearLayout(this);
         backupListContainer.setOrientation(LinearLayout.VERTICAL);
-        backupListContainer.setPadding(0, dp(6), 0, 0);
-        save.addView(backupListContainer);
-
-        LinearLayout pc = createCard(content, 16);
-        TextView pt = new TextView(this);
-        pt.setText("Wi-Fi Transfer from PC (Optional)");
-        pt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        pt.setTypeface(Typeface.DEFAULT_BOLD);
-        pt.setTextColor(Color.WHITE);
-        pc.addView(pt);
-
-        discoveryText = new TextView(this);
-        discoveryText.setText("Looking for PC on local network…");
-        discoveryText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        discoveryText.setTextColor(COLOR_TEXT_DIM);
-        discoveryText.setPadding(0, dp(2), 0, dp(6));
-        pc.addView(discoveryText);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-
-        addressField = new EditText(this);
-        addressField.setHint("PC IP:Port");
-        addressField.setTextColor(Color.WHITE);
-        addressField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        addressField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-        addressField.setPadding(dp(8), dp(8), dp(8), dp(8));
-        row.addView(addressField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f));
-
-        codeField = new EditText(this);
-        codeField.setHint("6-digits");
-        codeField.setTextColor(Color.WHITE);
-        codeField.setInputType(InputType.TYPE_CLASS_NUMBER);
-        codeField.setFilters(new InputFilter[] {new InputFilter.LengthFilter(6)});
-        codeField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        codeField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-        codeField.setPadding(dp(8), dp(8), dp(8), dp(8));
-        row.addView(codeField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        Button conn = createM3Button("Connect", true);
-        conn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) { connect(); }
-        });
-        row.addView(conn);
-        pc.addView(row);
-
-        groupsBox = new LinearLayout(this);
-        groupsBox.setOrientation(LinearLayout.VERTICAL);
-        pc.addView(groupsBox);
-
-        copyButton = createM3Button("Sync Files", true);
-        copyButton.setVisibility(View.GONE);
-        copyButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) { startCopy(); }
-        });
-        pc.addView(copyButton);
+        backupCard.addView(backupListContainer);
 
         return wrapScrollable(content);
     }
@@ -943,58 +848,50 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private void refreshBackupsList() {
         if (backupListContainer == null) return;
         backupListContainer.removeAllViews();
-        File bd = new File(base, "state/backups/saves");
-        File[] bk = bd.listFiles();
-        if (bk == null || bk.length == 0) return;
-        Arrays.sort(bk, Collections.reverseOrder());
-        for (int i = 0; i < Math.min(4, bk.length); i++) {
-            final File b = bk[i];
-            LinearLayout it = new LinearLayout(this);
-            it.setOrientation(LinearLayout.HORIZONTAL);
-            it.setGravity(Gravity.CENTER_VERTICAL);
-            it.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-            it.setPadding(dp(8), dp(6), dp(8), dp(6));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, 0, 0, dp(4));
-            it.setLayoutParams(lp);
+        File backups = new File(base, "state/backups/saves");
+        File[] stamps = backups.listFiles();
+        if (stamps == null || stamps.length == 0) {
+            backupListContainer.addView(label("No save backups found", 11, COLOR_TEXT_DIM, false));
+            return;
+        }
+        Arrays.sort(stamps, Collections.reverseOrder());
+        for (final File s : stamps) {
+            if (!s.isDirectory()) continue;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(4), 0, dp(4));
 
-            TextView n = new TextView(this);
-            n.setText(b.getName());
-            n.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            n.setTextColor(Color.WHITE);
-            it.addView(n, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+            row.addView(label(s.getName(), 12, Color.WHITE, false), lpWeight1());
 
-            Button rb = new Button(this);
-            rb.setText("Restore");
-            rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-            rb.setTextColor(COLOR_ACCENT);
-            rb.setBackground(rippleDrawable(Color.TRANSPARENT, Color.argb(40, 241, 174, 54), 6));
-            rb.setOnClickListener(new View.OnClickListener() {
+            Button rst = new Button(this);
+            rst.setText("Restore");
+            rst.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            rst.setTextColor(COLOR_ACCENT);
+            rst.setBackgroundColor(Color.TRANSPARENT);
+            rst.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(View v) { restoreSave(b); }
+                public void onClick(View v) { restoreSave(s); }
             });
-            it.addView(rb);
-            backupListContainer.addView(it);
+            row.addView(rst);
+            backupListContainer.addView(row);
         }
     }
 
     private void restoreSave(final File backup) {
         new AlertDialog.Builder(this)
-                .setTitle("Restore Save")
-                .setMessage("Restore '" + backup.getName() + "'?")
+                .setTitle("Restore Save Backup")
+                .setMessage("Restore save from " + backup.getName() + "? Current save will be backed up.")
                 .setPositiveButton("Restore", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
+                        backUpSave();
+                        File user = new File(base, "state/user");
                         try {
-                            backUpSave();
-                            File ud = new File(base, "state/user");
-                            deleteTree(ud);
-                            ud.mkdirs();
-                            copyTree(backup, ud);
-                            Toast.makeText(SetupActivity.this, "Save restored", Toast.LENGTH_SHORT).show();
+                            copyTree(backup, user);
+                            Toast.makeText(SetupActivity.this, "Save restored!", Toast.LENGTH_SHORT).show();
                         } catch (IOException e) {
-                            Toast.makeText(SetupActivity.this, "Failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            Toast.makeText(SetupActivity.this, "Restore failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                         }
                     }
                 })
@@ -1003,17 +900,39 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void refreshAllTabs() {
-        boolean r = gameReady();
+        boolean ready = gameReady();
         if (gameStatusText != null) {
-            gameStatusText.setText(r ? "Installed & Verified in files/game/base" : "Game data needed · Tap below to import");
-            gameStatusText.setTextColor(r ? COLOR_SUCCESS : COLOR_ACCENT);
+            gameStatusText.setText(ready ? "● Game Installed & Ready" : "○ Game Files Missing (default.xex)");
+            gameStatusText.setTextColor(ready ? COLOR_SUCCESS : Color.rgb(230, 80, 80));
         }
         if (launchButton != null) {
-            launchButton.setText(r ? "▶  LAUNCH GAME" : "📁  IMPORT GAME FILES");
+            launchButton.setEnabled(true);
+            launchButton.setText(ready ? "▶  LAUNCH GAME" : "📁  IMPORT GAME FILES");
+        }
+        if (activeBadgesLayout != null) {
+            activeBadgesLayout.removeAllViews();
+            String aspect = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
+            String driver = prefs.getString(PREF_SELECTED_DRIVER, "auto");
+            String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
+            String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
+            String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
+
+            activeBadgesLayout.addView(createBadgeView("Driver: " + driver));
+            activeBadgesLayout.addView(createBadgeView("Scaling: " + ("hor_plus".equals(aspect) ? "Widescreen Hor+" : aspect)));
+            activeBadgesLayout.addView(createBadgeView("Preset: " + preset.toUpperCase(Locale.ROOT)));
+            activeBadgesLayout.addView(createBadgeView("Upscaler: " + upscaler.toUpperCase(Locale.ROOT)));
+            activeBadgesLayout.addView(createBadgeView("Controls: " + ("tilt_a".equals(ctrl) ? "RR3 Tilt A" : ctrl)));
+
+            File xex = new File(base, "game/base/default.xex");
+            if (xex.isFile()) {
+                boolean isRetail = (xex.length() == PinyonShiftActivity.MS_2505_RETAIL_XEX_SIZE);
+                TextView xexBadge = createBadgeView(isRetail ? "MS-2505 USA Retail (Verified ✓)" : "default.xex (" + size(xex.length()) + ")");
+                xexBadge.setTextColor(isRetail ? COLOR_SUCCESS : COLOR_MUTED);
+                activeBadgesLayout.addView(xexBadge);
+            }
         }
         if (folderPathText != null) {
-            folderPathText.setText("Target: " + new File(base, "game/base").getAbsolutePath()
-                    + "\nStatus: " + (r ? "default.xex ready" : "no default.xex detected"));
+            folderPathText.setText("Installed at: " + new File(base, "game/base").getAbsolutePath());
         }
         refreshDriversList();
         refreshSettingsTab();
@@ -1043,7 +962,34 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         args.add("--draw_resolution_scale_x=" + scale);
         args.add("--draw_resolution_scale_y=" + scale);
         args.add("--vsync=" + (prefs.getBoolean(PREF_VSYNC, true) ? "true" : "false"));
-        args.add("--framerate_limit=" + prefs.getInt(PREF_FPS_CAP, 60));
+        int fps = prefs.getInt(PREF_FPS_CAP, 60);
+        args.add("--framerate_limit=" + fps);
+        args.add("--pinyon_shift_fh1_render_fps_limit=" + fps);
+
+        String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
+        if ("potato".equals(preset)) {
+            args.add("--pinyon_shift_fh1_env_map_rate=0.25");
+            args.add("--pinyon_shift_fh1_shadows=false");
+        } else if ("ultra".equals(preset)) {
+            args.add("--pinyon_shift_fh1_env_map_rate=1.0");
+            args.add("--pinyon_shift_fh1_shadows=true");
+        } else {
+            args.add("--pinyon_shift_fh1_env_map_rate=0.5");
+            args.add("--pinyon_shift_fh1_shadows=true");
+        }
+
+        String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
+        if ("fsr".equals(upscaler)) {
+            args.add("--present_effect=fsr");
+        } else if ("cas".equals(upscaler)) {
+            args.add("--present_effect=cas");
+        } else {
+            args.add("--present_effect=bilinear");
+        }
+
+        if (prefs.getBoolean(PREF_TBDR_TILES, true)) {
+            args.add("--vulkan_tbdr_tile_passes=true");
+        }
 
         if (prefs.getBoolean(PREF_SKIP_MOVIES, true)) args.add("--pinyon_shift_skip_opening_movies=true");
         if (prefs.getBoolean(PREF_TREASURE_MAP, true)) args.add("--dlc_treasure_map=true");
@@ -1123,10 +1069,11 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                             }
                         });
                     } catch (IOException e) {
+                        final String em = e.getMessage();
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(SetupActivity.this, "Driver import failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                                Toast.makeText(SetupActivity.this, "Driver import failed: " + em, Toast.LENGTH_LONG).show();
                             }
                         });
                     }
@@ -1268,12 +1215,6 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
     }
 
-    private static void deleteTree(File file) {
-        File[] ch = file.listFiles();
-        if (ch != null) for (File c : ch) deleteTree(c);
-        file.delete();
-    }
-
     private static void copy(InputStream in, OutputStream out, Progress p) throws IOException {
         byte[] buf = new byte[1 << 17];
         long w = 0;
@@ -1292,7 +1233,6 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             public void run() {
                 if (progress != null) progress.setProgress(total > 0 ? (int) (done * 1000 / total) : 0);
                 if (progressText != null) {
-                    long el = Math.max(1, (System.currentTimeMillis() - st) / 1000);
                     progressText.setText("Copying " + num + "/" + cnt + " (" + size(done) + " / " + size(total) + ")");
                 }
             }
@@ -1359,152 +1299,180 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         return res;
     }
 
-    private void connect() {
-        String addr = addressField.getText().toString().trim().replaceFirst("^https?://", "").replaceAll("/.*$", "");
-        final String code = codeField.getText().toString().trim();
-        if (addr.isEmpty() || code.length() != 6) {
-            Toast.makeText(this, "Enter IP and 6-digit code", Toast.LENGTH_SHORT).show();
+    @Override
+    public void onClick(View v) {
+        if (busy) return;
+        String raw = addressField.getText().toString().trim();
+        if (raw.isEmpty()) {
+            Toast.makeText(this, "Enter PC address", Toast.LENGTH_SHORT).show();
             return;
         }
-        final String host = addr.contains(":") ? addr : addr + ":" + HTTP_PORT;
+        if (!raw.contains(":")) raw += ":" + HTTP_PORT;
+        server = raw;
+        if (manifest == null) connect(server);
+        else startCopy();
+    }
+
+    private void connect(final String hostPort) {
         busy = true;
-        if (discoveryText != null) discoveryText.setText("Connecting…");
-        new Thread(new Runnable() {
-            @Override
-            public void run() { fetchManifest(host, code); }
-        }, "PcConnect").start();
-    }
-
-    private void fetchManifest(final String host, String code) {
-        try {
-            HttpURLConnection conn = (HttpURLConnection) new URL("http://" + host + "/pinyon/v1/manifest").openConnection();
-            conn.setConnectTimeout(8000);
-            conn.setRequestProperty("X-Pinyon-Code", code);
-            if (conn.getResponseCode() != 200) throw new IOException("PC answered " + conn.getResponseCode());
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            copy(conn.getInputStream(), out, null);
-            final JSONObject res = new JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
-            discovering = false;
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    server = host;
-                    manifest = res;
-                    showGroups();
-                    if (discoveryText != null) discoveryText.setText("Connected to " + res.optString("name", host));
-                }
-            });
-        } catch (Exception e) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() { if (discoveryText != null) discoveryText.setText("Failed: " + e.getMessage()); }
-            });
-        } finally { busy = false; }
-    }
-
-    private void showGroups() {
-        if (groupsBox == null || manifest == null) return;
-        groupsBox.removeAllViews();
-        groupChecks.clear();
-        JSONArray groups = manifest.optJSONArray("groups");
-        if (groups == null) return;
-        for (int i = 0; i < groups.length(); i++) {
-            JSONObject g = groups.optJSONObject(i);
-            if (g == null) continue;
-            String id = g.optString("id");
-            CheckBox cb = new CheckBox(this);
-            cb.setText(g.optString("label") + " (" + size(g.optLong("bytes")) + ")");
-            cb.setTextColor(Color.WHITE);
-            cb.setChecked(g.optBoolean("selected", true));
-            groupChecks.put(id, cb);
-            groupsBox.addView(cb);
-        }
-        if (copyButton != null) copyButton.setVisibility(View.VISIBLE);
-    }
-
-    private void startCopy() {
-        if (manifest == null || server == null) return;
-        final String code = codeField.getText().toString().trim();
-        final List<String> chosen = new ArrayList<>();
-        for (Map.Entry<String, CheckBox> e : groupChecks.entrySet()) {
-            if (e.getValue().isChecked()) chosen.add(e.getKey());
-        }
-        if (chosen.isEmpty()) return;
-        busy = true;
-        if (progress != null) progress.setVisibility(View.VISIBLE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        progressText.setText("Connecting to " + hostPort + "...");
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    copyFromPc(code, chosen);
-                    finishOp("PC Sync Complete!", true);
-                } catch (Exception e) { finishOp("Sync failed: " + e.getMessage(), false); }
+                    final JSONObject m = fetchManifest(hostPort);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            busy = false;
+                            manifest = m;
+                            showGroups(m);
+                        }
+                    });
+                } catch (final IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            busy = false;
+                            progressText.setText("Connection failed: " + e.getMessage());
+                            Toast.makeText(SetupActivity.this, "Cannot connect: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
             }
-        }, "PcCopy").start();
+        }, "Connect").start();
     }
 
-    private void copyFromPc(String code, List<String> chosen) throws IOException, JSONException {
-        List<JSONObject> files = new ArrayList<>();
-        long total = 0;
-        JSONArray groups = manifest.getJSONArray("groups");
-        for (int i = 0; i < groups.length(); i++) {
-            JSONObject g = groups.getJSONObject(i);
-            if (!chosen.contains(g.getString("id"))) continue;
-            JSONArray list = g.getJSONArray("files");
-            for (int j = 0; j < list.length(); j++) {
-                JSONObject f = list.getJSONObject(j);
-                total += f.getLong("size");
-                files.add(f);
+    private JSONObject fetchManifest(String hostPort) throws IOException {
+        URL url = new URL("http://" + hostPort + "/pinyon-shift-manifest.json");
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setConnectTimeout(4000);
+        con.setReadTimeout(4000);
+        try (InputStream in = con.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PinyonShiftActivity.copy(in, out);
+            return new JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
+        } catch (JSONException e) {
+            throw new IOException("bad manifest json", e);
+        }
+    }
+
+    private void showGroups(JSONObject m) {
+        groupsBox.removeAllViews();
+        groupChecks.clear();
+        try {
+            JSONArray groups = m.getJSONArray("groups");
+            for (int i = 0; i < groups.length(); i++) {
+                JSONObject g = groups.getJSONObject(i);
+                String id = g.getString("id");
+                String name = g.getString("name");
+                long bytes = g.getLong("bytes");
+                CheckBox cb = new CheckBox(this);
+                cb.setText(name + " (" + size(bytes) + ")");
+                cb.setTextColor(Color.WHITE);
+                cb.setChecked(true);
+                groupChecks.put(id, cb);
+                groupsBox.addView(cb);
             }
+            copyButton.setText("Start Wi-Fi Transfer");
+            progressText.setText("Ready to sync selected files from PC.");
+        } catch (JSONException e) {
+            progressText.setText("Failed parsing groups: " + e.getMessage());
         }
-        if (chosen.contains("save")) backUpSave();
-        boolean gm = chosen.contains("game");
-        File inc = new File(base, INCOMPLETE);
-        if (gm) {
-            inc.getParentFile().mkdirs();
-            new FileOutputStream(inc).close();
+    }
+
+    private void startCopy() {
+        if (codeField.getText().toString().trim().length() != 6) {
+            Toast.makeText(this, "Enter 6-digit pair code from PC", Toast.LENGTH_SHORT).show();
+            return;
         }
-        long[] done = {0};
+        final String code = codeField.getText().toString().trim();
+        final List<String> selected = new ArrayList<>();
+        for (Map.Entry<String, CheckBox> e : groupChecks.entrySet()) {
+            if (e.getValue().isChecked()) selected.add(e.getKey());
+        }
+        if (selected.isEmpty()) {
+            Toast.makeText(this, "Select at least one group", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        busy = true;
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        progress.setVisibility(View.VISIBLE);
+        copyButton.setEnabled(false);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    copyFromPc(server, code, selected);
+                    finishOp("Sync complete!", true);
+                } catch (IOException e) {
+                    finishOp("Sync failed: " + e.getMessage(), false);
+                }
+            }
+        }, "WifiCopy").start();
+    }
+
+    private void copyFromPc(String hostPort, String code, List<String> groups) throws IOException {
+        List<JSONObject> filesToCopy = new ArrayList<>();
+        long totalBytes = 0;
+        try {
+            JSONArray all = manifest.getJSONArray("files");
+            for (int i = 0; i < all.length(); i++) {
+                JSONObject f = all.getJSONObject(i);
+                if (groups.contains(f.getString("group"))) {
+                    filesToCopy.add(f);
+                    totalBytes += f.getLong("bytes");
+                }
+            }
+        } catch (JSONException e) { throw new IOException("bad manifest files", e); }
+
+        if (totalBytes > base.getUsableSpace() - (256L << 20)) {
+            throw new IOException("Not enough free space on device");
+        }
+
+        backUpSave();
+
+        long doneBytes = 0;
         long started = System.currentTimeMillis();
-        for (int i = 0; i < files.size(); i++) {
-            JSONObject f = files.get(i);
-            String path = f.getString("path");
-            long sz = f.getLong("size");
+        int totalFiles = filesToCopy.size();
+        for (int i = 0; i < totalFiles; i++) {
+            JSONObject item = filesToCopy.get(i);
+            String path;
+            long size;
+            try {
+                path = item.getString("path");
+                size = item.getLong("bytes");
+            } catch (JSONException e) { continue; }
+
             File target = destination(path);
-            if (target.length() != sz) {
-                fetch(code, f.getInt("index"), target, sz, done, total, i + 1, files.size(), started);
-            } else {
-                done[0] += sz;
+            if (target.length() != size) {
+                File part = new File(target.getPath() + ".part");
+                target.getParentFile().mkdirs();
+                fetch(code, hostPort, path, part, doneBytes, totalBytes, i + 1, totalFiles, started);
+                if (target.exists() && !target.delete()) throw new IOException("Cannot replace " + target);
+                if (!part.renameTo(target)) throw new IOException("Cannot rename to " + target);
             }
+            doneBytes += size;
         }
-        if (gm) inc.delete();
     }
 
-    private void fetch(String code, int index, File target, long size, final long[] done, final long total,
-                       final int number, final int count, final long started) throws IOException {
-        File part = new File(target.getPath() + ".part");
-        target.getParentFile().mkdirs();
-        long offset = part.isFile() ? part.length() : 0;
-        HttpURLConnection conn = (HttpURLConnection) new URL("http://" + server + "/pinyon/v1/files/" + index).openConnection();
-        conn.setConnectTimeout(8000);
-        conn.setRequestProperty("X-Pinyon-Code", code);
-        if (offset > 0) conn.setRequestProperty("Range", "bytes=" + offset + "-");
-        try (InputStream in = conn.getInputStream();
-             OutputStream out = new FileOutputStream(part, offset > 0)) {
-            final long before = done[0] + offset;
+    private void fetch(String code, String hostPort, String path, File part,
+                       final long doneBefore, final long totalBytes,
+                       final int fileNum, final int totalFiles, final long started) throws IOException {
+        URL url = new URL("http://" + hostPort + "/fetch?path=" + Uri.encode(path));
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setRequestProperty("X-Pinyon-Shift-Pair-Code", code);
+        con.setConnectTimeout(6000);
+        con.setReadTimeout(10000);
+        if (con.getResponseCode() != 200) {
+            throw new IOException("HTTP " + con.getResponseCode() + " on " + path);
+        }
+        try (InputStream in = con.getInputStream(); OutputStream out = new FileOutputStream(part)) {
             copy(in, out, new Progress() {
                 @Override
-                public void written(long b) { report(before + b, total, number, count, started); }
+                public void written(long b) {
+                    report(doneBefore + b, totalBytes, fileNum, totalFiles, started);
+                }
             });
         }
-        done[0] += size;
-        if (!part.renameTo(target)) {
-            target.delete();
-            part.renameTo(target);
-        }
     }
-
-    @Override
-    public void onClick(View v) {}
 }
