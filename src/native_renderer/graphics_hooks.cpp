@@ -39,6 +39,10 @@ REXCVAR_DEFINE_BOOL(pinyon_shift_fh1_shadows, !REX_PLATFORM_ANDROID, "Pinyon Shi
                     "mask: about 6.4 ms a frame on the Odin 2 Portal) and keeps the "
                     "screen's shadow mask lit; needs the Vulkan FH1 executor")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_BOOL(pinyon_shift_mobile_perf_mode, REX_PLATFORM_ANDROID, "Pinyon Shift",
+                    "Enables mobile fast-path optimizations for TBDR mobile GPUs (temporal cubemap "
+                    "interleaving and secondary pass culling)")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(pinyon_shift_reuse_gamma_ramp, true, "Pinyon Shift",
                     "Reuse the title's gamma ramp when it is rebuilt from the same settings. "
                     "A finished gamma transition never ends, so the title rebuilds the same "
@@ -162,7 +166,12 @@ void KeepShadowsOff(rex::memory::Memory* memory) {
 void ApplyRenderSettings() {
   auto* memory = rex::system::kernel_state()->memory();
   std::lock_guard<std::mutex> lock(render_scenarios_mutex);
-  const float rate = float(REXCVAR_GET(pinyon_shift_fh1_env_map_rate));
+  float rate = float(REXCVAR_GET(pinyon_shift_fh1_env_map_rate));
+  if (REXCVAR_GET(pinyon_shift_mobile_perf_mode) && rate > 0.0f) {
+    // Temporal cubemap face interleaving: slice updates to 1 face per frame (1/6th rate),
+    // eliminating 6-face redraw spikes while preserving dynamic reflections.
+    rate = std::min(rate, 1.0f / 6.0f);
+  }
   if (rate != applied_env_rate) {
     for (const RenderScenario& scenario : render_scenarios) SetEnvMapRate(memory, scenario, rate);
     applied_env_rate = rate;

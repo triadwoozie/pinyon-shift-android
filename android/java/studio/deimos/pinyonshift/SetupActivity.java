@@ -942,13 +942,6 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         int scale = (res >= 1080) ? 2 : 1;
         args.add("--draw_resolution_scale_x=" + scale);
         args.add("--draw_resolution_scale_y=" + scale);
-        if (res == 540) {
-            args.add("--window_width=960");
-            args.add("--window_height=540");
-        } else if (res == 360) {
-            args.add("--window_width=640");
-            args.add("--window_height=360");
-        }
         args.add("--vsync=" + prefs.getBoolean(PREF_VSYNC, true));
         int fps = prefs.getInt(PREF_FPS_CAP, 30);
         args.add("--host_present_fps_limit=" + fps);

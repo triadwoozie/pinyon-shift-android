@@ -5,11 +5,11 @@ import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
-import android.database.Cursor;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -32,6 +32,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.database.Cursor;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.system.ErrnoException;
@@ -60,10 +61,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import android.util.DisplayMetrics;
 import java.net.InetAddress;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -72,8 +73,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.libsdl.app.SDLActivity;
 
@@ -83,7 +82,6 @@ import org.libsdl.app.SDLActivity;
  */
 public class PinyonShiftActivity extends SDLActivity implements View.OnClickListener {
     private static final String TAG = "PinyonShift";
-    private static final int REQUEST_GPU_DRIVER_ZIP = 0x5053;
 
     public static final String MS_2505_RETAIL_XEX_SHA256 =
             "DB40DF605ADE49A612B35A7A24C38F6004BCB17A88ED6B48288DE16DF9E3987C";
@@ -219,11 +217,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             res = (res == 2) ? 1440 : 720;
             prefs.edit().putInt("res_scale", res).apply();
         }
-        if (mSurface != null && (res == 540 || res == 360)) {
-            int targetH = res;
-            int targetW = (int) Math.round(targetH * (16.0 / 9.0));
-            mSurface.getHolder().setFixedSize(targetW, targetH);
-        }
+        applySurfaceResolution(res);
 
         initHaptics();
         initSensors();
@@ -232,9 +226,56 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         attachMobileOverlays();
     }
 
+    private void applySurfaceResolution(int s) {
+        if (mSurface == null) return;
+        ViewGroup.LayoutParams lp = mSurface.getLayoutParams();
+        if (lp != null) {
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            mSurface.setLayoutParams(lp);
+        }
+        if (s == 540 || s == 360) {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            float asp = (float) Math.max(dm.widthPixels, dm.heightPixels) / (float) Math.max(1, Math.min(dm.widthPixels, dm.heightPixels));
+            int w = Math.round(s * asp);
+            mSurface.getHolder().setFixedSize(w, s);
+        } else {
+            mSurface.getHolder().setSizeFromLayout();
+        }
+    }
+
+    private void confirmQuit() {
+        new AlertDialog.Builder(this)
+                .setTitle("Quit Game")
+                .setMessage("Exit Pinyon Shift and return to launcher?")
+                .setPositiveButton("Quit", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        finishAffinity();
+                        System.exit(0);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (quickHudDrawer != null && quickHudDrawer.getVisibility() == View.VISIBLE) {
+            toggleQuickHud();
+            return;
+        }
+        if (inMenuMode) {
+            confirmQuit();
+            return;
+        }
+        super.onBackPressed();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        applySurfaceResolution(prefs.getInt("res_scale", 720));
         applyDisplayRefreshRate(currentFpsTarget);
         if (sensorManager != null && gameRotationSensor != null && "tilt_a".equals(controlScheme)) {
             sensorManager.registerListener(sensorListener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME);
@@ -485,6 +526,16 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         return v;
     }
 
+    private void addHudRow(LinearLayout items, String title, String[] labels, String[] tags, int activeIdx) {
+        addHudSectionTitle(items, title);
+        LinearLayout row = new LinearLayout(this);
+        for (int i = 0; i < labels.length; i++) {
+            Button b = createChipButton(labels[i], i == activeIdx);
+            row.addView(bindClick(b, tags[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        }
+        items.addView(row);
+    }
+
     private void toggleQuickHud() {
         if (quickHudDrawer == null) return;
         boolean show = quickHudDrawer.getVisibility() != View.VISIBLE;
@@ -543,71 +594,29 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         Button menuBtn = createChipButton(inMenuMode ? "Menu Mode D-Pad: ACTIVE" : "Menu Mode D-Pad: OFF", inMenuMode);
         items.addView(bindClick(menuBtn, "toggle_menu_mode"));
 
-        // Framerate Presets
-        addHudSectionTitle(items, "Target FPS (Live VRR)");
-        LinearLayout fpsRow = new LinearLayout(this);
-        fpsRow.setOrientation(LinearLayout.HORIZONTAL);
-        int[] fpsOpts = {30, 45, 60, 120};
-        for (int f : fpsOpts) {
-            Button b = createChipButton(f + " FPS", f == currentFpsTarget);
-            fpsRow.addView(bindClick(b, "fps_" + f), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        }
-        items.addView(fpsRow);
+        addHudRow(items, "Target FPS (Live VRR)", new String[]{"30 FPS", "45 FPS", "60 FPS", "120 FPS"},
+                new String[]{"fps_30", "fps_45", "fps_60", "fps_120"},
+                currentFpsTarget == 120 ? 3 : currentFpsTarget == 60 ? 2 : currentFpsTarget == 45 ? 1 : 0);
 
-        // Mobile Presets
-        addHudSectionTitle(items, "Render Preset");
-        LinearLayout presetRow = new LinearLayout(this);
-        presetRow.setOrientation(LinearLayout.HORIZONTAL);
-        String[] presets = {"Potato", "Balanced", "Ultra"};
-        for (String p : presets) {
-            Button b = createChipButton(p, false);
-            presetRow.addView(bindClick(b, "preset_" + p.toLowerCase(Locale.ROOT)), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        }
-        items.addView(presetRow);
+        addHudRow(items, "Render Preset", new String[]{"Potato", "Balanced", "Ultra"},
+                new String[]{"preset_potato", "preset_balanced", "preset_ultra"}, -1);
 
-        // Output Upscaler
-        addHudSectionTitle(items, "Output Upscaler");
-        LinearLayout upRow = new LinearLayout(this);
-        upRow.setOrientation(LinearLayout.HORIZONTAL);
-        String[] upscalers = {"FSR 1.0", "CAS", "Bilinear"};
-        for (String u : upscalers) {
-            String up = u.startsWith("FSR") ? "fsr" : u.startsWith("CAS") ? "cas" : "bilinear";
-            Button b = createChipButton(u, false);
-            upRow.addView(bindClick(b, "up_" + up), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        }
-        items.addView(upRow);
+        addHudRow(items, "Output Upscaler", new String[]{"FSR 1.0", "CAS", "Bilinear"},
+                new String[]{"up_fsr", "up_cas", "up_bilinear"}, -1);
 
-        // Live VSync
         addHudSectionTitle(items, "Vertical Sync (VSync)");
         boolean vsyncOn = prefs.getBoolean("vsync", true);
-        Button vsyncBtn = createChipButton(vsyncOn ? "VSync: ENABLED" : "VSync: DISABLED", vsyncOn);
-        items.addView(bindClick(vsyncBtn, "toggle_vsync"));
+        items.addView(bindClick(createChipButton(vsyncOn ? "VSync: ENABLED" : "VSync: DISABLED", vsyncOn), "toggle_vsync"));
 
-        // Resolution Scaling
-        addHudSectionTitle(items, "Internal Resolution");
-        LinearLayout resRow = new LinearLayout(this);
-        resRow.setOrientation(LinearLayout.HORIZONTAL);
-        int[] resScales = {720, 540, 360};
-        String[] resLabels = {"720p", "540p FSR", "360p FSR"};
         int curScale = prefs.getInt("res_scale", 720);
-        for (int i = 0; i < resScales.length; i++) {
-            Button b = createChipButton(resLabels[i], resScales[i] == curScale);
-            resRow.addView(bindClick(b, "res_" + resScales[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        }
-        items.addView(resRow);
+        addHudRow(items, "Internal Resolution", new String[]{"720p", "540p FSR", "360p FSR"},
+                new String[]{"res_720", "res_540", "res_360"},
+                curScale == 360 ? 2 : curScale == 540 ? 1 : 0);
 
-        // Touch Controls Customization
-        addHudSectionTitle(items, "Touch Controls Customization");
-        LinearLayout opRow = new LinearLayout(this);
-        opRow.setOrientation(LinearLayout.HORIZONTAL);
-        int[] opVals = {100, 75, 50, 0};
-        String[] opNames = {"100%", "75%", "50%", "Hidden"};
         int curOp = prefs.getInt("touch_opacity", 100);
-        for (int i = 0; i < opVals.length; i++) {
-            Button b = createChipButton(opNames[i], opVals[i] == curOp);
-            opRow.addView(bindClick(b, "op_" + opVals[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        }
-        items.addView(opRow);
+        addHudRow(items, "Touch Controls Customization", new String[]{"100%", "75%", "50%", "Hidden"},
+                new String[]{"op_100", "op_75", "op_50", "op_0"},
+                curOp == 0 ? 3 : curOp == 50 ? 2 : curOp == 75 ? 1 : 0);
 
         boolean curHor = prefs.getBoolean("touch_horizon", true);
         Button horBtn = createChipButton(curHor ? "Steering Horizon: ON" : "Steering Horizon: OFF", curHor);
@@ -621,6 +630,12 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         Button guideBtn = createChipButton("Touch Controls Guide", false);
         items.addView(bindClick(guideBtn, "touch_guide"));
 
+        Button quitBtn = createChipButton("Quit to Launcher", false);
+        GradientDrawable qgd = (GradientDrawable) quitBtn.getBackground();
+        if (qgd != null) qgd.setColor(0xDD3A1618);
+        quitBtn.setTextColor(0xFFFF6B6B);
+        items.addView(bindClick(quitBtn, "quit_game"));
+
         scroll.addView(items);
         drawer.addView(scroll);
         return drawer;
@@ -633,6 +648,9 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         String t = tag.toString();
         if ("hud_toggle".equals(t) || "hud_close".equals(t)) {
             toggleQuickHud();
+        } else if ("quit_game".equals(t)) {
+            toggleQuickHud();
+            confirmQuit();
         } else if ("toggle_auto_throttle".equals(t)) {
             autoThrottle = !autoThrottle;
             prefs.edit().putBoolean("auto_throttle", autoThrottle).apply();
@@ -677,13 +695,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         } else if (t.startsWith("res_")) {
             int s = Integer.parseInt(t.substring(4));
             prefs.edit().putInt("res_scale", s).apply();
-            if (mSurface != null) {
-                if (s == 540 || s == 360) {
-                    mSurface.getHolder().setFixedSize((int) Math.round(s * 16.0 / 9.0), s);
-                } else {
-                    mSurface.getHolder().setSizeFromLayout();
-                }
-            }
+            applySurfaceResolution(s);
             toast("Resolution: " + s + "p");
             toggleQuickHud();
         } else if (t.startsWith("op_")) {
@@ -1016,6 +1028,12 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
             pillPaint.setColor(0xCC1A241E);
             strokePaint.setColor(0x802E4233);
+            canvas.drawCircle(w - dp(110), dp(25), dp(13), pillPaint);
+            canvas.drawCircle(w - dp(110), dp(25), dp(13), strokePaint);
+            textPaint.setTextSize(dp(13));
+            textPaint.setColor(0xFFFF5252);
+            canvas.drawText("✕", w - dp(110), dp(29.5f), textPaint);
+
             canvas.drawCircle(w - dp(74), dp(25), dp(13), pillPaint);
             canvas.drawCircle(w - dp(74), dp(25), dp(13), strokePaint);
             textPaint.setTextSize(dp(12));
@@ -1114,6 +1132,10 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
                         currentButtons = 0;
                         flushOverrides();
                         postInvalidate();
+                        return true;
+                    }
+                    if (Math.hypot(x - (w - dp(110)), y - dp(25)) <= dp(22)) {
+                        confirmQuit();
                         return true;
                     }
                     if (Math.hypot(x - (w - dp(38)), y - dp(25)) <= dp(22)) {
@@ -1387,65 +1409,54 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         f.delete();
     }
 
-    static void copyTree(File src, File dst) throws IOException {
-        if (src.isDirectory()) {
-            dst.mkdirs();
-            File[] ch = src.listFiles();
-            if (ch != null) for (File c : ch) copyTree(c, new File(dst, c.getName()));
+    static void copyTree(File s, File d) throws IOException {
+        if (s.isDirectory()) {
+            d.mkdirs();
+            File[] ch = s.listFiles();
+            if (ch != null) for (File c : ch) copyTree(c, new File(d, c.getName()));
             return;
         }
-        dst.getParentFile().mkdirs();
-        try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
-            copy(in, out);
-        }
+        d.getParentFile().mkdirs();
+        try (InputStream in = new FileInputStream(s); OutputStream out = new FileOutputStream(d)) { copy(in, out); }
     }
 
     static List<InetAddress> broadcastAddresses() {
-        List<InetAddress> res = new ArrayList<>();
+        List<InetAddress> r = new ArrayList<>();
         try {
-            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (!ni.isUp() || ni.isLoopback()) continue;
-                for (InterfaceAddress ia : ni.getInterfaceAddresses()) {
-                    if (ia.getBroadcast() != null) res.add(ia.getBroadcast());
-                }
+            for (NetworkInterface n : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!n.isUp() || n.isLoopback()) continue;
+                for (InterfaceAddress ia : n.getInterfaceAddresses()) if (ia.getBroadcast() != null) r.add(ia.getBroadcast());
             }
-            res.add(InetAddress.getByName("255.255.255.255"));
+            r.add(InetAddress.getByName("255.255.255.255"));
         } catch (IOException ignored) {}
-        return res;
+        return r;
     }
 
     static String unpackDriver(ContentResolver resolver, File driversDir, Uri uri) throws IOException {
-        String baseName = "driver";
-        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                String displayName = cursor.getString(0);
-                if (displayName != null) baseName = displayName.replaceAll("(?i)\\.(zip|adpkg)$", "");
+        String base = "driver";
+        try (Cursor c = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String d = c.getString(0);
+                if (d != null) base = d.replaceAll("(?i)\\.(zip|adpkg)$", "");
             }
         }
-        File targetDir = new File(driversDir, baseName);
-        if (targetDir.exists()) deleteTree(targetDir);
-        targetDir.mkdirs();
-
-        try (InputStream raw = resolver.openInputStream(uri);
-             ZipInputStream zip = new ZipInputStream(raw)) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                String name = entry.getName();
-                if (name.contains("..")) continue;
-                File out = new File(targetDir, name);
-                if (entry.isDirectory()) {
-                    out.mkdirs();
-                } else {
+        File target = new File(driversDir, base);
+        if (target.exists()) deleteTree(target);
+        target.mkdirs();
+        try (InputStream raw = resolver.openInputStream(uri); ZipInputStream zip = new ZipInputStream(raw)) {
+            for (ZipEntry e; (e = zip.getNextEntry()) != null; zip.closeEntry()) {
+                if (e.getName().contains("..")) continue;
+                File out = new File(target, e.getName());
+                if (e.isDirectory()) out.mkdirs();
+                else {
                     out.getParentFile().mkdirs();
-                    try (OutputStream fos = new FileOutputStream(out)) {
-                        copy(zip, fos);
-                    }
+                    try (OutputStream fos = new FileOutputStream(out)) { copy(zip, fos); }
                 }
-                zip.closeEntry();
             }
         }
-        return baseName;
+        return base;
     }
+
 
     private void toast(final String text) {
         runOnUiThread(new Runnable() {

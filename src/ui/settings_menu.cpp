@@ -181,6 +181,7 @@ class SettingsPages : public std::enable_shared_from_this<SettingsPages> {
   std::unique_ptr<MenuScreen> ModActions();
   std::unique_ptr<MenuScreen> Rally();
   std::unique_ptr<MenuScreen> ConfirmRallyRetirement();
+  std::unique_ptr<MenuScreen> ConfirmQuitGame();
 
  public:
   std::unique_ptr<MenuScreen> Trainer();
@@ -1732,6 +1733,12 @@ std::unique_ptr<MenuScreen> SettingsPages::Root() {
     rows.push_back(std::move(row));
   }
   if (PinyonShiftUseBuiltinRallyAdapter()) rows.push_back(Page("HORIZON RALLY", &SettingsPages::Rally));
+  MenuRow quit_row;
+  quit_row.label = "QUIT GAME";
+  quit_row.activate = [self = shared_from_this()] {
+    self->host_ui_.Push(self->ConfirmQuitGame());
+  };
+  rows.push_back(std::move(quit_row));
   return std::make_unique<MenuScreen>("SETTINGS", std::move(rows));
 }
 
@@ -1774,6 +1781,26 @@ std::unique_ptr<MenuScreen> SettingsPages::ConfirmRallyRetirement() {
   auto screen = std::make_unique<MenuScreen>("RETIRE CHAMPIONSHIP?", std::move(rows));
   screen->set_body("End the unfinished championship and discard its current total. "
                    "Completed stage results and best times are kept.");
+  screen->SetFocus(1);
+  *self = screen.get();
+  return screen;
+}
+
+std::unique_ptr<MenuScreen> SettingsPages::ConfirmQuitGame() {
+  auto self = std::make_shared<const MenuScreen*>(nullptr);
+  std::vector<MenuRow> rows(2);
+  rows[0].label = "QUIT GAME";
+  rows[0].activate = [] {
+#if defined(__ANDROID__)
+    exit(0);
+#else
+    std::exit(0);
+#endif
+  };
+  rows[1].label = "CANCEL";
+  rows[1].activate = [this, self] { host_ui_.Finish(*self); };
+  auto screen = std::make_unique<MenuScreen>("QUIT GAME?", std::move(rows));
+  screen->set_body("Exit Pinyon Shift and return to the system launcher.");
   screen->SetFocus(1);
   *self = screen.get();
   return screen;
