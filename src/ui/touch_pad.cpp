@@ -1,4 +1,5 @@
 #include "ui/touch_pad.h"
+#include "native_renderer/graphics_hooks.h"
 
 #include <algorithm>
 #include <cmath>
@@ -411,9 +412,8 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAction(
     }
   } else if (actionId == 3) {
     if (value >= 0.0f) {
-      std::string limit = std::to_string(int(value));
-      rex::cvar::SetFlagByName("host_present_fps_limit", limit.c_str());
-      rex::cvar::SetFlagByName("pinyon_shift_fh1_render_fps_limit", limit.c_str());
+      int fps = int(value);
+      pinyon_shift::native_renderer::SetMobileTargetFps(fps);
     } else {
       std::string env = fmt::format("{:.2f}", std::abs(value));
       rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", env.c_str());
@@ -429,8 +429,18 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetCVar(
   const char* v = env->GetStringUTFChars(value, nullptr);
   if (n && v) {
     rex::cvar::SetFlagByName(n, v);
+    if (std::strcmp(n, "pinyon_shift_fh1_render_fps_limit") == 0 ||
+        std::strcmp(n, "host_present_fps_limit") == 0) {
+      pinyon_shift::native_renderer::SetMobileTargetFps(std::atoi(v));
+    }
   }
   if (n) env->ReleaseStringUTFChars(name, n);
   if (v) env->ReleaseStringUTFChars(value, v);
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeGetFrameTimeMs(
+    JNIEnv*, jclass) {
+  return pinyon_shift::native_renderer::GetMobileFrameTimeMs();
 }
 #endif

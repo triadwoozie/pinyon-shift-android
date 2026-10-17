@@ -1,7 +1,9 @@
 package studio.deimos.pinyonshift;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
+import android.graphics.drawable.ColorDrawable;
+import android.view.Window;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -162,8 +164,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         return new RippleDrawable(ColorStateList.valueOf(r), cardBg(n, rad), m);
     }
     private LinearLayout createCard(LinearLayout parent, int p) {
-        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL);
-        c.setBackground(cardBg(COLOR_CARD, 20, COLOR_CARD_STROKE, 1));
+        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL); c.setBackground(cardBg(COLOR_CARD, 20, COLOR_CARD_STROKE, 1));
         int pad = dp(p); c.setPadding(pad, pad, pad, pad);
         LinearLayout.LayoutParams l = lp(MP, WC); l.bottomMargin = dp(12); c.setLayoutParams(l);
         if (parent != null) parent.addView(c);
@@ -178,17 +179,26 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         return tv;
     }
     private EditText createField(String hint, int inputType) {
-        EditText et = new EditText(this); et.setHint(hint); et.setHintTextColor(COLOR_TEXT_DIM);
-        et.setTextColor(Color.WHITE); et.setTextSize(13); et.setInputType(inputType);
-        et.setBackground(cardBg(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-        et.setPadding(dp(12), dp(8), dp(12), dp(8));
+        EditText et = new EditText(this); et.setHint(hint); et.setHintTextColor(COLOR_TEXT_DIM); et.setTextColor(Color.WHITE); et.setTextSize(13); et.setInputType(inputType); et.setBackground(cardBg(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1)); et.setPadding(dp(12), dp(8), dp(12), dp(8));
         return et;
     }
     private void toast(final String msg) {
         runOnUiThread(new Runnable() { @Override public void run() { Toast.makeText(SetupActivity.this, msg, Toast.LENGTH_SHORT).show(); } });
     }
-    private void confirmDialog(String t, String m, String p, DialogInterface.OnClickListener ok) {
-        new AlertDialog.Builder(this).setTitle(t).setMessage(m).setPositiveButton(p, ok).setNegativeButton("Cancel", null).show();
+    private Dialog createCardDialog(String title, LinearLayout c) {
+        Dialog d = new Dialog(this); d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (d.getWindow() != null) d.getWindow().setBackgroundDrawable(new ColorDrawable(0)); c.setOrientation(LinearLayout.VERTICAL); c.setPadding(dp(18), dp(18), dp(18), dp(14)); c.setBackground(cardBg(0xFF181D1A, 20, 0xFF26302A, 1));
+        if (title != null) { TextView tv = label(title, 16, Color.WHITE, true); tv.setPadding(0, 0, 0, dp(10)); c.addView(tv); }
+        d.setContentView(c); return d;
+    }
+
+    private void confirmDialog(String t, String m, String p, final DialogInterface.OnClickListener ok) {
+        LinearLayout c = new LinearLayout(this); final Dialog d = createCardDialog(t, c);
+        TextView msg = label(m, 13, COLOR_MUTED, false); msg.setPadding(0, dp(4), 0, dp(12)); c.addView(msg);
+        LinearLayout row = new LinearLayout(this);
+        Button cancel = createM3Button("Cancel", false); cancel.setLayoutParams(lpWeight1()); cancel.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); } }); row.addView(cancel);
+        View sp = new View(this); sp.setLayoutParams(lp(dp(10), dp(1))); row.addView(sp);
+        Button pos = createM3Button(p, true); pos.setLayoutParams(lpWeight1()); pos.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); ok.onClick(d, DialogInterface.BUTTON_POSITIVE); } }); row.addView(pos); c.addView(row); d.show();
     }
 
     Drawable getSymbol(String name) {
@@ -205,8 +215,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             d.setTint(tint);
         }
         if (b != null) {
-            b.setCompoundDrawables(d, null, null, null);
-            b.setCompoundDrawablePadding(dp(8));
+            b.setCompoundDrawables(d, null, null, null); b.setCompoundDrawablePadding(dp(8));
         }
     }
 
@@ -217,53 +226,34 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     private Button createM3Button(String text, String icon, boolean primary) {
         Button btn = new Button(this);
         btn.setText(text);
-        btn.setAllCaps(false);
-        btn.setTextSize(14);
-        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setAllCaps(false); btn.setTextSize(14); btn.setTypeface(Typeface.DEFAULT_BOLD);
         int bg = primary ? colorAccent : COLOR_SURFACE;
-        int fg = primary ? 0xFF0B1F11 : colorAccent;
-        btn.setTextColor(fg);
-        btn.setLetterSpacing(0.04f);
-        btn.setBackground(ripple(bg, Color.argb(60, 255, 255, 255), 14));
-        btn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        int fg = primary ? 0xFF0B1F11 : colorAccent; btn.setTextColor(fg); btn.setLetterSpacing(0.04f); btn.setBackground(ripple(bg, Color.argb(60, 255, 255, 255), 14)); btn.setPadding(dp(16), dp(10), dp(16), dp(10));
         if (icon != null) setButtonIcon(btn, icon, fg);
         return btn;
     }
 
     private void buildMaterial3Layout() {
         LinearLayout root = new LinearLayout(this);
-        root.setFitsSystemWindows(true);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(COLOR_BG);
-        root.setLayoutParams(lp(MP, MP));
+        root.setFitsSystemWindows(true); root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(COLOR_BG); root.setLayoutParams(lp(MP, MP));
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackgroundColor(Color.TRANSPARENT);
-        header.setPadding(dp(20), dp(14), dp(20), dp(8));
+        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackgroundColor(Color.TRANSPARENT); header.setPadding(dp(20), dp(14), dp(20), dp(8));
 
         ImageView mark = new ImageView(this);
         Drawable mk = getSymbol("ic_launcher_foreground");
         if (mk != null) mark.setImageDrawable(mk);
         LinearLayout.LayoutParams mlp = lp(dp(28), dp(28));
-        mlp.rightMargin = dp(10);
-        header.addView(mark, mlp);
+        mlp.rightMargin = dp(10); header.addView(mark, mlp);
 
-        TextView title = label("PINYON SHIFT", 20, Color.WHITE, true);
-        title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC));
-        title.setLetterSpacing(0.08f);
-        header.addView(title, lpWeight1());
+        TextView title = label("PINYON SHIFT", 20, Color.WHITE, true); title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)); title.setLetterSpacing(0.08f); header.addView(title, lpWeight1());
 
-        TextView verBadge = label("v0.5.1", 11, COLOR_MUTED, true);
-        verBadge.setBackground(cardBg(0xFF1A241D, 10, COLOR_CARD_STROKE, 1));
-        verBadge.setPadding(dp(8), dp(3), dp(8), dp(3));
-        header.addView(verBadge);
-        root.addView(header);
+        TextView verBadge = label("v0.5.1", 11, COLOR_MUTED, true); verBadge.setBackground(cardBg(0xFF1A241D, 10, COLOR_CARD_STROKE, 1)); verBadge.setPadding(dp(8), dp(3), dp(8), dp(3)); header.addView(verBadge); root.addView(header);
 
         tabContentContainer = new FrameLayout(this);
         LinearLayout.LayoutParams clp = lp(MP, 0);
-        clp.weight = 1.0f;
-        tabContentContainer.setLayoutParams(clp);
+        clp.weight = 1.0f; tabContentContainer.setLayoutParams(clp);
 
         tabPages.clear();
         tabPages.add(buildPlayTab());
@@ -273,59 +263,40 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
 
         for (int i = 0; i < tabPages.size(); i++) {
             View page = tabPages.get(i);
-            page.setVisibility(i == currentTab ? View.VISIBLE : View.GONE);
-            tabContentContainer.addView(page);
+            page.setVisibility(i == currentTab ? View.VISIBLE : View.GONE); tabContentContainer.addView(page);
         }
-        root.addView(tabContentContainer);
-        root.addView(buildBottomNavBar());
+        root.addView(tabContentContainer); root.addView(buildBottomNavBar());
         setContentView(root);
     }
 
     private ScrollView wrapScrollable(View content) {
         ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setLayoutParams(new FrameLayout.LayoutParams(MP, MP));
-        int p = dp(16);
-        content.setPadding(p, p, p, p);
-        scroll.addView(content);
+        scroll.setFillViewport(true); scroll.setLayoutParams(new FrameLayout.LayoutParams(MP, MP));
+        int p = dp(16); content.setPadding(p, p, p, p); scroll.addView(content);
         return scroll;
     }
 
     private LinearLayout buildBottomNavBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setBackgroundColor(COLOR_SURFACE);
-        bar.setElevation(dp(8));
-        bar.setPadding(0, dp(4), 0, dp(4));
+        bar.setElevation(dp(8)); bar.setPadding(0, dp(4), 0, dp(4));
 
         navItems.clear();
         final String[] titles = {"Play", "Drivers", "Settings", "Content"};
         final String[] icons = {"ic_play_arrow", "ic_memory", "ic_settings", "ic_folder_open"};
 
         for (int i = 0; i < titles.length; i++) {
-            LinearLayout item = new LinearLayout(this);
-            item.setOrientation(LinearLayout.VERTICAL);
-            item.setGravity(Gravity.CENTER);
-            item.setPadding(0, dp(2), 0, dp(2));
+            LinearLayout item = new LinearLayout(this); item.setOrientation(LinearLayout.VERTICAL); item.setGravity(Gravity.CENTER); item.setPadding(0, dp(2), 0, dp(2));
 
             FrameLayout pill = new FrameLayout(this);
             LinearLayout.LayoutParams pillLp = lp(dp(56), dp(28));
-            pillLp.bottomMargin = dp(2);
-            pill.setLayoutParams(pillLp);
+            pillLp.bottomMargin = dp(2); pill.setLayoutParams(pillLp);
 
             ImageView icon = new ImageView(this);
             Drawable d = getSymbol(icons[i]);
-            if (d != null) icon.setImageDrawable(d);
-            pill.addView(icon, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
-            item.addView(pill);
+            if (d != null) icon.setImageDrawable(d); pill.addView(icon, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)); item.addView(pill);
 
-            TextView lbl = label(titles[i], 11, COLOR_MUTED, false);
-            lbl.setGravity(Gravity.CENTER);
-            item.addView(lbl);
-
-            item.setTag(Integer.valueOf(i));
-            item.setOnClickListener(this);
-
-            bar.addView(item, lpWeight1());
+            TextView lbl = label(titles[i], 11, COLOR_MUTED, false); lbl.setGravity(Gravity.CENTER); item.addView(lbl); item.setTag(Integer.valueOf(i)); item.setOnClickListener(this); bar.addView(item, lpWeight1());
             navItems.add(item);
         }
         updateNavSelection();
@@ -347,44 +318,30 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         for (int i = 0; i < navItems.size(); i++) {
             LinearLayout item = navItems.get(i);
             boolean active = (i == currentTab);
-            FrameLayout pill = (FrameLayout) item.getChildAt(0);
-            pill.setBackground(active ? cardBg(0xFF1F3828, 14) : null);
+            FrameLayout pill = (FrameLayout) item.getChildAt(0); pill.setBackground(active ? cardBg(0xFF1F3828, 14) : null);
             ImageView iv = (ImageView) pill.getChildAt(0);
             if (iv != null && iv.getDrawable() != null) {
                 iv.getDrawable().mutate().setTint(active ? colorAccent : COLOR_MUTED);
             }
-            TextView tv = (TextView) item.getChildAt(1);
-            tv.setTextColor(active ? colorAccent : COLOR_MUTED);
-            tv.setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            TextView tv = (TextView) item.getChildAt(1); tv.setTextColor(active ? colorAccent : COLOR_MUTED); tv.setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         }
     }
 
     private LinearLayout createStatTile(String cat, String val, String tag) {
-        LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
-        t.setBackground(ripple(0xFF1A241D, 0x28FFFFFF, 12));
-        t.setPadding(dp(12), dp(10), dp(12), dp(10));
-        TextView c = label(cat.toUpperCase(Locale.ROOT), 10, 0xFF86968B, true);
-        c.setLetterSpacing(0.06f);
-        t.addView(c);
-        TextView v = label(val, 13, Color.WHITE, true);
-        v.setPadding(0, dp(2), 0, 0);
-        v.setMaxLines(1);
-        t.addView(v);
-        t.setTag(tag);
-        t.setOnClickListener(this);
+        LinearLayout t = new LinearLayout(this); t.setOrientation(LinearLayout.VERTICAL); t.setBackground(ripple(0xFF1A241D, 0x28FFFFFF, 12)); t.setPadding(dp(12), dp(10), dp(12), dp(10));
+        TextView c = label(cat.toUpperCase(Locale.ROOT), 10, 0xFF86968B, true); c.setLetterSpacing(0.06f); t.addView(c);
+        TextView v = label(val, 13, Color.WHITE, true); v.setPadding(0, dp(2), 0, 0);
+        v.setMaxLines(1); t.addView(v); t.setTag(tag); t.setOnClickListener(this);
         return t;
     }
 
     private LinearLayout createTileRow(View v1, View v2) {
         LinearLayout row = new LinearLayout(this);
         LinearLayout.LayoutParams lp = lp(MP, WC);
-        lp.bottomMargin = dp(8);
-        row.setLayoutParams(lp);
+        lp.bottomMargin = dp(8); row.setLayoutParams(lp);
 
         LinearLayout.LayoutParams p1 = lpWeight1();
-        p1.rightMargin = v2 != null ? dp(8) : 0;
-        row.addView(v1, p1);
+        p1.rightMargin = v2 != null ? dp(8) : 0; row.addView(v1, p1);
 
         if (v2 != null) row.addView(v2, lpWeight1());
         return row;
@@ -395,69 +352,39 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     }
 
     private void addInfoCard(LinearLayout content, String title, String text, String badge, int badgeFg, int badgeBg) {
-        LinearLayout c = createCard(content, 14);
-        c.addView(label(title, 13, COLOR_MUTED, true));
-        LinearLayout r = new LinearLayout(this);
-        r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(0, dp(6), 0, 0);
-        r.addView(label(text, 12, COLOR_FOG, false), lpWeight1());
-        TextView b = label(badge, 11, badgeFg, true);
-        b.setBackground(cardBg(badgeBg, 8, COLOR_CARD_STROKE, 1));
-        b.setPadding(dp(8), dp(4), dp(8), dp(4));
-        r.addView(b);
-        c.addView(r);
+        LinearLayout c = createCard(content, 14); c.addView(label(title, 13, COLOR_MUTED, true));
+        LinearLayout r = new LinearLayout(this); r.setGravity(Gravity.CENTER_VERTICAL); r.setPadding(0, dp(6), 0, 0); r.addView(label(text, 12, COLOR_FOG, false), lpWeight1());
+        TextView b = label(badge, 11, badgeFg, true); b.setBackground(cardBg(badgeBg, 8, COLOR_CARD_STROKE, 1)); b.setPadding(dp(8), dp(4), dp(8), dp(4)); r.addView(b); c.addView(r);
     }
 
     private View buildPlayTab() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout hero = createCard(content, 18);
-        hero.setBackground(cardBg(COLOR_CARD, 20, COLOR_HERO_STROKE, 1));
-        gameTitleText = label("Forza Horizon (2012)", 20, COLOR_FOG, true);
-        hero.addView(gameTitleText);
+        LinearLayout hero = createCard(content, 18); hero.setBackground(cardBg(COLOR_CARD, 20, COLOR_HERO_STROKE, 1));
+        gameTitleText = label("Forza Horizon (2012)", 20, COLOR_FOG, true); hero.addView(gameTitleText);
 
-        statusPill = new LinearLayout(this);
-        statusPill.setGravity(Gravity.CENTER_VERTICAL);
-        statusPill.setPadding(dp(8), dp(4), dp(10), dp(4));
+        statusPill = new LinearLayout(this); statusPill.setGravity(Gravity.CENTER_VERTICAL); statusPill.setPadding(dp(8), dp(4), dp(10), dp(4));
         LinearLayout.LayoutParams spl = lp(WC, WC);
-        spl.setMargins(0, dp(6), 0, dp(14));
-        statusPill.setLayoutParams(spl);
+        spl.setMargins(0, dp(6), 0, dp(14)); statusPill.setLayoutParams(spl);
 
         statusDot = new View(this);
         LinearLayout.LayoutParams dlp = lp(dp(8), dp(8));
-        dlp.rightMargin = dp(6);
-        statusPill.addView(statusDot, dlp);
+        dlp.rightMargin = dp(6); statusPill.addView(statusDot, dlp);
 
-        gameStatusText = label("", 11, COLOR_MUTED, true);
-        statusPill.addView(gameStatusText);
-        hero.addView(statusPill);
+        gameStatusText = label("", 11, COLOR_MUTED, true); statusPill.addView(gameStatusText); hero.addView(statusPill);
 
-        launchButton = new LinearLayout(this);
-        launchButton.setGravity(Gravity.CENTER);
-        launchButton.setBackground(ripple(colorAccent, 0x3CFFFFFF, 14));
-        launchButton.setPadding(dp(16), dp(11), dp(16), dp(11));
-        launchButton.setTag("play");
-        launchButton.setOnClickListener(this);
+        launchButton = new LinearLayout(this); launchButton.setGravity(Gravity.CENTER); launchButton.setBackground(ripple(colorAccent, 0x3CFFFFFF, 14)); launchButton.setPadding(dp(16), dp(11), dp(16), dp(11)); launchButton.setTag("play"); launchButton.setOnClickListener(this);
 
         launchIcon = new ImageView(this);
         LinearLayout.LayoutParams lip = lp(dp(20), dp(20));
-        lip.rightMargin = dp(8);
-        launchButton.addView(launchIcon, lip);
+        lip.rightMargin = dp(8); launchButton.addView(launchIcon, lip);
 
-        launchText = label("Play", 15, 0xFF0B1F11, true);
-        launchText.setLetterSpacing(0.04f);
-        launchButton.addView(launchText);
-        hero.addView(launchButton);
+        launchText = label("Play", 15, 0xFF0B1F11, true); launchText.setLetterSpacing(0.04f); launchButton.addView(launchText); hero.addView(launchButton);
 
         LinearLayout badges = createCard(content, 14);
-        TextView bt = label("Active Launch Profile", 13, COLOR_MUTED, true);
-        bt.setPadding(0, 0, 0, dp(8));
-        badges.addView(bt);
+        TextView bt = label("Active Launch Profile", 13, COLOR_MUTED, true); bt.setPadding(0, 0, 0, dp(8)); badges.addView(bt);
 
-        activeBadgesLayout = new LinearLayout(this);
-        activeBadgesLayout.setOrientation(LinearLayout.VERTICAL);
-        badges.addView(activeBadgesLayout);
+        activeBadgesLayout = new LinearLayout(this); activeBadgesLayout.setOrientation(LinearLayout.VERTICAL); badges.addView(activeBadgesLayout);
 
         String mfg = Build.MANUFACTURER;
         if (mfg != null && mfg.length() > 0) mfg = Character.toUpperCase(mfg.charAt(0)) + mfg.substring(1).toLowerCase(Locale.ROOT);
@@ -473,22 +400,14 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     }
 
     private View buildDriversTab() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout card = addSection(content, "Vulkan GPU Driver");
-        activeDriverText = label("", 12, colorAccent, false);
-        activeDriverText.setPadding(0, dp(4), 0, dp(12));
-        card.addView(activeDriverText);
+        activeDriverText = label("", 12, colorAccent, false); activeDriverText.setPadding(0, dp(4), 0, dp(12)); card.addView(activeDriverText);
 
-        driverListContainer = new LinearLayout(this);
-        driverListContainer.setOrientation(LinearLayout.VERTICAL);
-        card.addView(driverListContainer);
+        driverListContainer = new LinearLayout(this); driverListContainer.setOrientation(LinearLayout.VERTICAL); card.addView(driverListContainer);
 
-        Button importBtn = createM3Button("+  Import Driver (.zip / .adpkg)", false);
-        importBtn.setTag("import_driver");
-        importBtn.setOnClickListener(this);
-        card.addView(importBtn);
+        Button importBtn = createM3Button("+  Import Driver (.zip / .adpkg)", false); importBtn.setTag("import_driver"); importBtn.setOnClickListener(this); card.addView(importBtn);
 
         return wrapScrollable(content);
     }
@@ -517,33 +436,18 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     }
 
     private void addDriverItem(final String name, final String id, String desc, boolean isSelected) {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
         int bg = isSelected ? ((colorAccent & 0x00FFFFFF) | 0x28000000) : COLOR_SURFACE;
-        int stroke = isSelected ? colorAccent : COLOR_CARD_STROKE;
-        row.setBackground(cardBg(bg, 12, stroke, 1));
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        int stroke = isSelected ? colorAccent : COLOR_CARD_STROKE; row.setBackground(cardBg(bg, 12, stroke, 1)); row.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams l = lp(MP, WC);
-        l.bottomMargin = dp(8);
-        row.setLayoutParams(l);
+        l.bottomMargin = dp(8); row.setLayoutParams(l);
 
-        LinearLayout textGroup = new LinearLayout(this);
-        textGroup.setOrientation(LinearLayout.VERTICAL);
-        textGroup.addView(label(name + (isSelected ? "  ✓" : ""), 13, isSelected ? colorAccent : COLOR_FOG, true));
-        textGroup.addView(label(desc, 11, COLOR_TEXT_DIM, false));
-        row.addView(textGroup, lpWeight1());
-
-        row.setTag("drv:" + id);
-        row.setOnClickListener(this);
+        LinearLayout textGroup = new LinearLayout(this); textGroup.setOrientation(LinearLayout.VERTICAL); textGroup.addView(label(name + (isSelected ? "  ✓" : ""), 13, isSelected ? colorAccent : COLOR_FOG, true)); textGroup.addView(label(desc, 11, COLOR_TEXT_DIM, false)); row.addView(textGroup, lpWeight1()); row.setTag("drv:" + id); row.setOnClickListener(this);
 
         if (!"auto".equals(id) && !"turnip-gen8-v37".equals(id)) {
             Button del = new Button(this);
-            del.setText("✕");
-            del.setTextColor(COLOR_RED);
-            del.setBackgroundColor(Color.TRANSPARENT);
-            del.setTag("del:" + id);
-            del.setOnClickListener(this);
-            row.addView(del);
+            del.setText("✕"); del.setTextColor(COLOR_RED);
+            del.setBackgroundColor(Color.TRANSPARENT); del.setTag("del:" + id); del.setOnClickListener(this); row.addView(del);
         }
 
         driverListContainer.addView(row);
@@ -581,66 +485,52 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     static final String[] OPACITY_ITEMS = {"100%", "75%", "50%", "25%", "Hidden"}; static final int[] OPACITY_VALS = {100, 75, 50, 25, 0};
 
     private View buildSettingsTab() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout disp = addSection(content, "Display & Resolution");
         aspectModeSummary = addSettingSelector(disp, "Display Scaling Mode", "scaling");
         resScaleSummary = addSettingSelector(disp, "Internal Resolution", "res_scale");
         fpsCapSummary = addSettingSelector(disp, "Target Framerate", "fps");
-        addSwitchRow(disp, "Vertical Sync (VSync)", "Lock to display refresh rate", PREF_VSYNC, true);
-        addSwitchRow(disp, "Performance Overlay", "Show live FPS, frame ms & temp", "fps_overlay", true);
+        addSwitchRow(disp, "Vertical Sync (VSync)", PREF_VSYNC, true);
+        addSwitchRow(disp, "Performance Overlay", "fps_overlay", true);
         presetSummary = addSettingSelector(disp, "Graphics Preset", "preset");
         upscalerSummary = addSettingSelector(disp, "Upscaler (FSR / CAS)", "upscaler");
         themeSummary = addSettingSelector(disp, "Theme Accent", "theme");
 
         LinearLayout mob = addSection(content, "Mobile Engine Optimizations");
-        addSwitchRow(mob, "TBDR Tile Passes", "Tile memory preservation", PREF_TBDR_TILES, true);
-        addSwitchRow(mob, "Thermal Frame Pacer", "Auto-throttle at >= 42°C", PREF_THERMAL_PACER, true);
-        addSwitchRow(mob, "No Driver Preamble", "Skip preambles", PREF_NO_PREAMBLE, true);
-        addSwitchRow(mob, "GPU Turbo Boost", "Aggressive governor", PREF_GPU_TURBO, false);
+        addSwitchRow(mob, "TBDR Tile Passes", PREF_TBDR_TILES, true);
+        addSwitchRow(mob, "Thermal Frame Pacer", PREF_THERMAL_PACER, true);
+        addSwitchRow(mob, "No Driver Preamble", PREF_NO_PREAMBLE, true);
+        addSwitchRow(mob, "GPU Turbo Boost", PREF_GPU_TURBO, false);
 
         LinearLayout ctrl = addSection(content, "Controls & Haptics");
         controlSummary = addSettingSelector(ctrl, "Control Scheme", "controls");
         touchOpacitySummary = addSettingSelector(ctrl, "Touch Controls Opacity", "touch_opacity");
         addSettingSelector(ctrl, "Touch Controls Guide", "touch_guide").setText("View 4-Layer Gesture Map");
-        addSwitchRow(ctrl, "Steering Horizon", "Subtle tilt bar at bottom center", "touch_horizon", true);
-        addSwitchRow(ctrl, "Auto-Throttle", "Auto acceleration (zones brake)", PREF_AUTO_THROTTLE, true);
-        addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts & pedals", PREF_HAPTICS, true);
-        addSwitchRow(ctrl, "Smart Auto-Clutch", "Auto-blip LB on shifts", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
-        addSwitchRow(ctrl, "Center Gesture Shift", "Flick up/down to shift", PinyonShiftActivity.PREF_GESTURE_SHIFT, true);
-        addSwitchRow(ctrl, "HUD Touch Hitboxes", "Minimap map & wristband pause", PinyonShiftActivity.PREF_HUD_HITBOXES, true);
-        addSwitchRow(ctrl, "Menu Mode Auto-Switch", "Swipes = LB/RB tabs in menus", PinyonShiftActivity.PREF_MENU_MODE_AUTO, true);
+        addSwitchRow(ctrl, "Steering Horizon", "touch_horizon", true);
+        addSwitchRow(ctrl, "Auto-Throttle", PREF_AUTO_THROTTLE, true);
+        addSwitchRow(ctrl, "Haptic Feedback", PREF_HAPTICS, true);
+        addSwitchRow(ctrl, "Smart Auto-Clutch", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
+        addSwitchRow(ctrl, "Center Gesture Shift", PinyonShiftActivity.PREF_GESTURE_SHIFT, true);
+        addSwitchRow(ctrl, "HUD Touch Hitboxes", PinyonShiftActivity.PREF_HUD_HITBOXES, true);
+        addSwitchRow(ctrl, "Menu Mode Auto-Switch", PinyonShiftActivity.PREF_MENU_MODE_AUTO, true);
 
         LinearLayout gm = addSection(content, "Game Features");
-        addSwitchRow(gm, "Skip Opening Movies", "Skip intro splash videos", PREF_SKIP_MOVIES, true);
-        addSwitchRow(gm, "1000 Club Offline", "Local challenge evaluation", PREF_CLUB_OFFLINE, true);
-        addSwitchRow(gm, "Unlock Treasure Map", "Show all barn finds & signs", PREF_TREASURE_MAP, true);
-        addSwitchRow(gm, "Auto-Boot Game", "Launch directly on app start", PREF_AUTO_LAUNCH, false);
+        addSwitchRow(gm, "Skip Opening Movies", PREF_SKIP_MOVIES, true);
+        addSwitchRow(gm, "1000 Club Offline", PREF_CLUB_OFFLINE, true);
+        addSwitchRow(gm, "Unlock Treasure Map", PREF_TREASURE_MAP, true);
+        addSwitchRow(gm, "Auto-Boot Game", PREF_AUTO_LAUNCH, false);
 
         return wrapScrollable(content);
     }
 
     private TextView addSettingSelector(LinearLayout parent, String title, String tag) {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(ripple(COLOR_SURFACE, 0x28FFFFFF, 10));
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setBackground(ripple(COLOR_SURFACE, 0x28FFFFFF, 10)); row.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams l = lp(MP, WC);
-        l.topMargin = dp(6);
-        row.setLayoutParams(l);
+        l.topMargin = dp(6); row.setLayoutParams(l);
 
-        LinearLayout tg = new LinearLayout(this);
-        tg.setOrientation(LinearLayout.VERTICAL);
-        tg.addView(label(title, 13, Color.WHITE, true));
-        TextView vv = label("", 11, colorAccent, false);
-        tg.addView(vv);
-        row.addView(tg, lpWeight1());
-
-        row.addView(label("›", 16, COLOR_TEXT_DIM, false));
-        row.setTag(tag);
-        row.setOnClickListener(this);
-        parent.addView(row);
+        LinearLayout tg = new LinearLayout(this); tg.setOrientation(LinearLayout.VERTICAL); tg.addView(label(title, 13, Color.WHITE, true));
+        TextView vv = label("", 11, colorAccent, false); tg.addView(vv); row.addView(tg, lpWeight1()); row.addView(label("›", 16, COLOR_TEXT_DIM, false)); row.setTag(tag); row.setOnClickListener(this); parent.addView(row);
         return vv;
     }
 
@@ -650,24 +540,9 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         sw.setTrackTintList(new ColorStateList(states, new int[]{(colorAccent & 0x00FFFFFF) | 0x80000000, 0x3CFFFFFF}));
     }
 
-    private void addSwitchRow(LinearLayout parent, String title, String sub, String key, boolean def) {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(4), 0, dp(6));
-
-        LinearLayout tg = new LinearLayout(this);
-        tg.setOrientation(LinearLayout.VERTICAL);
-        tg.addView(label(title, 13, Color.WHITE, false));
-        tg.addView(label(sub, 11, COLOR_TEXT_DIM, false));
-        row.addView(tg, lpWeight1());
-
-        Switch sw = new Switch(this);
-        sw.setChecked(prefs.getBoolean(key, def));
-        sw.setTag(key);
-        tintSwitch(sw);
-        sw.setOnCheckedChangeListener(this);
-        row.addView(sw);
-        parent.addView(row);
+    private void addSwitchRow(LinearLayout parent, String title, String key, boolean def) {
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(0, dp(4), 0, dp(6)); row.addView(label(title, 13, Color.WHITE, true), lpWeight1());
+        Switch sw = new Switch(this); tintSwitch(sw); sw.setChecked(prefs.getBoolean(key, def)); sw.setTag(key); sw.setOnCheckedChangeListener(this); row.addView(sw); parent.addView(row);
     }
 
     @Override
@@ -689,8 +564,15 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         }
     }
 
-    private void showDialog(String title, String[] items, int cur, DialogInterface.OnClickListener ok) {
-        new AlertDialog.Builder(this).setTitle(title).setSingleChoiceItems(items, cur, ok).setNegativeButton("Cancel", null).show();
+    private void showDialog(String title, final String[] items, final int cur, final DialogInterface.OnClickListener ok) {
+        LinearLayout c = new LinearLayout(this); final Dialog d = createCardDialog(title, c);
+        for (int i = 0; i < items.length; i++) {
+            final int idx = i;
+            Button b = new Button(this); b.setText(items[i]); b.setTextSize(13); b.setAllCaps(false); b.setTextColor(i == cur ? 0xFF0B1F11 : Color.WHITE); b.setBackground(ripple(i == cur ? colorAccent : 0xFF212923, Color.argb(40, 255, 255, 255), 10)); b.setPadding(dp(12), dp(8), dp(12), dp(8));
+            LinearLayout.LayoutParams lp = lp(MP, WC); lp.topMargin = dp(4); b.setLayoutParams(lp); b.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); ok.onClick(d, idx); } }); c.addView(b);
+        }
+        Button cancel = createM3Button("Cancel", false);
+        LinearLayout.LayoutParams clp = lp(MP, WC); clp.topMargin = dp(10); cancel.setLayoutParams(clp); cancel.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); } }); c.addView(cancel); d.setContentView(c); d.show();
     }
 
     private void showChoiceDialog(String title, final String prefKey, final String[] items, final String[] values) {
@@ -768,66 +650,42 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     }
 
     private View buildContentTab() {
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout game = addSection(content, "Game Data Files");
-        folderPathText = label("", 11, COLOR_TEXT_DIM, false);
-        folderPathText.setPadding(0, dp(4), 0, dp(8));
-        game.addView(folderPathText);
+        folderPathText = label("", 11, COLOR_TEXT_DIM, false); folderPathText.setPadding(0, dp(4), 0, dp(8)); game.addView(folderPathText);
 
-        Button importFolderBtn = createM3Button("Select Game Folder (default.xex)", "ic_folder_open", false);
-        importFolderBtn.setTag("import_folder");
-        importFolderBtn.setOnClickListener(this);
-        game.addView(importFolderBtn);
+        Button importFolderBtn = createM3Button("Select Game Folder (default.xex)", "ic_folder_open", false); importFolderBtn.setTag("import_folder"); importFolderBtn.setOnClickListener(this); game.addView(importFolderBtn);
 
         LinearLayout wifi = addSection(content, "Sync from PC (Wi-Fi)");
         Switch scanSw = new Switch(this);
-        scanSw.setText("Scan for PC on Wi-Fi");
-        scanSw.setTextColor(Color.WHITE);
-        scanSw.setTextSize(13);
-        tintSwitch(scanSw);
-        scanSw.setTag("wifi_scan");
-        scanSw.setOnCheckedChangeListener(this);
-        wifi.addView(scanSw);
+        scanSw.setText("Scan for PC on Wi-Fi"); scanSw.setTextColor(Color.WHITE); scanSw.setTextSize(13);
+        tintSwitch(scanSw); scanSw.setTag("wifi_scan");
+        scanSw.setOnCheckedChangeListener(this); wifi.addView(scanSw);
 
-        discoveryText = label("Wi-Fi discovery idle.", 11, COLOR_MUTED, false);
-        discoveryText.setPadding(0, dp(4), 0, dp(8));
-        wifi.addView(discoveryText);
+        discoveryText = label("Wi-Fi discovery idle.", 11, COLOR_MUTED, false); discoveryText.setPadding(0, dp(4), 0, dp(8)); wifi.addView(discoveryText);
 
-        addressField = createField("PC Address (e.g. 192.168.1.50:47615)", InputType.TYPE_CLASS_TEXT);
-        wifi.addView(addressField);
+        addressField = createField("PC Address (e.g. 192.168.1.50:47615)", InputType.TYPE_CLASS_TEXT); wifi.addView(addressField);
 
         codeField = createField("6-digit Pair Code from PC screen", InputType.TYPE_CLASS_NUMBER);
         codeField.setFilters(new InputFilter[]{new InputFilter.LengthFilter(6)});
         LinearLayout.LayoutParams clp = lp(MP, WC);
-        clp.setMargins(0, dp(6), 0, dp(10));
-        codeField.setLayoutParams(clp);
-        wifi.addView(codeField);
+        clp.setMargins(0, dp(6), 0, dp(10)); codeField.setLayoutParams(clp); wifi.addView(codeField);
 
-        groupsBox = new LinearLayout(this);
-        groupsBox.setOrientation(LinearLayout.VERTICAL);
-        wifi.addView(groupsBox);
+        groupsBox = new LinearLayout(this); groupsBox.setOrientation(LinearLayout.VERTICAL); wifi.addView(groupsBox);
 
-        copyButton = createM3Button("Connect & Transfer", "ic_sync", true);
-        copyButton.setOnClickListener(this);
-        wifi.addView(copyButton);
+        copyButton = createM3Button("Connect & Transfer", "ic_sync", true); copyButton.setOnClickListener(this); wifi.addView(copyButton);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
         progress.setVisibility(View.GONE);
         LinearLayout.LayoutParams plp = lp(MP, dp(8));
-        plp.setMargins(0, dp(12), 0, dp(4));
-        progress.setLayoutParams(plp);
-        wifi.addView(progress);
+        plp.setMargins(0, dp(12), 0, dp(4)); progress.setLayoutParams(plp); wifi.addView(progress);
 
-        progressText = label("", 11, COLOR_TEXT_DIM, false);
-        wifi.addView(progressText);
+        progressText = label("", 11, COLOR_TEXT_DIM, false); wifi.addView(progressText);
 
         LinearLayout backupCard = addSection(content, "Save Backups");
-        backupListContainer = new LinearLayout(this);
-        backupListContainer.setOrientation(LinearLayout.VERTICAL);
-        backupCard.addView(backupListContainer);
+        backupListContainer = new LinearLayout(this); backupListContainer.setOrientation(LinearLayout.VERTICAL); backupCard.addView(backupListContainer);
 
         return wrapScrollable(content);
     }
@@ -844,21 +702,11 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         Arrays.sort(stamps, Collections.reverseOrder());
         for (final File s : stamps) {
             if (!s.isDirectory()) continue;
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(4), 0, dp(4));
-
-            row.addView(label(s.getName(), 12, Color.WHITE, false), lpWeight1());
+            LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(0, dp(4), 0, dp(4)); row.addView(label(s.getName(), 12, Color.WHITE, false), lpWeight1());
 
             Button rst = new Button(this);
-            rst.setText("Restore");
-            rst.setTextSize(11);
-            rst.setTextColor(colorAccent);
-            rst.setBackgroundColor(Color.TRANSPARENT);
-            rst.setTag(s);
-            rst.setOnClickListener(this);
-            row.addView(rst);
-            backupListContainer.addView(row);
+            rst.setText("Restore"); rst.setTextSize(11); rst.setTextColor(colorAccent);
+            rst.setBackgroundColor(Color.TRANSPARENT); rst.setTag(s); rst.setOnClickListener(this); row.addView(rst); backupListContainer.addView(row);
         }
     }
 
@@ -881,10 +729,8 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         boolean ready = gameReady();
         if (gameTitleText != null) gameTitleText.setText(ready ? "Forza Horizon (2012)" : "Set up your copy");
         if (statusPill != null && statusDot != null && gameStatusText != null) {
-            statusPill.setBackground(cardBg(ready ? 0xFF14281E : 0xFF2A1618, 6));
-            statusDot.setBackground(cardBg(ready ? 0xFF5CE68B : 0xFFFF6B6B, 4));
-            gameStatusText.setText(ready ? "Game Files Verified · Ready to Drive" : "Game Files Missing (default.xex)");
-            gameStatusText.setTextColor(ready ? 0xFF5CE68B : 0xFFFF6B6B);
+            statusPill.setBackground(cardBg(ready ? 0xFF14281E : 0xFF2A1618, 6)); statusDot.setBackground(cardBg(ready ? 0xFF5CE68B : 0xFFFF6B6B, 4));
+            gameStatusText.setText(ready ? "Game Files Verified · Ready to Drive" : "Game Files Missing (default.xex)"); gameStatusText.setTextColor(ready ? 0xFF5CE68B : 0xFFFF6B6B);
         }
         if (launchButton != null) {
             launchText.setText(ready ? "Play" : "IMPORT GAME FILES");
@@ -1295,11 +1141,9 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             for (int i = 0; i < groups.length(); i++) {
                 JSONObject g = groups.getJSONObject(i);
                 CheckBox cb = new CheckBox(this);
-                cb.setText(g.getString("name") + " (" + size(g.getLong("bytes")) + ")");
-                cb.setTextColor(Color.WHITE);
+                cb.setText(g.getString("name") + " (" + size(g.getLong("bytes")) + ")"); cb.setTextColor(Color.WHITE);
                 cb.setChecked(true);
-                groupChecks.put(g.getString("id"), cb);
-                groupsBox.addView(cb);
+                groupChecks.put(g.getString("id"), cb); groupsBox.addView(cb);
             }
             copyButton.setText("Start Wi-Fi Transfer");
             progressText.setText("Ready to sync selected files from PC.");

@@ -964,6 +964,9 @@ void PinyonShiftApp::OnPostSetup() {
                                             [this] { ApplyMapView(map_view_open_); UpdateHorPlus(); });
                                       }
                                     });
+  if (REXCVAR_GET(pinyon_shift_hor_plus)) {
+    rex::cvar::SetFlagByName("present_letterbox", "false");
+  }
   UpdateHorPlus();
   PinyonShiftSetMapViewCallback([this](bool open) {
     if (window()) {

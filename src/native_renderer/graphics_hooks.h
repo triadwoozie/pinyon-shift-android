@@ -4,3 +4,8 @@
 // called from the mid-asm hooks in config/rexglue/analysis. They feed the
 // critical-path trace and the source-frame counter. The GPU fence wait hook
 // blocks the title's fence polling until the command processor writes.
+
+namespace pinyon_shift::native_renderer {
+void SetMobileTargetFps(int fps);
+float GetMobileFrameTimeMs();
+}
