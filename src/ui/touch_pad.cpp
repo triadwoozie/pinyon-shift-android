@@ -224,12 +224,14 @@ bool TouchPad::Visible() const {
          std::chrono::steady_clock::now() - last_touch_ < kVisibleAfterTouch;
 }
 
-void TouchPad::SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask) {
+void TouchPad::SetMobileOverrides(float steer_x, float throttle, float brake, uint16_t button_mask, float look_x, float look_y) {
   std::lock_guard lock(mutex_);
-  mobile_override_active_ = (steer_x != 0.0f || throttle != 0.0f || brake != 0.0f || button_mask != 0);
+  mobile_override_active_ = (steer_x != 0.0f || throttle != 0.0f || brake != 0.0f || button_mask != 0 || look_x != 0.0f || look_y != 0.0f);
   mobile_steer_x_ = steer_x;
   mobile_throttle_ = throttle;
   mobile_brake_ = brake;
+  mobile_look_x_ = look_x;
+  mobile_look_y_ = look_y;
   mobile_buttons_ = button_mask;
   if (mobile_override_active_) {
     last_touch_ = std::chrono::steady_clock::now();
@@ -246,6 +248,8 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
     pad.thumb_lx = int16_t(std::clamp(mobile_steer_x_, -1.0f, 1.0f) * 32767.0f);
     pad.right_trigger = uint8_t(std::clamp(mobile_throttle_, 0.0f, 1.0f) * 255.0f);
     pad.left_trigger = uint8_t(std::clamp(mobile_brake_, 0.0f, 1.0f) * 255.0f);
+    pad.thumb_rx = int16_t(std::clamp(mobile_look_x_, -1.0f, 1.0f) * 32767.0f);
+    pad.thumb_ry = int16_t(std::clamp(mobile_look_y_, -1.0f, 1.0f) * 32767.0f);
     pad.buttons = mobile_buttons_;
     return pad;
   }
@@ -344,9 +348,9 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
 
 extern "C" JNIEXPORT void JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSetMobileOverrides(
-    JNIEnv*, jclass, jfloat steer_x, jfloat throttle, jfloat brake, jint button_mask) {
+    JNIEnv*, jclass, jfloat steer_x, jfloat throttle, jfloat brake, jint button_mask, jfloat look_x, jfloat look_y) {
   pinyon_shift::ui::TouchPad::Get().SetMobileOverrides(
-      float(steer_x), float(throttle), float(brake), uint16_t(button_mask));
+      float(steer_x), float(throttle), float(brake), uint16_t(button_mask), float(look_x), float(look_y));
 }
 
 extern "C" JNIEXPORT void JNICALL

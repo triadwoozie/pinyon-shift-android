@@ -581,9 +581,9 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         LinearLayout mobile = createCard(content, 16);
         mobile.addView(label("Mobile Engine Optimizations", 14, Color.WHITE, true));
-        addSwitchRow(mobile, "TBDR Tile Passes", "Preserve on-chip tile memory (reduces thermals)", PREF_TBDR_TILES, true);
+        addSwitchRow(mobile, "TBDR Tile Passes", "Preserve on-chip tile memory", PREF_TBDR_TILES, true);
         addSwitchRow(mobile, "Thermal Frame Pacer", "Auto-throttle target FPS at >= 42°C", PREF_THERMAL_PACER, true);
-        addSwitchRow(mobile, "No Driver Preamble", "Skip redundant command buffer preambles", PREF_NO_PREAMBLE, true);
+        addSwitchRow(mobile, "No Driver Preamble", "Skip command buffer preambles", PREF_NO_PREAMBLE, true);
         addSwitchRow(mobile, "GPU Turbo Boost", "Aggressive GPU power governor", PREF_GPU_TURBO, false);
 
         LinearLayout ctrl = createCard(content, 16);
@@ -593,8 +593,17 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                     @Override
                     public void onClick(View v) { showControlDialog(); }
                 });
-        addSwitchRow(ctrl, "Auto-Throttle", "Automatic acceleration (pedal zones brake)", PREF_AUTO_THROTTLE, false);
-        addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts, handbrake and pedals", PREF_HAPTICS, true);
+        addSettingSelector(ctrl, "Touch Controls Guide", "View 4-Layer Gesture Map",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) { PinyonShiftActivity.showTouchGuide(SetupActivity.this); }
+                });
+        addSwitchRow(ctrl, "Auto-Throttle", "Auto acceleration (zones brake)", PREF_AUTO_THROTTLE, false);
+        addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts & pedals", PREF_HAPTICS, true);
+        addSwitchRow(ctrl, "Smart Auto-Clutch", "Auto-blip LB on shifts", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
+        addSwitchRow(ctrl, "Center Gesture Shift", "Flick up/down in center to shift", PinyonShiftActivity.PREF_GESTURE_SHIFT, true);
+        addSwitchRow(ctrl, "HUD Touch Hitboxes", "Minimap map & wristband pause", PinyonShiftActivity.PREF_HUD_HITBOXES, true);
+        addSwitchRow(ctrl, "Menu Mode Auto-Switch", "Swipes = LB/RB tabs in menus", PinyonShiftActivity.PREF_MENU_MODE_AUTO, true);
 
         LinearLayout game = createCard(content, 16);
         game.addView(label("Game Features", 14, Color.WHITE, true));
@@ -680,15 +689,17 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 prefs.getString(PREF_ASPECT_MODE, "hor_plus"));
     }
 
-    private void showResDialog() {
-        final String[] res = {"1x · 720p Native (1280x720) [Best battery]", "1.5x · 1080p (1920x1080)", "2x · 1440p (2560x1440) [Quad HD]"};
-        int cur = prefs.getInt(PREF_RES_SCALE, 1) == 2 ? 2 : 0;
+    private void showIntChoiceDialog(String title, final String prefKey, final String[] items, final int[] values, int currentVal, final boolean setVsync) {
+        int cur = 0;
+        for (int i = 0; i < values.length; i++) if (values[i] == currentVal) cur = i;
         new AlertDialog.Builder(this)
-                .setTitle("Resolution Scaling")
-                .setSingleChoiceItems(res, cur, new DialogInterface.OnClickListener() {
+                .setTitle(title)
+                .setSingleChoiceItems(items, cur, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
-                        prefs.edit().putInt(PREF_RES_SCALE, w == 2 ? 2 : 1).apply();
+                        SharedPreferences.Editor ed = prefs.edit().putInt(prefKey, values[w]);
+                        if (setVsync) ed.putBoolean(PREF_VSYNC, values[w] != 0);
+                        ed.apply();
                         d.dismiss();
                         refreshSettingsTab();
                     }
@@ -697,29 +708,21 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 .show();
     }
 
+    private void showResDialog() {
+        showIntChoiceDialog("Resolution Scaling", PREF_RES_SCALE,
+                new String[]{"1x · 720p Native", "1.5x · 1080p", "2x · 1440p"},
+                new int[]{1, 2, 2}, prefs.getInt(PREF_RES_SCALE, 1), false);
+    }
+
     private void showFpsDialog() {
-        final String[] f = {"60 FPS (VSync)", "45 FPS (Smooth)", "40 FPS (120Hz 1/3)", "30 FPS (Battery saver)", "120 FPS (High Refresh)", "Unlocked"};
-        final int[] caps = {60, 45, 40, 30, 120, 0};
-        int cap = prefs.getInt(PREF_FPS_CAP, 60);
-        int cur = 0;
-        for (int i = 0; i < caps.length; i++) if (caps[i] == cap) cur = i;
-        new AlertDialog.Builder(this)
-                .setTitle("Target Framerate")
-                .setSingleChoiceItems(f, cur, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        prefs.edit().putInt(PREF_FPS_CAP, caps[w]).putBoolean(PREF_VSYNC, caps[w] != 0).apply();
-                        d.dismiss();
-                        refreshSettingsTab();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        showIntChoiceDialog("Target Framerate", PREF_FPS_CAP,
+                new String[]{"60 FPS (VSync)", "45 FPS", "40 FPS", "30 FPS", "120 FPS", "Unlocked"},
+                new int[]{60, 45, 40, 30, 120, 0}, prefs.getInt(PREF_FPS_CAP, 60), true);
     }
 
     private void showPresetDialog() {
         showChoiceDialog("Graphics Preset", PREF_GRAPHICS_PRESET,
-                new String[]{"Potato (Max FPS · Drops reflections/shadows)", "Balanced (Standard Horizon visuals)", "Ultra (Full reflections + shadows)"},
+                new String[]{"Potato (Max FPS · Drops shadows)", "Balanced (Standard Horizon visuals)", "Ultra (Full reflections + shadows)"},
                 new String[]{"potato", "balanced", "ultra"},
                 prefs.getString(PREF_GRAPHICS_PRESET, "balanced"));
     }
@@ -788,7 +791,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         LinearLayout wifi = createCard(content, 16);
         wifi.addView(label("Sync from PC (Wi-Fi)", 14, Color.WHITE, true));
 
-        discoveryText = label("Looking for PC launcher on local Wi-Fi...", 11, COLOR_MUTED, false);
+        discoveryText = label("Searching for PC on local Wi-Fi...", 11, COLOR_MUTED, false);
         discoveryText.setPadding(0, dp(4), 0, dp(8));
         wifi.addView(discoveryText);
 
