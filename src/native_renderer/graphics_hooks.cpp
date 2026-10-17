@@ -170,12 +170,7 @@ void KeepShadowsOff(rex::memory::Memory* memory) {
 void ApplyRenderSettings() {
   auto* memory = rex::system::kernel_state()->memory();
   std::lock_guard<std::mutex> lock(render_scenarios_mutex);
-  float rate = float(REXCVAR_GET(pinyon_shift_fh1_env_map_rate));
-  if (REXCVAR_GET(pinyon_shift_mobile_perf_mode) && rate > 0.0f) {
-    // Temporal cubemap face interleaving: slice updates to 1 face per frame (1/6th rate),
-    // eliminating 6-face redraw spikes while preserving dynamic reflections.
-    rate = std::min(rate, 1.0f / 6.0f);
-  }
+  const float rate = float(REXCVAR_GET(pinyon_shift_fh1_env_map_rate));
   if (rate != applied_env_rate) {
     for (const RenderScenario& scenario : render_scenarios) SetEnvMapRate(memory, scenario, rate);
     applied_env_rate = rate;

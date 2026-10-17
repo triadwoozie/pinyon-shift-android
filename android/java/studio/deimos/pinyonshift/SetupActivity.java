@@ -394,7 +394,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         String tStr = bTemp > 0 ? String.format(Locale.ROOT, " · %.1f°C", bTemp / 10.0f) : "";
         addInfoCard(content, "Hardware & Platform", (mfg != null ? mfg + " " : "") + Build.MODEL + " · Android " + Build.VERSION.RELEASE + tStr,
                 adreno != null ? "Adreno " + adreno : "Vulkan GPU", colorAccent, 0xFF1A241D);
-        addInfoCard(content, "Storage & Environment", "Free Storage: " + size(base.getUsableSpace()), "Save Protected ✓", COLOR_SUCCESS, 0xFF14281E);
+        addInfoCard(content, "Storage & Environment", "Free Storage: " + size(base.getUsableSpace()), "Save Protected", COLOR_SUCCESS, 0xFF14281E);
 
         return wrapScrollable(content);
     }
@@ -442,11 +442,11 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         LinearLayout.LayoutParams l = lp(MP, WC);
         l.bottomMargin = dp(8); row.setLayoutParams(l);
 
-        LinearLayout textGroup = new LinearLayout(this); textGroup.setOrientation(LinearLayout.VERTICAL); textGroup.addView(label(name + (isSelected ? "  ✓" : ""), 13, isSelected ? colorAccent : COLOR_FOG, true)); textGroup.addView(label(desc, 11, COLOR_TEXT_DIM, false)); row.addView(textGroup, lpWeight1()); row.setTag("drv:" + id); row.setOnClickListener(this);
+        LinearLayout textGroup = new LinearLayout(this); textGroup.setOrientation(LinearLayout.VERTICAL); textGroup.addView(label(name + (isSelected ? "  (Active)" : ""), 13, isSelected ? colorAccent : COLOR_FOG, true)); textGroup.addView(label(desc, 11, COLOR_TEXT_DIM, false)); row.addView(textGroup, lpWeight1()); row.setTag("drv:" + id); row.setOnClickListener(this);
 
         if (!"auto".equals(id) && !"turnip-gen8-v37".equals(id)) {
             Button del = new Button(this);
-            del.setText("✕"); del.setTextColor(COLOR_RED);
+            del.setText("X"); del.setTextColor(COLOR_RED);
             del.setBackgroundColor(Color.TRANSPARENT); del.setTag("del:" + id); del.setOnClickListener(this); row.addView(del);
         }
 
@@ -762,7 +762,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
 
             File xex = new File(base, "game/base/default.xex");
             boolean isRetail = xex.isFile() && (xex.length() == PinyonShiftActivity.MS_2505_RETAIL_XEX_SIZE);
-            String dataStr = !xex.isFile() ? "Missing" : isRetail ? "MS-2505 Verified ✓" : size(xex.length());
+            String dataStr = !xex.isFile() ? "Missing" : isRetail ? "MS-2505 Verified" : size(xex.length());
 
             addBadgeRow("Preset", presetStr, "preset", "Display Scaling", scalingStr, "scaling");
             addBadgeRow("Framerate", fpsStr, "fps", "Driver", driverStr, "driver");

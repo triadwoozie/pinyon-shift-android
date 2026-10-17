@@ -129,25 +129,21 @@ your PC from your own disc and installed on your own device. It needs Android
 8 GB of memory.
 
 <p align="center">
-  <img src=".github/android-ingame-drive.png" alt="Pinyon Shift in-game Drive Mode on Android with touch steering, rewind and e-brake" width="800">
-</p>
-
-### Key mobile features
-
-- **Dynamic in-game touch overlay & gesture pipeline:** Context-aware switching between **Drive Mode** (multi-touch steering zone, auto/manual throttle, dedicated `⏪ REWIND` and `(A) E-BRAKE` buttons, and steering horizon indicator) and **Menu Mode** (tactile D-Pad and standard face buttons for clean title screen and pause menu navigation without driving HUD overlap).
-- **FH1 Live Tuning drawer:** Slide-out in-game performance drawer allowing live changes to target frame rates (`30 FPS`, `45 FPS`, `60 FPS`, `120 FPS`), graphics presets (`Potato`, `Balanced`, `Ultra`), FSR 1.0 upscaling, and touch opacity without restarting the game.
-- **Bento Grid launcher & GPU driver manager:** Material 3 launcher featuring quick-launch profiles, custom console card dialogs, and an integrated Vulkan GPU Driver Manager supporting custom Mesa Turnip driver packages.
-
-<p align="center">
   <img src=".github/android-launcher-bento.png" alt="Android launcher Bento Grid launch profile" width="390">
   &nbsp;
   <img src=".github/android-launcher-drivers.png" alt="Android launcher Vulkan GPU Driver Manager" width="390">
 </p>
 
+### Key mobile features
+
+- **Bento Grid launcher & GPU driver manager:** Material 3 launcher featuring quick-launch profiles, custom console card dialogs, and an integrated Vulkan GPU Driver Manager supporting custom Mesa Turnip driver packages.
+- **Dynamic in-game touch overlay & gesture pipeline:** Context-aware switching between **Drive Mode** (multi-touch steering zone, auto/manual throttle, dedicated `<<` Rewind and `(P)` Handbrake buttons, and steering horizon indicator) and **Menu Mode** (tactile D-Pad and standard face buttons for clean title screen and pause menu navigation without driving HUD overlap).
+- **FH1 Live Tuning drawer:** Slide-out in-game performance drawer allowing live changes to target frame rates (`30 FPS`, `45 FPS`, `60 FPS`, `120 FPS`), graphics presets (`Potato`, `Balanced`, `Ultra`), FSR 1.0 upscaling, Hor+ Ultrawide / 16:9 Fit, and touch opacity without restarting the game.
+
 <p align="center">
-  <img src=".github/android-ingame-menu.png" alt="In-game Menu Mode with D-Pad and face buttons" width="390">
+  <img src=".github/android-launcher-settings.png" alt="Android launcher graphics and performance settings" width="390">
   &nbsp;
-  <img src=".github/android-ingame-tuning.png" alt="In-game Live Tuning drawer" width="390">
+  <img src=".github/android-dialog-card.png" alt="Android console card dialogs" width="390">
 </p>
 
 1. Once the game plays on the PC, choose **Android** in the launcher, then

@@ -940,10 +940,16 @@ void PinyonShiftApp::UpdateHorPlus() {
 
 void PinyonShiftApp::ApplyMapView(bool open) {
   map_view_open_ = open;
+#if defined(__ANDROID__)
+  if (REXCVAR_GET(pinyon_shift_hor_plus)) {
+    rex::cvar::SetFlagByName("present_letterbox", "false");
+  }
+#else
   if (!REXCVAR_GET(pinyon_shift_hor_plus)) return;
   // Wider View stretches the widened gameplay frame over the window; the
   // title's 16:9 screens (menus, Autoshow, map) are letterboxed (#363).
   rex::cvar::SetFlagByName("present_letterbox", open ? "true" : "false");
+#endif
   UpdateHorPlus();
   pinyon_shift::diagnostics::RecordEvent("display.hor_plus_view", {{"wide", open ? "0" : "1"}});
 }

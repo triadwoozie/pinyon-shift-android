@@ -418,6 +418,35 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAction(
       std::string env = fmt::format("{:.2f}", std::abs(value));
       rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", env.c_str());
     }
+  } else if (actionId == 4) {
+    bool hor_plus = (value > 0.5f);
+    rex::cvar::SetFlagByName("pinyon_shift_hor_plus", hor_plus ? "true" : "false");
+    rex::cvar::SetFlagByName("present_letterbox", hor_plus ? "false" : "true");
+    if (auto* app = PinyonShiftApp::Instance()) {
+      app->UpdateHorPlus();
+    }
+  } else if (actionId == 5) {
+    int u = int(value);
+    const char* eff = (u == 1) ? "fsr" : (u == 2 ? "cas" : "bilinear");
+    rex::cvar::SetFlagByName("present_effect", eff);
+  } else if (actionId == 6) {
+    int p = int(value);
+    if (p == 0) {
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_shadows", "false");
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", "0.25");
+      rex::cvar::SetFlagByName("present_effect", "bilinear");
+    } else if (p == 2) {
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_shadows", "true");
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", "1.0");
+      rex::cvar::SetFlagByName("present_effect", "cas");
+    } else {
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_shadows", "false");
+      rex::cvar::SetFlagByName("pinyon_shift_fh1_env_map_rate", "0.5");
+      rex::cvar::SetFlagByName("present_effect", "fsr");
+    }
+  } else if (actionId == 7) {
+    bool vs = (value > 0.5f);
+    rex::cvar::SetFlagByName("vsync", vs ? "true" : "false");
   }
 }
 

@@ -33,6 +33,8 @@ class PinyonShiftApp final : public rex::ReXApp {
   static PinyonShiftApp* Instance();
   void TriggerPhoto();
   void ToggleGameMenu();
+  // NP-4.4 Hor+: the title's aspect for the window's (pinyon_shift_hor_plus).
+  void UpdateHorPlus();
 
  protected:
   void OnConfigurePaths(rex::PathConfig& paths) override;
@@ -69,8 +71,6 @@ class PinyonShiftApp final : public rex::ReXApp {
   // Creates the host UI and installs its XAM dialogs once presentation is
   // ready; UI thread.
   bool EnsureHostUi();
-  // NP-4.4 Hor+: the title's aspect for the window's (pinyon_shift_hor_plus).
-  void UpdateHorPlus();
   // Under Hor+, present frames without the gameplay view 16:9 letterboxed.
   void ApplyMapView(bool open);
   bool map_view_open_ = false;
