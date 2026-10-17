@@ -16,40 +16,35 @@ A developer alpha. The Android build is the same recompiled game, cross-compiled
 - An arm64 device with Android 13 or later and a Vulkan 1.3 driver, about 8 GB free, on the same network as the PC.
 - Tuned for Snapdragon 8 Gen 2 or newer (Adreno 740 and up).
 
-## Install over Wi-Fi
+## Standalone Setup on Device
 
-1. In the launcher, choose **Android**, then **Build APK**. The first build takes 20 to 60 minutes.
-2. Choose **Share on Wi-Fi**. Scan the QR code with the device's camera, download the app and open it. Android asks once to allow the browser to install apps; Windows asks once to allow the launcher on private networks.
-3. The app finds the PC on the local network and asks for the six-digit code the launcher shows. It then lists what the PC offers: the game files (7.2 GB, required), title update v4, imported DLC and your PC save. Then **Play**.
+Pinyon Shift on Android runs standalone without requiring a PC for initial setup:
 
-No USB debugging is needed. Your PC save is never copied unless you select it, and the device's own save is backed up first. An interrupted copy resumes where it stopped. To copy more later, long-press the app icon and choose **Get files from PC**.
+1. Copy your extracted game folder (holding `default.xex`) to your device's internal storage or an SD card.
+2. Open Pinyon Shift. Tap **Choose Extracted Game Folder** to select your folder with Android's system document picker.
+3. The app verifies `default.xex` and copies the assets directly into its private storage.
+4. Tap **Launch Game**.
 
-The launcher serves only while sharing is on, only to private network addresses, and only the files it listed. The pairing code changes each time sharing starts, and ten wrong codes stop the share. Nothing goes from the device to the PC.
+Alternatively, you can transfer files over Wi-Fi from the PC launcher or over USB with adb (`python tools/pinyon.py android push-data`).
 
-## Install over USB
+## Display Scaling and Widescreen (Hor+)
 
-With USB debugging on, **Install over USB** in the launcher does the same with adb. From a repository checkout:
+Modern phones and handhelds feature wide aspect ratios (such as 20:9 or 19.5:9 on Galaxy, Xperia, and Odin devices). In **Settings > Display Scaling Mode**:
 
-```bash
-python tools/pinyon.py android build
-python tools/pinyon.py android install
-python tools/pinyon.py android push-data
-```
+- **Widescreen (Hor+)** *(Default)*: Widens the in-engine camera horizontal field of view to match your screen's exact aspect ratio without stretching the 3D scene. HUD elements maintain proper circular proportions.
+- **Fit (16:9 Letterbox)**: Preserves the original Xbox 360 16:9 aspect ratio with side pillarboxes.
+- **Stretch**: Fills the entire display by stretching the 16:9 frame.
+- **Crop**: Zooms into the image to fill the screen without distortion.
 
-`push-data` copies the extracted game into `Android/data/studio.deimos.pinyonshift/files/game/base` and resumes if interrupted. Saves, settings, logs and mods live beside it in `files/state`, laid out as on the PC.
+## Drivers and Performance
 
-## Presets and drivers
+The **Drivers** tab in the mobile launcher manages Vulkan drivers before starting the game:
 
-**SETTINGS > GRAPHICS > GRAPHICS PRESET** has two choices:
-
-| Preset | MSAA | Sun shadows | Rate |
-| --- | --- | --- | ---: |
-| SMOOTH 60 | 2x | Off | 60 |
-| QUALITY 30 | 4x | On | 30 |
-
-Both draw the game's three predicated tiles in one pass and redraw the reflection map at a quarter of the game's rate.
-
-On Adreno 7xx and 8xx the bundled Mesa Turnip driver (Gen8 V37) is chosen automatically. It is much faster than the stock driver on the Adreno 740 and takes about a fifth less GPU time on the Adreno 830. Other GPUs use the system driver. **SETTINGS > GRAPHICS > GPU DRIVER** picks the driver for the next start. **IMPORT DRIVER (.ZIP)** adds an adrenotools package, including Qualcomm driver packages; the log's `Vulkan device` line shows which driver version runs.
+- **Auto**: Recommends the optimal tested driver for your GPU (Mesa Turnip Gen8 V37 for Adreno 6xx, 7xx, and 8xx).
+- **System Default**: Uses the vendor's pre-installed Vulkan driver.
+- **Import Driver (.zip)**: Unpacks any adrenotools or custom Turnip driver archive directly on device.
+- **GPU Turbo Clocks**: Locks Adreno GPU to peak frequency states during gameplay.
+- **No-Preamble Shaders**: Lowers draw call latency in Turnip.
 
 ## Measured devices
 

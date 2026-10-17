@@ -155,7 +155,7 @@ public class PinyonShiftActivity extends SDLActivity {
 
     // The Adreno GPU's model number ("740"), from the kernel driver, or from
     // the SoC where that is not readable; null when not an Adreno.
-    private static String adrenoModel() {
+    static String adrenoModel() {
         try (BufferedReader reader = new BufferedReader(
                 new FileReader("/sys/class/kgsl/kgsl-3d0/gpu_model"))) {
             String line = reader.readLine();
@@ -168,6 +168,8 @@ public class PinyonShiftActivity extends SDLActivity {
         }
         if (Build.VERSION.SDK_INT >= 31) {
             switch (Build.SOC_MODEL) {
+                case "SM8250": case "SM8250-AB": case "SM8250-AC": return "650";
+                case "SM8350": return "660";
                 case "SM8450": case "SM8475": return "730";
                 case "SM8550": case "QCS8550": return "740";
                 case "SM8635": return "735";
@@ -182,34 +184,34 @@ public class PinyonShiftActivity extends SDLActivity {
         return null;
     }
 
-    // Adreno 7xx and 8xx: Mesa Turnip Gen8 V37 (measured on the Adreno 740
-    // and 830 against the system driver, and on the 740 against newer Turnip
-    // builds). Others keep the system's.
-    private static String recommendedDriver(String adreno) {
-        return adreno.startsWith("7") || adreno.startsWith("8") ? "turnip-gen8-v37" : null;
+    // Adreno 6xx, 7xx and 8xx: Mesa Turnip Gen8 V37 (measured on the Adreno 650, 740
+    // and 830 against the system driver). Others keep the system's.
+    static String recommendedDriver(String adreno) {
+        if (adreno == null) return null;
+        return adreno.startsWith("6") || adreno.startsWith("7") || adreno.startsWith("8") ? "turnip-gen8-v37" : null;
     }
 
     // Copies each driver folder under the package's assets/drivers into
     // state/drivers, where a file is missing or differs in size.
-    private void installBundledDrivers() {
+    static void installBundledDrivers(android.content.res.AssetManager assets, File driversDir) {
         try {
-            String[] names = getAssets().list("drivers");
+            String[] names = assets.list("drivers");
             if (names == null) return;
             for (String name : names) {
-                String[] files = getAssets().list("drivers/" + name);
+                String[] files = assets.list("drivers/" + name);
                 if (files == null || files.length == 0) continue;
                 File folder = new File(driversDir, name);
                 folder.mkdirs();
                 for (String file : files) {
                     File target = new File(folder, file);
                     long size;
-                    try (InputStream in = getAssets().open("drivers/" + name + "/" + file)) {
+                    try (InputStream in = assets.open("drivers/" + name + "/" + file)) {
                         size = 0;
                         byte[] buffer = new byte[65536];
                         for (int read; (read = in.read(buffer)) > 0; ) size += read;
                     }
                     if (target.length() == size) continue;
-                    try (InputStream in = getAssets().open("drivers/" + name + "/" + file);
+                    try (InputStream in = assets.open("drivers/" + name + "/" + file);
                          OutputStream out = new FileOutputStream(target)) {
                         copy(in, out);
                     }
@@ -221,7 +223,11 @@ public class PinyonShiftActivity extends SDLActivity {
         }
     }
 
-    private static void copy(InputStream in, OutputStream out) throws IOException {
+    private void installBundledDrivers() {
+        installBundledDrivers(getAssets(), driversDir);
+    }
+
+    static void copy(InputStream in, OutputStream out) throws IOException {
         byte[] buffer = new byte[65536];
         for (int read; (read = in.read(buffer)) > 0; ) {
             out.write(buffer, 0, read);
@@ -278,9 +284,9 @@ public class PinyonShiftActivity extends SDLActivity {
 
     // Unpacks an adrenotools driver zip (meta.json and the driver .so, the
     // files at any depth) into state/drivers/<the zip's name>.
-    private String unpackDriver(Uri uri) throws IOException {
+    static String unpackDriver(android.content.ContentResolver resolver, File driversDir, Uri uri) throws IOException {
         String display = "driver";
-        try (Cursor cursor = getContentResolver().query(uri,
+        try (Cursor cursor = resolver.query(uri,
                 new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
                 display = cursor.getString(0);
@@ -294,7 +300,7 @@ public class PinyonShiftActivity extends SDLActivity {
         deleteTree(staging);
         staging.mkdirs();
         boolean library = false;
-        try (InputStream in = getContentResolver().openInputStream(uri);
+        try (InputStream in = resolver.openInputStream(uri);
              ZipInputStream zip = new ZipInputStream(in)) {
             for (ZipEntry entry; (entry = zip.getNextEntry()) != null; ) {
                 if (entry.isDirectory()) continue;
@@ -315,6 +321,10 @@ public class PinyonShiftActivity extends SDLActivity {
             throw new IOException("cannot create " + folder);
         }
         return name;
+    }
+
+    private String unpackDriver(Uri uri) throws IOException {
+        return unpackDriver(getContentResolver(), driversDir, uri);
     }
 
     private static void deleteTree(File file) {
