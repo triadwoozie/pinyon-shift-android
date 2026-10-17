@@ -646,6 +646,87 @@ public class PinyonShiftActivity extends SDLActivity {
         }
         items.addView(upRow);
 
+        // Live VSync
+        addHudSectionTitle(items, "Vertical Sync (VSync)");
+        final boolean vsyncOn = prefs.getBoolean("vsync", true);
+        Button vsyncBtn = createChipButton(vsyncOn ? "VSync: ENABLED" : "VSync: DISABLED", vsyncOn);
+        vsyncBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !prefs.getBoolean("vsync", true);
+                prefs.edit().putBoolean("vsync", next).apply();
+                try {
+                    nativeSetCVar("vsync", next ? "true" : "false");
+                } catch (UnsatisfiedLinkError ignored) {}
+                toast("VSync: " + (next ? "ENABLED" : "DISABLED"));
+                toggleQuickHud();
+            }
+        });
+        items.addView(vsyncBtn);
+
+        // Resolution Scaling
+        addHudSectionTitle(items, "Internal Resolution");
+        LinearLayout resRow = new LinearLayout(this);
+        resRow.setOrientation(LinearLayout.HORIZONTAL);
+        int[] resScales = {1, 2};
+        String[] resLabels = {"1x (720p)", "2x (1440p)"};
+        int curScale = prefs.getInt("res_scale", 1);
+        for (int i = 0; i < resScales.length; i++) {
+            final int s = resScales[i];
+            Button b = createChipButton(resLabels[i], s == curScale);
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    prefs.edit().putInt("res_scale", s).apply();
+                    try {
+                        nativeSetCVar("draw_resolution_scale_x", String.valueOf(s));
+                        nativeSetCVar("draw_resolution_scale_y", String.valueOf(s));
+                    } catch (UnsatisfiedLinkError ignored) {}
+                    toast("Resolution: " + s + "x");
+                    toggleQuickHud();
+                }
+            });
+            resRow.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        }
+        items.addView(resRow);
+
+        // Touch Controls Customization
+        addHudSectionTitle(items, "Touch Controls Customization");
+        LinearLayout opRow = new LinearLayout(this);
+        opRow.setOrientation(LinearLayout.HORIZONTAL);
+        int[] opVals = {100, 75, 50, 0};
+        String[] opNames = {"100%", "75%", "50%", "Hidden"};
+        int curOp = prefs.getInt("touch_opacity", 100);
+        for (int i = 0; i < opVals.length; i++) {
+            final int op = opVals[i];
+            Button b = createChipButton(opNames[i], op == curOp);
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    prefs.edit().putInt("touch_opacity", op).apply();
+                    if (rr3Overlay != null) rr3Overlay.updateTouchOpacity(op / 100.0f);
+                    toast("Touch Opacity: " + (op == 0 ? "Hidden" : op + "%"));
+                    toggleQuickHud();
+                }
+            });
+            opRow.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        }
+        items.addView(opRow);
+
+        final boolean curHor = prefs.getBoolean("touch_horizon", true);
+        Button horBtn = createChipButton(curHor ? "Steering Horizon: ON" : "Steering Horizon: OFF", curHor);
+        horBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean next = !prefs.getBoolean("touch_horizon", true);
+                prefs.edit().putBoolean("touch_horizon", next).apply();
+                if (rr3Overlay != null) rr3Overlay.updateShowHorizon(next);
+                toast("Steering Horizon: " + (next ? "ON" : "OFF"));
+                toggleQuickHud();
+            }
+        });
+        items.addView(horBtn);
+
         // Controls & Guide
         addHudSectionTitle(items, "Controls & Help");
         Button calBtn = createChipButton("Recalibrate Gyro 0°", true);
@@ -848,19 +929,18 @@ public class PinyonShiftActivity extends SDLActivity {
         private long leftDownTime = 0;
         private long rightDownTime = 0;
         private boolean manualShifting = false;
+        private float touchOpacity = 1.0f;
+        private boolean showHorizon = true;
 
         public RR3OverlayView(Context context) {
             super(context);
-            horizonPaint.setColor(Color.argb(130, 255, 255, 255));
             horizonPaint.setStrokeWidth(dp(2));
             horizonPaint.setStyle(Paint.Style.STROKE);
 
-            textPaint.setColor(Color.argb(70, 255, 255, 255));
             textPaint.setTextSize(dp(13));
             textPaint.setTypeface(Typeface.DEFAULT_BOLD);
             textPaint.setTextAlign(Paint.Align.CENTER);
 
-            pillPaint.setColor(Color.argb(40, 255, 255, 255));
             pillPaint.setStyle(Paint.Style.FILL);
 
             int accent = getThemeAccent(context);
@@ -868,6 +948,26 @@ public class PinyonShiftActivity extends SDLActivity {
             bannerPaint.setStyle(Paint.Style.FILL);
 
             manualShifting = prefs.getBoolean(PREF_MANUAL_SHIFT, false);
+            touchOpacity = prefs.getInt("touch_opacity", 100) / 100.0f;
+            showHorizon = prefs.getBoolean("touch_horizon", true);
+            applyOpacityPaints();
+        }
+
+        public void updateTouchOpacity(float op) {
+            touchOpacity = op;
+            applyOpacityPaints();
+            postInvalidate();
+        }
+
+        public void updateShowHorizon(boolean show) {
+            showHorizon = show;
+            postInvalidate();
+        }
+
+        private void applyOpacityPaints() {
+            horizonPaint.setColor(Color.argb((int) (130 * touchOpacity), 255, 255, 255));
+            textPaint.setColor(Color.argb((int) (70 * touchOpacity), 255, 255, 255));
+            pillPaint.setColor(Color.argb((int) (40 * touchOpacity), 255, 255, 255));
         }
 
         public void setTiltAngle(float degrees) {
@@ -888,20 +988,22 @@ public class PinyonShiftActivity extends SDLActivity {
                 textPaint.setColor(Color.BLACK);
                 textPaint.setTextSize(dp(12));
                 canvas.drawText("MENU MODE · Swipes = LB/RB · Tap = A (Select) · Back = B", w * 0.5f, dp(20), textPaint);
-                textPaint.setColor(Color.argb(70, 255, 255, 255));
+                textPaint.setColor(Color.argb((int) (70 * touchOpacity), 255, 255, 255));
                 return;
             }
+
+            if (touchOpacity <= 0.01f) return;
 
             // Layer 1: Dynamic Brake Vignette (Radial red glow when left zone is pressed)
             if (brakeAlpha > 0.01f) {
                 vignettePaint.setShader(new RadialGradient(0, h, w * 0.45f,
-                        Color.argb((int) (brakeAlpha * 255), 255, 30, 30),
+                        Color.argb((int) (brakeAlpha * 255 * touchOpacity), 255, 30, 30),
                         Color.TRANSPARENT, Shader.TileMode.CLAMP));
                 canvas.drawRect(0, 0, w * 0.45f, h, vignettePaint);
             }
 
             // Layer 1: Subtle Steering Horizon Indicator (Tilts with the device)
-            if ("tilt_a".equals(controlScheme)) {
+            if ("tilt_a".equals(controlScheme) && showHorizon) {
                 canvas.save();
                 float cx = w * 0.5f;
                 float cy = h * 0.88f;

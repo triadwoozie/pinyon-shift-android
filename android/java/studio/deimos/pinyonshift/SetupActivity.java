@@ -52,24 +52,17 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
-import java.net.InterfaceAddress;
-import java.net.NetworkInterface;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
- * Standalone Mobile Hub and Launcher for Pinyon Shift (Android).
- */
 public class SetupActivity extends Activity implements View.OnClickListener {
     private static final int HTTP_PORT = 47615;
     private static final int DISCOVERY_PORT = 47616;
@@ -77,16 +70,16 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private static final int REQUEST_DRIVER_ZIP = 0x5056;
 
     // Palette matching the PC release (PinyonShift.Launcher/App.xaml)
-    private static final int COLOR_BG = Color.rgb(10, 15, 12);       // #0A0F0C Ink
-    private static final int COLOR_SURFACE = Color.rgb(16, 24, 19);  // #101813 Surface
-    private static final int COLOR_CARD = Color.rgb(22, 33, 26);     // #16211A Raised
-    private static final int COLOR_CARD_STROKE = Color.rgb(52, 73, 59); // #34493B LineStrong
-    private static final int COLOR_ACCENT_DEFAULT = Color.rgb(92, 208, 138); // #5CD08A Emerald Green
-    private static final int COLOR_FOG = Color.rgb(238, 243, 236);   // #EEF3EC Fog
-    private static final int COLOR_MUTED = Color.rgb(147, 165, 151); // #93A597 Muted
-    private static final int COLOR_TEXT_DIM = Color.rgb(97, 115, 106); // #61736A Faint
-    private static final int COLOR_SUCCESS = Color.rgb(92, 208, 138); // #5CD08A Green
-    private static final int COLOR_RED = Color.rgb(225, 110, 95);    // #E16E5F Red
+    private static final int COLOR_BG = 0xFF0A0F0C;
+    private static final int COLOR_SURFACE = 0xFF101813;
+    private static final int COLOR_CARD = 0xFF16211A;
+    private static final int COLOR_CARD_STROKE = 0xFF34493B;
+    private static final int COLOR_ACCENT_DEFAULT = 0xFF5CD08A;
+    private static final int COLOR_FOG = 0xFFEEF3EC;
+    private static final int COLOR_MUTED = 0xFF93A597;
+    private static final int COLOR_TEXT_DIM = 0xFF61736A;
+    private static final int COLOR_SUCCESS = 0xFF5CD08A;
+    private static final int COLOR_RED = 0xFFE16E5F;
 
     private static final String INCOMPLETE = "game/.copy-incomplete";
     static final String ARGUMENTS_FILE = "state/config/android-arguments.txt";
@@ -122,6 +115,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private final List<View> tabPages = new ArrayList<>();
     private final List<LinearLayout> navItems = new ArrayList<>();
 
+    private TextView gameTitleText;
     private TextView gameStatusText;
     private Button launchButton;
     private LinearLayout driverListContainer;
@@ -133,6 +127,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private TextView upscalerSummary;
     private TextView controlSummary;
     private TextView themeSummary;
+    private TextView touchOpacitySummary;
     private TextView folderPathText;
     private LinearLayout backupListContainer;
     private LinearLayout activeBadgesLayout;
@@ -159,6 +154,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         driversDir.mkdirs();
         prefs = getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE);
         colorAccent = prefs.getInt("theme_accent", COLOR_ACCENT_DEFAULT);
+        currentTab = prefs.getInt("active_tab", 0);
 
         PinyonShiftActivity.installBundledDrivers(getAssets(), driversDir);
 
@@ -252,6 +248,27 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         return tv;
     }
 
+    private EditText createField(String hint, int inputType) {
+        EditText et = new EditText(this);
+        et.setHint(hint);
+        et.setHintTextColor(COLOR_TEXT_DIM);
+        et.setTextColor(Color.WHITE);
+        et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        et.setInputType(inputType);
+        et.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
+        et.setPadding(dp(12), dp(8), dp(12), dp(8));
+        return et;
+    }
+
+    private void toast(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    private void confirmDialog(String title, String msg, String pos, DialogInterface.OnClickListener ok) {
+        new AlertDialog.Builder(this).setTitle(title).setMessage(msg)
+                .setPositiveButton(pos, ok).setNegativeButton("Cancel", null).show();
+    }
+
     Drawable getSymbol(String name) {
         int id = getResources().getIdentifier(name, "drawable", getPackageName());
         if (id == 0) return null;
@@ -302,13 +319,16 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setBackgroundColor(COLOR_SURFACE);
-        header.setPadding(dp(20), dp(14), dp(20), dp(14));
+        header.setPadding(dp(20), dp(12), dp(20), dp(12));
 
-        TextView title = label("PINYON SHIFT", 18, colorAccent, true);
-        header.addView(title, lpWeight1());
+        ImageView mark = new ImageView(this);
+        Drawable mk = getSymbol("ic_launcher_foreground");
+        if (mk != null) mark.setImageDrawable(mk);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(26), dp(26));
+        mlp.rightMargin = dp(10);
+        header.addView(mark, mlp);
 
-        TextView sub = label("Standalone Mobile Hub", 12, COLOR_MUTED, false);
-        header.addView(sub);
+        header.addView(label("PINYON SHIFT", 17, Color.WHITE, true), lpWeight1());
         root.addView(header);
 
         tabContentContainer = new FrameLayout(this);
@@ -386,9 +406,10 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void switchTab(int index) {
-        if (index == currentTab || index < 0 || index >= tabPages.size()) return;
+        if (index < 0 || index >= tabPages.size()) return;
         tabPages.get(currentTab).setVisibility(View.GONE);
         currentTab = index;
+        prefs.edit().putInt("active_tab", index).apply();
         tabPages.get(currentTab).setVisibility(View.VISIBLE);
         updateNavSelection();
         refreshAllTabs();
@@ -413,22 +434,23 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         LinearLayout hero = createCard(content, 18);
         hero.setBackground(cardBackground(COLOR_CARD, 18, colorAccent, 1));
-        hero.addView(label("Forza Horizon (2012)", 20, COLOR_FOG, true));
+        gameTitleText = label("Ready to drive", 22, COLOR_FOG, true);
+        hero.addView(gameTitleText);
 
         gameStatusText = label("", 12, COLOR_TEXT_DIM, false);
         gameStatusText.setPadding(0, dp(4), 0, dp(14));
         hero.addView(gameStatusText);
 
-        launchButton = createM3Button("LAUNCH GAME", "ic_play_arrow", true);
+        launchButton = createM3Button("Play", "ic_play_arrow", true);
         launchButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        launchButton.setPadding(dp(16), dp(14), dp(16), dp(14));
+        launchButton.setPadding(dp(20), dp(12), dp(20), dp(12));
         launchButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (gameReady()) startGame();
                 else {
                     switchTab(3);
-                    Toast.makeText(SetupActivity.this, "Import game files first", Toast.LENGTH_SHORT).show();
+                    toast("Import game files first");
                 }
             }
         });
@@ -516,7 +538,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        int bg = isSelected ? Color.argb(40, Color.red(colorAccent), Color.green(colorAccent), Color.blue(colorAccent)) : COLOR_SURFACE;
+        int bg = isSelected ? ((colorAccent & 0x00FFFFFF) | 0x28000000) : COLOR_SURFACE;
         int stroke = isSelected ? colorAccent : COLOR_CARD_STROKE;
         row.setBackground(cardBackground(bg, 12, stroke, 1));
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -555,22 +577,17 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void deleteDriver(final String id) {
-        new AlertDialog.Builder(this)
-                .setTitle("Delete Driver")
-                .setMessage("Remove " + id + "?")
-                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        PinyonShiftActivity.deleteTree(new File(driversDir, id));
-                        if (id.equals(prefs.getString(PREF_SELECTED_DRIVER, "auto"))) {
-                            prefs.edit().putString(PREF_SELECTED_DRIVER, "auto").apply();
-                        }
-                        refreshDriversList();
-                        applySettings();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        confirmDialog("Delete Driver", "Remove " + id + "?", "Delete", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface d, int w) {
+                PinyonShiftActivity.deleteTree(new File(driversDir, id));
+                if (id.equals(prefs.getString(PREF_SELECTED_DRIVER, "auto"))) {
+                    prefs.edit().putString(PREF_SELECTED_DRIVER, "auto").apply();
+                }
+                refreshDriversList();
+                applySettings();
+            }
+        });
     }
 
     private void importDriverZip() {
@@ -580,7 +597,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         String[] mimes = {"application/zip", "application/x-zip-compressed", "application/octet-stream"};
         intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes);
         try { startActivityForResult(intent, REQUEST_DRIVER_ZIP); }
-        catch (Exception e) { Toast.makeText(this, "No file picker", Toast.LENGTH_SHORT).show(); }
+        catch (Exception e) { toast("No file picker"); }
     }
 
     private View buildSettingsTab() {
@@ -590,51 +607,38 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         LinearLayout disp = createCard(content, 16);
         disp.addView(label("Display & Resolution", 14, Color.WHITE, true));
 
-        aspectModeSummary = addSettingSelector(disp, "Display Scaling Mode", "Widescreen (Hor+)", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showChoiceDialog("Display Scaling Mode", PREF_ASPECT_MODE,
-                        new String[]{"Widescreen (Hor+)  [Recommended]", "Fit (16:9 Letterbox)", "Stretch (Fullscreen)", "Crop (Zoom)"},
-                        new String[]{"hor_plus", "letterbox", "stretch", "crop"});
-            }
-        });
+        aspectModeSummary = addChoiceSelector(disp, "Display Scaling Mode", PREF_ASPECT_MODE,
+                new String[]{"Widescreen (Hor+)  [Recommended]", "Fit (16:9 Letterbox)", "Stretch (Fullscreen)", "Crop (Zoom)"},
+                new String[]{"hor_plus", "letterbox", "stretch", "crop"});
 
-        resScaleSummary = addSettingSelector(disp, "Internal Resolution", "1x (720p)", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showIntChoiceDialog("Resolution Scaling", PREF_RES_SCALE,
-                        new String[]{"1x · 720p Native", "1.5x · 1080p", "2x · 1440p"},
-                        new int[]{1, 2, 2}, false);
-            }
-        });
+        resScaleSummary = addIntChoiceSelector(disp, "Internal Resolution", PREF_RES_SCALE,
+                new String[]{"1x · 720p Native", "1.5x · 1080p", "2x · 1440p"},
+                new int[]{1, 2, 2});
 
-        fpsCapSummary = addSettingSelector(disp, "Target Framerate", "60 FPS (VSync)", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showIntChoiceDialog("Target Framerate", PREF_FPS_CAP,
-                        new String[]{"60 FPS (VSync)", "45 FPS", "40 FPS", "30 FPS", "120 FPS", "Unlocked"},
-                        new int[]{60, 45, 40, 30, 120, 0}, true);
-            }
-        });
+        fpsCapSummary = addIntChoiceSelector(disp, "Target Framerate", PREF_FPS_CAP,
+                new String[]{"60 FPS", "45 FPS", "40 FPS", "30 FPS", "120 FPS", "Unlocked"},
+                new int[]{60, 45, 40, 30, 120, 0});
+        addSwitchRow(disp, "Vertical Sync (VSync)", "Lock presentation to display refresh rate", PREF_VSYNC, true);
 
-        presetSummary = addSettingSelector(disp, "Graphics Preset", "Balanced", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showChoiceDialog("Graphics Preset", PREF_GRAPHICS_PRESET,
-                        new String[]{"Potato (Max FPS)", "Balanced (Standard)", "Ultra (Full Visuals)"},
-                        new String[]{"potato", "balanced", "ultra"});
-            }
-        });
+        presetSummary = addChoiceSelector(disp, "Graphics Preset", PREF_GRAPHICS_PRESET,
+                new String[]{"Potato (Max FPS)", "Balanced (Standard)", "Ultra (Full Visuals)"},
+                new String[]{"potato", "balanced", "ultra"});
 
-        upscalerSummary = addSettingSelector(disp, "Upscaler (FSR / CAS)", "AMD FSR 1.0", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showChoiceDialog("Upscaler", PREF_UPSCALER,
-                        new String[]{"AMD FSR 1.0 (Spatial)", "CAS (Adaptive Sharpening)", "Bilinear"},
-                        new String[]{"fsr", "cas", "bilinear"});
-            }
-        });
+        upscalerSummary = addChoiceSelector(disp, "Upscaler (FSR / CAS)", PREF_UPSCALER,
+                new String[]{"AMD FSR 1.0 (Spatial)", "CAS (Adaptive Sharpening)", "Bilinear"},
+                new String[]{"fsr", "cas", "bilinear"});
 
         themeSummary = addSettingSelector(disp, "Theme Accent", "Pinyon Green", new View.OnClickListener() {
             @Override public void onClick(View v) {
+                int sysAccent = COLOR_ACCENT_DEFAULT;
+                if (Build.VERSION.SDK_INT >= 31) {
+                    try {
+                        sysAccent = getResources().getColor(android.R.color.system_accent1_500, getTheme());
+                    } catch (Throwable ignored) {}
+                }
                 showIntChoiceDialog("Theme Accent", "theme_accent",
-                        new String[]{"Pinyon Green  [Original PC]", "Horizon Amber  [Festival]", "Alpine White", "Cyber Cyan", "Sunset Orange"},
-                        new int[]{COLOR_ACCENT_DEFAULT, Color.rgb(241, 174, 54), COLOR_FOG, Color.rgb(92, 225, 230), Color.rgb(255, 112, 67)}, false);
+                        new String[]{"Pinyon Green  [Original PC]", "System Dynamic  [Material You]", "Horizon Amber  [Festival]", "Alpine White", "Cyber Cyan", "Sunset Orange"},
+                        new int[]{COLOR_ACCENT_DEFAULT, sysAccent, 0xFFF1AE36, COLOR_FOG, 0xFF5CE1E6, 0xFFFF7043});
             }
         });
 
@@ -647,18 +651,18 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         LinearLayout ctrl = createCard(content, 16);
         ctrl.addView(label("Controls & Haptics", 14, Color.WHITE, true));
-        controlSummary = addSettingSelector(ctrl, "Control Scheme", "Tilt A (RR3 Gyro)", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                showChoiceDialog("Control Scheme", PREF_CONTROL_SCHEME,
-                        new String[]{"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic (Virtual Pad)", "Gamepad (External)"},
-                        new String[]{"tilt_a", "tilt_b", "classic", "gamepad"});
-            }
-        });
+        controlSummary = addChoiceSelector(ctrl, "Control Scheme", PREF_CONTROL_SCHEME,
+                new String[]{"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic (Virtual Pad)", "Gamepad (External)"},
+                new String[]{"tilt_a", "tilt_b", "classic", "gamepad"});
+        touchOpacitySummary = addIntChoiceSelector(ctrl, "Touch Controls Opacity", "touch_opacity",
+                new String[]{"100% · Fully Visible", "75%", "50%", "25%", "Hidden · Clean HUD"},
+                new int[]{100, 75, 50, 25, 0});
         addSettingSelector(ctrl, "Touch Controls Guide", "View 4-Layer Gesture Map",
                 new View.OnClickListener() {
                     @Override
                     public void onClick(View v) { PinyonShiftActivity.showTouchGuide(SetupActivity.this); }
                 });
+        addSwitchRow(ctrl, "Steering Horizon", "Subtle tilt bar at bottom center", "touch_horizon", true);
         addSwitchRow(ctrl, "Auto-Throttle", "Auto acceleration (zones brake)", PREF_AUTO_THROTTLE, false);
         addSwitchRow(ctrl, "Haptic Feedback", "Vibration on shifts & pedals", PREF_HAPTICS, true);
         addSwitchRow(ctrl, "Smart Auto-Clutch", "Auto-blip LB on shifts", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
@@ -680,7 +684,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(rippleDrawable(COLOR_SURFACE, Color.argb(40, 255, 255, 255), 10));
+        row.setBackground(rippleDrawable(COLOR_SURFACE, 0x28FFFFFF, 10));
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams l = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         l.setMargins(0, dp(6), 0, 0);
@@ -693,12 +697,28 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         tg.addView(vv);
         row.addView(tg, lpWeight1());
 
-        TextView arr = label("›", 16, COLOR_TEXT_DIM, false);
-        row.addView(arr);
-
+        row.addView(label("›", 16, COLOR_TEXT_DIM, false));
         row.setOnClickListener(clk);
         parent.addView(row);
         return vv;
+    }
+
+    private TextView addChoiceSelector(LinearLayout parent, final String title, final String prefKey, final String[] items, final String[] values) {
+        return addSettingSelector(parent, title, "", new View.OnClickListener() {
+            @Override public void onClick(View v) { showChoiceDialog(title, prefKey, items, values); }
+        });
+    }
+
+    private TextView addIntChoiceSelector(LinearLayout parent, final String title, final String prefKey, final String[] items, final int[] values) {
+        return addSettingSelector(parent, title, "", new View.OnClickListener() {
+            @Override public void onClick(View v) { showIntChoiceDialog(title, prefKey, items, values); }
+        });
+    }
+
+    private void tintSwitch(Switch sw) {
+        int[][] states = new int[][]{new int[]{android.R.attr.state_checked}, new int[]{-android.R.attr.state_checked}};
+        sw.setThumbTintList(new ColorStateList(states, new int[]{colorAccent, COLOR_TEXT_DIM}));
+        sw.setTrackTintList(new ColorStateList(states, new int[]{(colorAccent & 0x00FFFFFF) | 0x80000000, 0x3CFFFFFF}));
     }
 
     private void addSwitchRow(LinearLayout parent, String title, String sub, final String key, boolean def) {
@@ -715,6 +735,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         Switch sw = new Switch(this);
         sw.setChecked(prefs.getBoolean(key, def));
+        tintSwitch(sw);
         sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton b, boolean c) {
@@ -744,7 +765,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 .show();
     }
 
-    private void showIntChoiceDialog(String title, final String prefKey, final String[] items, final int[] values, final boolean setVsync) {
+    private void showIntChoiceDialog(String title, final String prefKey, final String[] items, final int[] values) {
         int currentVal = prefs.getInt(prefKey, values[0]);
         int cur = 0;
         for (int i = 0; i < values.length; i++) if (values[i] == currentVal) cur = i;
@@ -753,9 +774,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 .setSingleChoiceItems(items, cur, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface d, int w) {
-                        SharedPreferences.Editor ed = prefs.edit().putInt(prefKey, values[w]);
-                        if (setVsync) ed.putBoolean(PREF_VSYNC, values[w] != 0);
-                        ed.apply();
+                        prefs.edit().putInt(prefKey, values[w]).apply();
                         d.dismiss();
                         if ("theme_accent".equals(prefKey)) { recreate(); return; }
                         refreshSettingsTab();
@@ -789,13 +808,18 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         if (themeSummary != null) {
             themeSummary.setText(colorAccent == COLOR_ACCENT_DEFAULT ? "Pinyon Green (Original PC)"
-                    : colorAccent == Color.rgb(241, 174, 54) ? "Horizon Amber"
+                    : colorAccent == 0xFFF1AE36 ? "Horizon Amber"
                     : colorAccent == COLOR_FOG ? "Alpine White"
-                    : colorAccent == Color.rgb(92, 225, 230) ? "Cyber Cyan" : "Sunset Orange");
+                    : colorAccent == 0xFF5CE1E6 ? "Cyber Cyan"
+                    : colorAccent == 0xFFFF7043 ? "Sunset Orange" : "System Dynamic");
         }
         if (controlSummary != null) {
             String c = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
             controlSummary.setText("tilt_a".equals(c) ? "Tilt A (RR3 Gyro)" : "tilt_b".equals(c) ? "Tilt B (RR3 Touch)" : "classic".equals(c) ? "Classic" : "Gamepad");
+        }
+        if (touchOpacitySummary != null) {
+            int op = prefs.getInt("touch_opacity", 100);
+            touchOpacitySummary.setText(op == 0 ? "Hidden" : op + "%");
         }
         applySettings();
     }
@@ -824,25 +848,11 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         discoveryText.setPadding(0, dp(4), 0, dp(8));
         wifi.addView(discoveryText);
 
-        addressField = new EditText(this);
-        addressField.setHint("PC Address (e.g. 192.168.1.50:47615)");
-        addressField.setHintTextColor(COLOR_TEXT_DIM);
-        addressField.setTextColor(Color.WHITE);
-        addressField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        addressField.setInputType(InputType.TYPE_CLASS_TEXT);
-        addressField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-        addressField.setPadding(dp(12), dp(8), dp(12), dp(8));
+        addressField = createField("PC Address (e.g. 192.168.1.50:47615)", InputType.TYPE_CLASS_TEXT);
         wifi.addView(addressField);
 
-        codeField = new EditText(this);
-        codeField.setHint("6-digit Pair Code from PC screen");
-        codeField.setHintTextColor(COLOR_TEXT_DIM);
-        codeField.setTextColor(Color.WHITE);
-        codeField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        codeField.setInputType(InputType.TYPE_CLASS_NUMBER);
+        codeField = createField("6-digit Pair Code from PC screen", InputType.TYPE_CLASS_NUMBER);
         codeField.setFilters(new InputFilter[] {new InputFilter.LengthFilter(6)});
-        codeField.setBackground(cardBackground(COLOR_SURFACE, 8, COLOR_CARD_STROKE, 1));
-        codeField.setPadding(dp(12), dp(8), dp(12), dp(8));
         LinearLayout.LayoutParams clp = lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         clp.setMargins(0, dp(6), 0, dp(10));
         codeField.setLayoutParams(clp);
@@ -911,35 +921,33 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void restoreSave(final File backup) {
-        new AlertDialog.Builder(this)
-                .setTitle("Restore Save Backup")
-                .setMessage("Restore save from " + backup.getName() + "? Current save will be backed up.")
-                .setPositiveButton("Restore", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        backUpSave();
-                        File user = new File(base, "state/user");
-                        try {
-                            PinyonShiftActivity.copyTree(backup, user);
-                            Toast.makeText(SetupActivity.this, "Save restored!", Toast.LENGTH_SHORT).show();
-                        } catch (IOException e) {
-                            Toast.makeText(SetupActivity.this, "Restore failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                        }
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        confirmDialog("Restore Save Backup", "Restore save from " + backup.getName() + "? Current save will be backed up.", "Restore", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface d, int w) {
+                backUpSave();
+                try {
+                    PinyonShiftActivity.copyTree(backup, new File(base, "state/user"));
+                    toast("Save restored!");
+                } catch (IOException e) {
+                    toast("Restore failed: " + e.getMessage());
+                }
+            }
+        });
     }
 
     private void refreshAllTabs() {
         boolean ready = gameReady();
+        if (gameTitleText != null) {
+            gameTitleText.setText(ready ? "Ready to drive" : "Set up your copy");
+        }
         if (gameStatusText != null) {
-            gameStatusText.setText(ready ? "● Game Installed & Ready" : "○ Game Files Missing (default.xex)");
-            gameStatusText.setTextColor(ready ? COLOR_SUCCESS : COLOR_RED);
+            gameStatusText.setText(ready ? "Vulkan · 1x (720p Native) · Quick HUD opens settings in game"
+                    : "Game files missing (default.xex)");
+            gameStatusText.setTextColor(ready ? COLOR_MUTED : COLOR_RED);
         }
         if (launchButton != null) {
             launchButton.setEnabled(true);
-            launchButton.setText(ready ? "LAUNCH GAME" : "IMPORT GAME FILES");
+            launchButton.setText(ready ? "Play" : "IMPORT GAME FILES");
             setButtonIcon(launchButton, ready ? "ic_play_arrow" : "ic_folder_open", COLOR_BG);
         }
         if (activeBadgesLayout != null) {
@@ -949,10 +957,11 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
             String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
             String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
+            boolean vsync = prefs.getBoolean(PREF_VSYNC, true);
 
             String[] bgs = {"Driver: " + driver, "Scaling: " + ("hor_plus".equals(aspect) ? "Widescreen Hor+" : aspect),
                     "Preset: " + preset.toUpperCase(Locale.ROOT), "Upscaler: " + upscaler.toUpperCase(Locale.ROOT),
-                    "Controls: " + ("tilt_a".equals(ctrl) ? "RR3 Tilt A" : ctrl)};
+                    (vsync ? "VSync: ON" : "VSync: OFF"), "Controls: " + ("tilt_a".equals(ctrl) ? "RR3 Tilt A" : ctrl)};
             for (String b : bgs) activeBadgesLayout.addView(createBadgeView(b));
 
             File xex = new File(base, "game/base/default.xex");
@@ -1034,7 +1043,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private void chooseFolder() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         try { startActivityForResult(intent, REQUEST_FOLDER); }
-        catch (Exception e) { Toast.makeText(this, "No folder picker", Toast.LENGTH_SHORT).show(); }
+        catch (Exception e) { toast("No folder picker"); }
     }
 
     @Override
@@ -1186,11 +1195,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         if (!(path.startsWith("game/base/") || path.startsWith("state/")) || path.contains("\\")) {
             throw new IOException("unexpected path " + path);
         }
-        for (String part : path.split("/")) {
-            if (part.isEmpty() || part.equals(".") || part.equals("..")) {
-                throw new IOException("unexpected path " + path);
-            }
-        }
+        for (String part : path.split("/")) if (part.equals("..")) throw new IOException("unexpected path " + path);
         File target = new File(base, path);
         if (!target.getCanonicalPath().startsWith(base.getCanonicalPath() + File.separator)) {
             throw new IOException("unexpected path " + path);
@@ -1201,7 +1206,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private void backUpSave() {
         File user = new File(base, "state/user");
         if (!user.isDirectory()) return;
-        String stamp = new SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).format(new Date());
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).format(new java.util.Date());
         File backup = new File(base, "state/backups/saves/" + stamp);
         try { PinyonShiftActivity.copyTree(user, backup); } catch (IOException ignored) {}
     }
@@ -1281,7 +1286,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         if (busy) return;
         String raw = addressField.getText().toString().trim();
         if (raw.isEmpty()) {
-            Toast.makeText(this, "Enter PC address", Toast.LENGTH_SHORT).show();
+            toast("Enter PC address");
             return;
         }
         if (!raw.contains(":")) raw += ":" + HTTP_PORT;
@@ -1359,7 +1364,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
     private void startCopy() {
         if (codeField.getText().toString().trim().length() != 6) {
-            Toast.makeText(this, "Enter 6-digit pair code from PC", Toast.LENGTH_SHORT).show();
+            toast("Enter 6-digit pair code from PC");
             return;
         }
         final String code = codeField.getText().toString().trim();
@@ -1368,7 +1373,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             if (e.getValue().isChecked()) selected.add(e.getKey());
         }
         if (selected.isEmpty()) {
-            Toast.makeText(this, "Select at least one group", Toast.LENGTH_SHORT).show();
+            toast("Select at least one group");
             return;
         }
         busy = true;
