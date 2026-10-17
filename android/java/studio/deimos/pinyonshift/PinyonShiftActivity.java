@@ -61,6 +61,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -478,15 +481,16 @@ public class PinyonShiftActivity extends SDLActivity {
     }
 
     private View createQuickHudButton() {
+        int accent = getThemeAccent(this);
         Button btn = new Button(this);
         btn.setText("⚡ FH1");
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setTextColor(Color.WHITE);
         GradientDrawable gd = new GradientDrawable();
-        gd.setColor(Color.argb(160, 20, 22, 28));
+        gd.setColor(Color.argb(160, 16, 24, 19));
         gd.setCornerRadius(dp(16));
-        gd.setStroke(dp(1), Color.argb(120, 241, 174, 54));
+        gd.setStroke(dp(1), Color.argb(140, Color.red(accent), Color.green(accent), Color.blue(accent)));
         btn.setBackground(gd);
         btn.setPadding(dp(10), dp(4), dp(10), dp(4));
 
@@ -538,8 +542,9 @@ public class PinyonShiftActivity extends SDLActivity {
     }
 
     private View createQuickHudDrawer() {
+        int accent = getThemeAccent(this);
         FrameLayout drawer = new FrameLayout(this);
-        drawer.setBackgroundColor(Color.argb(235, 16, 18, 22));
+        drawer.setBackgroundColor(Color.argb(240, 16, 24, 19));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT);
         lp.gravity = Gravity.START;
         drawer.setLayoutParams(lp);
@@ -553,13 +558,13 @@ public class PinyonShiftActivity extends SDLActivity {
         title.setText("FH1 Live Tuning");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.rgb(241, 174, 54));
+        title.setTextColor(accent);
         items.addView(title);
 
         TextView tempTv = new TextView(this);
         tempTv.setText(String.format(Locale.ROOT, "Battery Temp: %.1f°C", currentBatteryTempC));
         tempTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        tempTv.setTextColor(Color.rgb(160, 165, 176));
+        tempTv.setTextColor(Color.rgb(147, 165, 151));
         tempTv.setPadding(0, dp(4), 0, dp(12));
         items.addView(tempTv);
 
@@ -661,18 +666,19 @@ public class PinyonShiftActivity extends SDLActivity {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        tv.setTextColor(Color.rgb(159, 178, 165));
+        tv.setTextColor(Color.rgb(147, 165, 151));
         tv.setPadding(0, dp(10), 0, dp(4));
         container.addView(tv);
     }
 
     private Button createChipButton(String text, boolean active) {
+        int accent = getThemeAccent(this);
         Button b = new Button(this);
         b.setText(text);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        b.setTextColor(active ? Color.BLACK : Color.WHITE);
+        b.setTextColor(active ? Color.rgb(10, 15, 12) : Color.rgb(238, 243, 236));
         GradientDrawable gd = new GradientDrawable();
-        gd.setColor(active ? Color.rgb(241, 174, 54) : Color.rgb(32, 36, 44));
+        gd.setColor(active ? accent : Color.rgb(22, 33, 26));
         gd.setCornerRadius(dp(8));
         b.setBackground(gd);
         b.setPadding(dp(4), dp(4), dp(4), dp(4));
@@ -830,7 +836,8 @@ public class PinyonShiftActivity extends SDLActivity {
             pillPaint.setColor(Color.argb(40, 255, 255, 255));
             pillPaint.setStyle(Paint.Style.FILL);
 
-            bannerPaint.setColor(Color.argb(210, 241, 174, 54));
+            int accent = getThemeAccent(context);
+            bannerPaint.setColor(Color.argb(210, Color.red(accent), Color.green(accent), Color.blue(accent)));
             bannerPaint.setStyle(Paint.Style.FILL);
 
             manualShifting = prefs.getBoolean(PREF_MANUAL_SHIFT, false);
@@ -1165,6 +1172,38 @@ public class PinyonShiftActivity extends SDLActivity {
         } catch (IOException error) {
             Log.w(TAG, "failed installing bundled drivers", error);
         }
+    }
+
+    static int getThemeAccent(Context ctx) {
+        SharedPreferences p = ctx.getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE);
+        return p.getInt("theme_accent", Color.rgb(92, 208, 138));
+    }
+
+    static void copyTree(File src, File dst) throws IOException {
+        if (src.isDirectory()) {
+            dst.mkdirs();
+            File[] ch = src.listFiles();
+            if (ch != null) for (File c : ch) copyTree(c, new File(dst, c.getName()));
+            return;
+        }
+        dst.getParentFile().mkdirs();
+        try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
+            copy(in, out);
+        }
+    }
+
+    static List<InetAddress> broadcastAddresses() {
+        List<InetAddress> res = new ArrayList<>();
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                for (InterfaceAddress ia : ni.getInterfaceAddresses()) {
+                    if (ia.getBroadcast() != null) res.add(ia.getBroadcast());
+                }
+            }
+            res.add(InetAddress.getByName("255.255.255.255"));
+        } catch (IOException ignored) {}
+        return res;
     }
 
     static void copy(InputStream in, OutputStream out) throws IOException {
