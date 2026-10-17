@@ -17,6 +17,7 @@ import android.graphics.Paint;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -480,13 +481,27 @@ public class PinyonShiftActivity extends SDLActivity {
         });
     }
 
+    private Drawable getSymbol(String name) {
+        int id = getResources().getIdentifier(name, "drawable", getPackageName());
+        if (id == 0) return null;
+        Drawable d = getDrawable(id);
+        return d != null ? d.mutate() : null;
+    }
+
     private View createQuickHudButton() {
         int accent = getThemeAccent(this);
         Button btn = new Button(this);
-        btn.setText("⚡ FH1");
+        btn.setText("FH1");
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setTextColor(Color.WHITE);
+        Drawable d = getSymbol("ic_bolt");
+        if (d != null) {
+            d.setBounds(0, 0, dp(14), dp(14));
+            d.setTint(accent);
+            btn.setCompoundDrawables(d, null, null, null);
+            btn.setCompoundDrawablePadding(dp(4));
+        }
         GradientDrawable gd = new GradientDrawable();
         gd.setColor(Color.argb(160, 16, 24, 19));
         gd.setCornerRadius(dp(16));
@@ -509,8 +524,13 @@ public class PinyonShiftActivity extends SDLActivity {
 
     private View createFloatingShutter() {
         Button btn = new Button(this);
-        btn.setText("📷");
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        btn.setText("");
+        Drawable d = getSymbol("ic_photo_camera");
+        if (d != null) {
+            d.setBounds(0, 0, dp(22), dp(22));
+            d.setTint(Color.WHITE);
+            btn.setCompoundDrawables(d, null, null, null);
+        }
         GradientDrawable gd = new GradientDrawable();
         gd.setColor(Color.argb(140, 25, 28, 35));
         gd.setCornerRadius(dp(22));
@@ -628,14 +648,14 @@ public class PinyonShiftActivity extends SDLActivity {
 
         // Controls & Guide
         addHudSectionTitle(items, "Controls & Help");
-        Button calBtn = createChipButton("🎯 Recalibrate Gyro 0°", true);
+        Button calBtn = createChipButton("Recalibrate Gyro 0°", true);
         calBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { recalibrateGyro(); toggleQuickHud(); }
         });
         items.addView(calBtn);
 
-        Button guideBtn = createChipButton("📖 Touch Controls Guide", false);
+        Button guideBtn = createChipButton("Touch Controls Guide", false);
         guideBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -645,7 +665,14 @@ public class PinyonShiftActivity extends SDLActivity {
         });
         items.addView(guideBtn);
 
-        Button menuModeBtn = createChipButton("🎮 Toggle Menu Mode (" + (inMenuMode ? "ON" : "OFF") + ")", false);
+        Button menuModeBtn = createChipButton("Toggle Menu Mode (" + (inMenuMode ? "ON" : "OFF") + ")", false);
+        Drawable pad = getSymbol("ic_sports_esports");
+        if (pad != null) {
+            pad.setBounds(0, 0, dp(16), dp(16));
+            pad.setTint(Color.WHITE);
+            menuModeBtn.setCompoundDrawables(pad, null, null, null);
+            menuModeBtn.setCompoundDrawablePadding(dp(6));
+        }
         menuModeBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {

@@ -9,6 +9,7 @@ import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
@@ -28,6 +29,7 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -250,16 +252,42 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         return tv;
     }
 
+    Drawable getSymbol(String name) {
+        int id = getResources().getIdentifier(name, "drawable", getPackageName());
+        if (id == 0) return null;
+        Drawable d = getDrawable(id);
+        return d != null ? d.mutate() : null;
+    }
+
+    void setButtonIcon(Button b, String name, int tint) {
+        if (b == null) return;
+        Drawable d = getSymbol(name);
+        if (d != null) {
+            d.setBounds(0, 0, dp(18), dp(18));
+            d.setTint(tint);
+            b.setCompoundDrawables(d, null, null, null);
+            b.setCompoundDrawablePadding(dp(8));
+        } else {
+            b.setCompoundDrawables(null, null, null, null);
+        }
+    }
+
     private Button createM3Button(String text, boolean primary) {
+        return createM3Button(text, null, primary);
+    }
+
+    private Button createM3Button(String text, String icon, boolean primary) {
         Button btn = new Button(this);
         btn.setText(text);
         btn.setAllCaps(false);
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         int bg = primary ? colorAccent : COLOR_SURFACE;
-        btn.setTextColor(primary ? COLOR_BG : colorAccent);
+        int fg = primary ? COLOR_BG : colorAccent;
+        btn.setTextColor(fg);
         btn.setBackground(rippleDrawable(bg, Color.argb(60, 255, 255, 255), 14));
         btn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        if (icon != null) setButtonIcon(btn, icon, fg);
         return btn;
     }
 
@@ -325,22 +353,26 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
         navItems.clear();
         final String[] titles = {"Play", "Drivers", "Settings", "Content"};
-        final String[] icons = {"▶", "⚙", "⚡", "📁"};
+        final String[] icons = {"ic_play_arrow", "ic_memory", "ic_settings", "ic_folder_open"};
 
         for (int i = 0; i < titles.length; i++) {
             final int index = i;
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setPadding(dp(4), dp(4), dp(4), dp(4));
+            item.setPadding(0, dp(4), 0, dp(4));
 
-            TextView icon = label(icons[i], 18, COLOR_TEXT_DIM, false);
-            icon.setGravity(Gravity.CENTER);
+            ImageView icon = new ImageView(this);
+            Drawable d = getSymbol(icons[i]);
+            if (d != null) icon.setImageDrawable(d);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(22), dp(22));
+            lp.bottomMargin = dp(2);
+            item.addView(icon, lp);
+
             TextView lbl = label(titles[i], 11, COLOR_TEXT_DIM, false);
             lbl.setGravity(Gravity.CENTER);
-
-            item.addView(icon);
             item.addView(lbl);
+
             item.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) { switchTab(index); }
@@ -367,7 +399,10 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         for (int i = 0; i < navItems.size(); i++) {
             LinearLayout item = navItems.get(i);
             int color = (i == currentTab) ? colorAccent : COLOR_TEXT_DIM;
-            ((TextView) item.getChildAt(0)).setTextColor(color);
+            ImageView iv = (ImageView) item.getChildAt(0);
+            if (iv != null && iv.getDrawable() != null) {
+                iv.getDrawable().mutate().setTint(color);
+            }
             ((TextView) item.getChildAt(1)).setTextColor(color);
         }
     }
@@ -384,7 +419,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         gameStatusText.setPadding(0, dp(4), 0, dp(14));
         hero.addView(gameStatusText);
 
-        launchButton = createM3Button("▶  LAUNCH GAME", true);
+        launchButton = createM3Button("LAUNCH GAME", "ic_play_arrow", true);
         launchButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         launchButton.setPadding(dp(16), dp(14), dp(16), dp(14));
         launchButton.setOnClickListener(new View.OnClickListener() {
@@ -582,7 +617,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         presetSummary = addSettingSelector(disp, "Graphics Preset", "Balanced", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 showChoiceDialog("Graphics Preset", PREF_GRAPHICS_PRESET,
-                        new String[]{"Potato (Max FPS · Drops shadows)", "Balanced (Standard Horizon visuals)", "Ultra (Full reflections + shadows)"},
+                        new String[]{"Potato (Max FPS)", "Balanced (Standard)", "Ultra (Full Visuals)"},
                         new String[]{"potato", "balanced", "ultra"});
             }
         });
@@ -590,7 +625,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         upscalerSummary = addSettingSelector(disp, "Upscaler (FSR / CAS)", "AMD FSR 1.0", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 showChoiceDialog("Upscaler", PREF_UPSCALER,
-                        new String[]{"AMD FSR 1.0 (Spatial Upscale + CAS)", "CAS (Contrast Adaptive Sharpening)", "Bilinear (Standard filter)"},
+                        new String[]{"AMD FSR 1.0 (Spatial)", "CAS (Adaptive Sharpening)", "Bilinear"},
                         new String[]{"fsr", "cas", "bilinear"});
             }
         });
@@ -615,7 +650,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         controlSummary = addSettingSelector(ctrl, "Control Scheme", "Tilt A (RR3 Gyro)", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 showChoiceDialog("Control Scheme", PREF_CONTROL_SCHEME,
-                        new String[]{"Tilt A · RR3 Gyro Steering + Touch Zones", "Tilt B · RR3 Touch Steer + Touch Zones", "Classic · On-Screen Virtual Pad", "Gamepad · External Controller"},
+                        new String[]{"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic (Virtual Pad)", "Gamepad (External)"},
                         new String[]{"tilt_a", "tilt_b", "classic", "gamepad"});
             }
         });
@@ -776,10 +811,9 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         folderPathText.setPadding(0, dp(4), 0, dp(8));
         game.addView(folderPathText);
 
-        Button importFolderBtn = createM3Button("📁  Select Game Folder (default.xex)", false);
+        Button importFolderBtn = createM3Button("Select Game Folder (default.xex)", "ic_folder_open", false);
         importFolderBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) { chooseFolder(); }
+            @Override public void onClick(View v) { chooseFolder(); }
         });
         game.addView(importFolderBtn);
 
@@ -818,7 +852,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         groupsBox.setOrientation(LinearLayout.VERTICAL);
         wifi.addView(groupsBox);
 
-        copyButton = createM3Button("Connect & Transfer", true);
+        copyButton = createM3Button("Connect & Transfer", "ic_sync", true);
         copyButton.setOnClickListener(this);
         wifi.addView(copyButton);
 
@@ -905,7 +939,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         if (launchButton != null) {
             launchButton.setEnabled(true);
-            launchButton.setText(ready ? "▶  LAUNCH GAME" : "📁  IMPORT GAME FILES");
+            launchButton.setText(ready ? "LAUNCH GAME" : "IMPORT GAME FILES");
+            setButtonIcon(launchButton, ready ? "ic_play_arrow" : "ic_folder_open", COLOR_BG);
         }
         if (activeBadgesLayout != null) {
             activeBadgesLayout.removeAllViews();
@@ -915,11 +950,10 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
             String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
 
-            activeBadgesLayout.addView(createBadgeView("Driver: " + driver));
-            activeBadgesLayout.addView(createBadgeView("Scaling: " + ("hor_plus".equals(aspect) ? "Widescreen Hor+" : aspect)));
-            activeBadgesLayout.addView(createBadgeView("Preset: " + preset.toUpperCase(Locale.ROOT)));
-            activeBadgesLayout.addView(createBadgeView("Upscaler: " + upscaler.toUpperCase(Locale.ROOT)));
-            activeBadgesLayout.addView(createBadgeView("Controls: " + ("tilt_a".equals(ctrl) ? "RR3 Tilt A" : ctrl)));
+            String[] bgs = {"Driver: " + driver, "Scaling: " + ("hor_plus".equals(aspect) ? "Widescreen Hor+" : aspect),
+                    "Preset: " + preset.toUpperCase(Locale.ROOT), "Upscaler: " + upscaler.toUpperCase(Locale.ROOT),
+                    "Controls: " + ("tilt_a".equals(ctrl) ? "RR3 Tilt A" : ctrl)};
+            for (String b : bgs) activeBadgesLayout.addView(createBadgeView(b));
 
             File xex = new File(base, "game/base/default.xex");
             if (xex.isFile()) {
@@ -961,10 +995,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
         args.add("--present_effect=" + ("fsr".equals(upscaler) ? "fsr" : "cas".equals(upscaler) ? "cas" : "bilinear"));
 
-        if (prefs.getBoolean(PREF_TBDR_TILES, true)) {
-            args.add("--vulkan_tbdr_tile_passes=true");
-        }
-
+        if (prefs.getBoolean(PREF_TBDR_TILES, true)) args.add("--vulkan_tbdr_tile_passes=true");
         if (prefs.getBoolean(PREF_SKIP_MOVIES, true)) args.add("--pinyon_shift_skip_opening_movies=true");
         if (prefs.getBoolean(PREF_TREASURE_MAP, true)) args.add("--dlc_treasure_map=true");
         if (prefs.getBoolean(PREF_GPU_TURBO, false)) args.add("--android_gpu_turbo=true");
