@@ -137,13 +137,14 @@ your PC from your own disc and installed on your own device. It needs Android
 ### Key mobile features
 
 - **Bento Grid launcher & GPU driver manager:** Material 3 launcher featuring quick-launch profiles, custom console card dialogs, and an integrated Vulkan GPU Driver Manager supporting custom Mesa Turnip driver packages.
-- **Dynamic in-game touch overlay & gesture pipeline:** Context-aware switching between **Drive Mode** (multi-touch steering zone, auto/manual throttle, dedicated `<<` Rewind and `(P)` Handbrake buttons, and steering horizon indicator) and **Menu Mode** (tactile D-Pad and standard face buttons for clean title screen and pause menu navigation without driving HUD overlap).
+- **Dynamic in-game touch overlay & gesture pipeline:** Context-aware switching between **Drive Mode** (natural left-thumb steering arrows `‹` `›`, split right-hand vertical pedals for Brake UP and Gas DOWN with dynamic visual feedback, dedicated vector Rewind and `(P)` Handbrake buttons) and **Menu Mode** (tactile D-Pad and face buttons for clean menu navigation without overlap).
 - **FH1 Live Tuning drawer:** Slide-out in-game performance drawer allowing live changes to target frame rates (`30 FPS`, `45 FPS`, `60 FPS`, `120 FPS`), graphics presets (`Potato`, `Balanced`, `Ultra`), FSR 1.0 upscaling, Hor+ Ultrawide / 16:9 Fit, and touch opacity without restarting the game.
+- **Clean launcher integration:** Quit to Launcher returns directly to the Material 3 dashboard.
 
 <p align="center">
-  <img src=".github/android-launcher-settings.png" alt="Android launcher graphics and performance settings" width="390">
+  <img src=".github/android-ingame-60fps.png" alt="In-game 60 FPS rendering on Snapdragon 865 Adreno 650" width="480">
   &nbsp;
-  <img src=".github/android-dialog-card.png" alt="Android console card dialogs" width="390">
+  <img src=".github/android-launcher-ready.png" alt="Android Material 3 launcher ready to drive" width="310">
 </p>
 
 1. Once the game plays on the PC, choose **Android** in the launcher, then

@@ -44,9 +44,9 @@ void Capture(const uint32_t* buffer) {
 class ProbeDriver final : public rex::audio::sdl::SDLAudioDriver {
  public:
   using SDLAudioDriver::SDLAudioDriver;
-  void SubmitFrame(uint32_t pointer) override {
-    Capture(memory_->TranslateVirtual<const uint32_t*>(pointer));
-    SDLAudioDriver::SubmitFrame(pointer);
+  void SubmitHostFrame(const uint32_t* frame) override {
+    Capture(frame);
+    SDLAudioDriver::SubmitHostFrame(frame);
   }
 };
 class ProbeSystem final : public rex::audio::sdl::SDLAudioSystem {

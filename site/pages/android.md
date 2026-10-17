@@ -61,7 +61,7 @@ The Thor and the Astra were measured before SMOOTH 60 moved from no MSAA to 2x.
 A built-in, Bluetooth or USB controller works as on the PC. On a touch screen, Pinyon Shift provides a unified mobile HUD with an interactive mode pill (`[🎮 DRIVE]` / `[🧭 MENU]`):
 
 - **Menu Mode** *(Default on launch)*: Clean semi-transparent D-Pad cluster, face buttons (A, B, X, Y), bumpers (LB, RB), START and MAP for navigating menus cleanly without touch clutter.
-- **Drive Mode**: Real Racing 3 style tilt or touch steering, progressive edge brake and throttle, flick-to-shift, and optional auto-throttle.
+- **Drive Mode**: Ergonomic thumb controls with lower-left subtle steering arrows, right-hand vertical split pedals (brake top, throttle bottom), haptic feedback, flick-to-shift, and experimental tilt gyro.
 - **Top HUD**: Live performance pill (FPS, frame time ms, battery temperature °C), instant camera shutter button, and live tuning gear icon.
 
 ## Troubleshooting

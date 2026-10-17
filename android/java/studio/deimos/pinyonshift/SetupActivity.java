@@ -481,7 +481,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     static final String[] FPS_ITEMS = {"30 FPS (Native)", "60 FPS", "45 FPS", "40 FPS", "120 FPS", "Unlocked"}; static final int[] FPS_VALS = {30, 60, 45, 40, 120, 0};
     static final String[] PRESET_ITEMS = {"Balanced", "Potato", "Ultra"}, PRESET_VALS = {"balanced", "potato", "ultra"};
     static final String[] UPSCALER_ITEMS = {"AMD FSR 1.0", "CAS", "Bilinear"}, UPSCALER_VALS = {"fsr", "cas", "bilinear"};
-    static final String[] CTRL_ITEMS = {"Tilt A (RR3 Gyro)", "Tilt B (Touch Steer)", "Classic Pad", "Gamepad"}, CTRL_VALS = {"tilt_a", "tilt_b", "classic", "gamepad"};
+    static final String[] CTRL_ITEMS = {"Touch Arrows (Default)", "Tilt A (RR3 Gyro)", "Classic Pad", "Gamepad"}, CTRL_VALS = {"arrows", "tilt_a", "classic", "gamepad"};
     static final String[] OPACITY_ITEMS = {"100%", "75%", "50%", "25%", "Hidden"}; static final int[] OPACITY_VALS = {100, 75, 50, 25, 0};
 
     private View buildSettingsTab() {
@@ -508,7 +508,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         touchOpacitySummary = addSettingSelector(ctrl, "Touch Controls Opacity", "touch_opacity");
         addSettingSelector(ctrl, "Touch Controls Guide", "touch_guide").setText("View 4-Layer Gesture Map");
         addSwitchRow(ctrl, "Steering Horizon", "touch_horizon", true);
-        addSwitchRow(ctrl, "Auto-Throttle", PREF_AUTO_THROTTLE, true);
+        addSwitchRow(ctrl, "Auto-Throttle", PREF_AUTO_THROTTLE, false);
         addSwitchRow(ctrl, "Haptic Feedback", PREF_HAPTICS, true);
         addSwitchRow(ctrl, "Smart Auto-Clutch", PinyonShiftActivity.PREF_SMART_CLUTCH, true);
         addSwitchRow(ctrl, "Center Gesture Shift", PinyonShiftActivity.PREF_GESTURE_SHIFT, true);
@@ -642,8 +642,8 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         String u = prefs.getString(PREF_UPSCALER, "fsr");
         setSummary(upscalerSummary, "fsr".equals(u) ? "AMD FSR 1.0" : "cas".equals(u) ? "CAS" : "Bilinear");
         setSummary(themeSummary, colorAccent == 0xFFF1AE36 ? "Horizon Amber" : colorAccent == COLOR_ACCENT_DEFAULT ? "Pinyon Green" : "Custom Accent");
-        String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
-        setSummary(controlSummary, "tilt_a".equals(ctrl) ? "Tilt A (RR3 Gyro)" : "tilt_b".equals(ctrl) ? "Tilt B (RR3 Touch)" : "classic".equals(ctrl) ? "Classic" : "Gamepad");
+        String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "arrows");
+        setSummary(controlSummary, "arrows".equals(ctrl) ? "Touch Arrows" : "tilt_a".equals(ctrl) ? "Tilt A (RR3 Gyro)" : "classic".equals(ctrl) ? "Classic" : "Gamepad");
         int op = prefs.getInt("touch_opacity", 100);
         setSummary(touchOpacitySummary, op == 0 ? "Hidden" : op + "%");
         applySettings();
@@ -749,7 +749,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             String driver = prefs.getString(PREF_SELECTED_DRIVER, "auto");
             String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
             String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
-            String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "tilt_a");
+            String ctrl = prefs.getString(PREF_CONTROL_SCHEME, "arrows");
             boolean vsync = prefs.getBoolean(PREF_VSYNC, true);
             int fps = prefs.getInt(PREF_FPS_CAP, 30);
 
@@ -758,7 +758,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             String scalingStr = "hor_plus".equals(aspect) ? "Widescreen (Hor+)" : aspect;
             String fpsStr = (fps > 0 ? fps + " FPS" : "Unlocked") + " · VSync " + (vsync ? "ON" : "OFF");
             String driverStr = "auto".equals(driver) ? "Turnip (Auto)" : driver;
-            String ctrlStr = "tilt_a".equals(ctrl) ? "RR3 Tilt A" : "tilt_b".equals(ctrl) ? "RR3 Tilt B" : ctrl;
+            String ctrlStr = "arrows".equals(ctrl) ? "Touch Arrows" : "tilt_a".equals(ctrl) ? "Tilt (Gyro)" : ctrl;
 
             File xex = new File(base, "game/base/default.xex");
             boolean isRetail = xex.isFile() && (xex.length() == PinyonShiftActivity.MS_2505_RETAIL_XEX_SIZE);
@@ -795,18 +795,15 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
 
         String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
         boolean potato = "potato".equals(preset);
-        boolean ultra = "ultra".equals(preset);
-        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : ultra ? "1.0" : "0.25"));
-        args.add("--pinyon_shift_fh1_shadows=" + ultra);
+        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : "1.0"));
+        args.add("--pinyon_shift_fh1_shadows=" + (!potato));
 
-        String upscaler = prefs.getString(PREF_UPSCALER, "fsr");
+        String upscaler = prefs.getString(PREF_UPSCALER, "bilinear");
         args.add("--present_effect=" + ("fsr".equals(upscaler) ? "fsr" : "cas".equals(upscaler) ? "cas" : "bilinear"));
 
-        if (prefs.getBoolean(PREF_TBDR_TILES, true)) args.add("--vulkan_tbdr_tile_passes=true");
         if (prefs.getBoolean(PREF_SKIP_MOVIES, true)) args.add("--pinyon_shift_skip_opening_movies=true");
-        if (prefs.getBoolean(PREF_TREASURE_MAP, true)) args.add("--dlc_treasure_map=true");
+        args.add("--pinyon_shift_dlc_treasure_map=" + prefs.getBoolean(PREF_TREASURE_MAP, true));
         if (prefs.getBoolean(PREF_GPU_TURBO, false)) args.add("--android_gpu_turbo=true");
-        if (prefs.getBoolean(PREF_NO_PREAMBLE, true)) args.add("--android_gpu_driver_no_preamble=true");
         if (prefs.getBoolean(PREF_CLUB_OFFLINE, true)) {
             args.add("--pinyon_shift_car_challenge_gate_probe=true");
             args.add("--xam_report_live_signin=true");
@@ -815,22 +812,19 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
     }
 
     private void applySettings() {
-        String[] args = buildCurrentArguments();
-        File argFile = new File(base, ARGUMENTS_FILE);
-        argFile.getParentFile().mkdirs();
-        try (OutputStream out = new FileOutputStream(argFile)) {
-            for (String a : args) out.write((a + "\n").getBytes(StandardCharsets.UTF_8));
+        File aF = new File(base, ARGUMENTS_FILE); aF.getParentFile().mkdirs();
+        try (OutputStream out = new FileOutputStream(aF)) {
+            for (String a : buildCurrentArguments()) out.write((a + "\n").getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) {}
-
-        File configFile = new File(base, CONFIG_TOML);
-        configFile.getParentFile().mkdirs();
-        try (OutputStream out = new FileOutputStream(configFile)) {
+        File cF = new File(base, CONFIG_TOML); cF.getParentFile().mkdirs();
+        try (OutputStream out = new FileOutputStream(cF)) {
             String toml = "[display]\nscaling = \"" + prefs.getString(PREF_ASPECT_MODE, "hor_plus") + "\"\nvsync = "
                     + prefs.getBoolean(PREF_VSYNC, true) + "\nfps_limit = " + prefs.getInt(PREF_FPS_CAP, 60)
-                    + "\n\n[touch]\nscheme = \"" + prefs.getString(PREF_CONTROL_SCHEME, "tilt_a")
+                    + "\n\n[touch]\nscheme = \"" + prefs.getString(PREF_CONTROL_SCHEME, "arrows")
                     + "\"\nopacity = " + prefs.getInt("touch_opacity", 100)
                     + "\nhorizon = " + prefs.getBoolean("touch_horizon", true)
-                    + "\nhaptics = " + prefs.getBoolean(PREF_HAPTICS, true) + "\n";
+                    + "\nhaptics = " + prefs.getBoolean(PREF_HAPTICS, true)
+                    + "\n\n[dlc]\ntreasure_map = " + prefs.getBoolean(PREF_TREASURE_MAP, true) + "\n";
             out.write(toml.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) {}
     }

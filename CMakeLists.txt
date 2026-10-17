@@ -219,13 +219,6 @@ add_executable(pinyon_shift_fh1_texture_import EXCLUDE_FROM_ALL
     ${REXSDK_DIR}/src/graphics/pipeline/texture/info_formats.cpp)
 target_include_directories(pinyon_shift_fh1_texture_import PRIVATE
     ${REXSDK_DIR}/include)
-if(WIN32)
-    target_sources(pinyon_shift_fh1_texture_import PRIVATE
-        ${REXSDK_DIR}/src/core/math_msvc.cpp)
-else()
-    target_sources(pinyon_shift_fh1_texture_import PRIVATE
-        ${REXSDK_DIR}/src/core/math_gcc.cpp)
-endif()
 target_include_directories(pinyon_shift_fh1_archive_extract PRIVATE
     src ${REXSDK_DIR}/include)
 target_link_libraries(pinyon_shift_fh1_archive_extract PRIVATE rex::runtime)

@@ -1,75 +1,22 @@
 package studio.deimos.pinyonshift;
 
 import android.app.Dialog;
-import android.content.BroadcastReceiver;
-import android.content.ContentResolver;
-import android.content.ContentValues;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.SharedPreferences;
+import android.content.*;
 import android.content.res.AssetManager;
-import android.database.Cursor;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
+import android.graphics.*;
+import android.graphics.drawable.*;
+import android.hardware.*;
 import android.net.Uri;
-import android.os.BatteryManager;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.FileObserver;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.SystemClock;
-import android.os.VibrationEffect;
-import android.os.Vibrator;
+import android.os.*;
 import android.provider.MediaStore;
-import android.provider.OpenableColumns;
-import android.system.ErrnoException;
-import android.system.Os;
-import android.util.DisplayMetrics;
-import android.util.Log;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.KeyEvent;
-import android.view.MotionEvent;
-import android.view.Surface;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.Window;
-import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
+import android.system.*;
+import android.util.*;
+import android.view.*;
+import android.widget.*;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InterfaceAddress;
-import java.net.NetworkInterface;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.io.*;
+import java.util.*;
+import java.util.regex.*;
 import org.libsdl.app.SDLActivity;
 
 public class PinyonShiftActivity extends SDLActivity implements View.OnClickListener {
@@ -80,10 +27,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     public static final int BTN_START = 0x0010, BTN_BACK = 0x0020, BTN_LEFT_SHOULDER = 0x0100, BTN_RIGHT_SHOULDER = 0x0200;
     public static final int BTN_A = 0x1000, BTN_B = 0x2000, BTN_X = 0x4000, BTN_Y = 0x8000;
 
-    public static final String PREF_SMART_CLUTCH = "pref_smart_clutch", PREF_GESTURE_SHIFT = "pref_gesture_shift";
-    public static final String PREF_HUD_HITBOXES = "pref_hud_hitboxes", PREF_MENU_MODE_AUTO = "pref_menu_mode_auto";
-    public static final String PREF_LOOK_AROUND = "pref_look_around";
-    private static final String PREF_ASPECT_MODE = "pref_aspect_mode";
+    public static final String PREF_SMART_CLUTCH = "pref_smart_clutch", PREF_GESTURE_SHIFT = "pref_gesture_shift", PREF_HUD_HITBOXES = "pref_hud_hitboxes", PREF_MENU_MODE_AUTO = "pref_menu_mode_auto", PREF_LOOK_AROUND = "pref_look_around", PREF_ASPECT_MODE = "pref_aspect_mode";
 
     public static native void nativeSetPadState(float steer, float throttle, float brake, float lookX, float lookY, int buttons);
     public static native void nativeAction(int actionId, float value);
@@ -91,162 +35,146 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     public static native void nativeSetCVar(String name, String value);
     public static native float nativeGetFrameTimeMs();
 
-    private File stateDir;
-    private File driversDir;
+    private File stateDir, driversDir;
     private SharedPreferences prefs;
-
-    // Controls and Overlay
     private RR3OverlayView rr3Overlay;
     private View quickHudDrawer;
 
-    // Sensors & Gyro Steering
     private SensorManager sensorManager;
     private Sensor gameRotationSensor;
-    private float baselineRoll = 0.0f;
-    private boolean gyroCalibrated = false;
-    private float currentTiltDegrees = 0.0f;
-    private String controlScheme = "tilt_a";
-    private boolean autoThrottle = true;
-    private boolean inMenuMode = true;
-    private boolean showFpsOverlay = true;
+    private float baselineRoll = 0.0f, currentTiltDegrees = 0.0f;
+    private boolean gyroCalibrated = false, autoThrottle = false, inMenuMode = false, showFpsOverlay = true, thermalPacerEnabled = true;
+    private String controlScheme = "arrows";
     private TextView hudTempText;
 
-    // Active input state for direct C++ synthesis
-    private volatile float currentSteerX = 0.0f;
-    private volatile float currentSteerY = 0.0f;
-    private volatile float currentThrottle = 0.0f;
-    private volatile float currentBrake = 0.0f;
-    private volatile float currentLookX = 0.0f;
-    private volatile float currentLookY = 0.0f;
+    private volatile float currentSteerX = 0.0f, currentSteerY = 0.0f, currentThrottle = 0.0f, currentBrake = 0.0f, currentLookX = 0.0f, currentLookY = 0.0f;
     private volatile int currentButtons = 0;
 
-    // Thermal Frame Pacer
     private BroadcastReceiver thermalReceiver;
     private float currentBatteryTempC = 25.0f;
-    private boolean thermalPacerEnabled = true;
     private int currentFpsTarget = 30;
-
-    // Photo Observer
     private FileObserver photoObserver;
     private static Vibrator sVibrator;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        File external = getExternalFilesDir(null);
-        File base = external != null ? external : getFilesDir();
+        File base = getExternalFilesDir(null) != null ? getExternalFilesDir(null) : getFilesDir();
         stateDir = new File(base, "state");
         setDefaultEnvironment("HOME", getFilesDir().getAbsolutePath());
         setDefaultEnvironment("PINYON_SHIFT_STATE_ROOT", stateDir.getAbsolutePath());
         setDefaultEnvironment("PINYON_SHIFT_GAME_ROOT", new File(base, "game/base").getAbsolutePath());
-
         driversDir = new File(base, "state/drivers");
         setDefaultEnvironment("REX_ANDROID_DRIVERS_DIR", driversDir.getAbsolutePath());
-
         installBundledDrivers();
         String adreno = adrenoModel();
         if (adreno != null) {
             setDefaultEnvironment("PINYON_SHIFT_ADRENO_MODEL", adreno);
-            String recommended = recommendedDriver(adreno);
-            if (recommended != null) {
-                setDefaultEnvironment("REX_ANDROID_RECOMMENDED_DRIVER", recommended);
-            }
+            String rec = recommendedDriver(adreno);
+            if (rec != null) setDefaultEnvironment("REX_ANDROID_RECOMMENDED_DRIVER", rec);
         }
-
-        if (new File(base, "state/cache/rally_adapter/rally-stage.toml").isFile()) {
-            setDefaultEnvironment("PINYON_SHIFT_RALLY_PREPARED", "1");
-        }
-
+        if (new File(base, "state/cache/rally_adapter/rally-stage.toml").isFile()) setDefaultEnvironment("PINYON_SHIFT_RALLY_PREPARED", "1");
         File manifest = new File(getFilesDir(), "pinyon_shift_build.json");
         try (InputStream in = getAssets().open("pinyon_shift_build.json"); OutputStream out = new FileOutputStream(manifest)) {
-            copy(in, out);
-            setEnvironment("PINYON_SHIFT_BUILD_MANIFEST", manifest.getAbsolutePath());
-        } catch (IOException error) {
-            Log.w(TAG, "no build manifest in the package", error);
-        }
-
-        Intent intent = getIntent();
-        Bundle extras = intent != null ? intent.getExtras() : null;
-        if (extras != null) {
-            for (String key : extras.keySet()) {
-                if (key.startsWith("ENV_")) {
-                    setEnvironment(key.substring(4), extras.getString(key, ""));
-                }
-            }
-        }
-
+            copy(in, out); setEnvironment("PINYON_SHIFT_BUILD_MANIFEST", manifest.getAbsolutePath());
+        } catch (IOException ignored) {}
+        Bundle extras = getIntent() != null ? getIntent().getExtras() : null;
+        if (extras != null) for (String k : extras.keySet()) if (k.startsWith("ENV_")) setEnvironment(k.substring(4), extras.getString(k, ""));
         prefs = getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE);
-        controlScheme = prefs.getString("control_scheme", "tilt_a");
-        autoThrottle = prefs.getBoolean("auto_throttle", true);
+        controlScheme = prefs.getString("control_scheme", "arrows");
+        autoThrottle = prefs.getBoolean("auto_throttle", false);
         showFpsOverlay = prefs.getBoolean("fps_overlay", true);
         thermalPacerEnabled = prefs.getBoolean("thermal_pacer", true);
         if (autoThrottle) currentThrottle = 1.0f;
-
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= 28) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-
+        enforceCutoutMode();
         int res = prefs.getInt("res_scale", 720);
-        if (res <= 2) {
-            res = (res == 2) ? 1440 : 720;
-            prefs.edit().putInt("res_scale", res).apply();
-        }
+        if (res <= 2) { res = (res == 2) ? 1440 : 720; prefs.edit().putInt("res_scale", res).apply(); }
         applySurfaceResolution(res);
-
-        initHaptics();
-        initSensors();
-        initThermalPacer();
+        initHaptics(); initSensors(); initThermalPacer();
         startPhotoWatcher(new File(stateDir, "photos"));
         attachMobileOverlays();
+    }
+
+    private void enforceCutoutMode() {
+        if (getWindow() == null) return;
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30 ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+            if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
+        }
+        if (mLayout != null) mLayout.setFitsSystemWindows(false);
+        if (mSurface != null) mSurface.setFitsSystemWindows(false);
+    }
+
+    @Override
+    protected org.libsdl.app.SDLSurface createSDLSurface(Context context) {
+        return new org.libsdl.app.SDLSurface(context) {
+            @Override
+            public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    SDLActivity.onNativeInsetsChanged(0, 0, 0, 0);
+                }
+                return insets;
+            }
+        };
+    }
+
+    @Override
+    protected String[] getArguments() {
+        File f = new File(stateDir != null ? stateDir : new File(getFilesDir(), "state"), "config/android-arguments.txt");
+        if (!f.exists()) return new String[0];
+        List<String> list = new ArrayList<>();
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            for (String l; (l = r.readLine()) != null; ) { l = l.trim(); if (!l.isEmpty() && !l.startsWith("#")) list.add(l); }
+        } catch (IOException ignored) {}
+        return list.toArray(new String[0]);
     }
 
     private void applySurfaceResolution(int s) {
         if (mSurface == null) return;
         ViewGroup.LayoutParams lp = mSurface.getLayoutParams();
-        if (lp != null) {
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
-            mSurface.setLayoutParams(lp);
-        }
+        if (lp != null) { lp.width = lp.height = ViewGroup.LayoutParams.MATCH_PARENT; mSurface.setLayoutParams(lp); }
         if (s == 540 || s == 360) {
             DisplayMetrics dm = getResources().getDisplayMetrics();
             float asp = (float) Math.max(dm.widthPixels, dm.heightPixels) / (float) Math.max(1, Math.min(dm.widthPixels, dm.heightPixels));
-            int w = Math.round(s * asp);
-            mSurface.getHolder().setFixedSize(w, s);
-        } else {
-            mSurface.getHolder().setSizeFromLayout();
-        }
+            mSurface.getHolder().setFixedSize(Math.round(s * asp), s);
+        } else mSurface.getHolder().setSizeFromLayout();
     }
 
     Dialog createCardDialog(String title, LinearLayout c) {
         Dialog d = new Dialog(this); d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         if (d.getWindow() != null) d.getWindow().setBackgroundDrawable(new ColorDrawable(0));
         c.setOrientation(LinearLayout.VERTICAL); c.setPadding(dp(18), dp(18), dp(18), dp(14));
-        GradientDrawable bg = new GradientDrawable(); bg.setColor(0xFF181D1A); bg.setCornerRadius(dp(20)); bg.setStroke(dp(1), 0xFF26302A);
+        GradientDrawable bg = new GradientDrawable(); bg.setColor(0xFF181D1A); bg.setCornerRadius(dp(18)); bg.setStroke(dp(1), 0xFF26302A);
         c.setBackground(bg);
-        if (title != null) {
-            TextView tv = new TextView(this); tv.setText(title); tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16); tv.setTextColor(Color.WHITE); tv.setTypeface(Typeface.DEFAULT_BOLD); tv.setPadding(0, 0, 0, dp(10)); c.addView(tv);
-        }
+        if (title != null) { TextView tv = new TextView(this); tv.setText(title); tv.setTextColor(Color.WHITE); tv.setTypeface(Typeface.DEFAULT_BOLD); tv.setPadding(0, 0, 0, dp(8)); c.addView(tv); }
         d.setContentView(c); return d;
     }
 
     Button createDialogBtn(String text, boolean primary) {
-        Button b = new Button(this); b.setText(text); b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13); b.setTextColor(primary ? 0xFF0B1F11 : Color.WHITE);
+        Button b = new Button(this); b.setText(text); b.setTextColor(primary ? 0xFF0B1F11 : Color.WHITE);
         GradientDrawable gd = new GradientDrawable(); gd.setColor(primary ? 0xFF5CE68B : 0xFF212923); gd.setCornerRadius(dp(10));
-        b.setBackground(gd); b.setPadding(dp(12), dp(8), dp(12), dp(8)); return b;
+        b.setBackground(gd); b.setPadding(dp(12), dp(6), dp(12), dp(6)); return b;
     }
 
     private void confirmQuit() {
         LinearLayout c = new LinearLayout(this); final Dialog d = createCardDialog("Quit Game", c);
-        TextView msg = new TextView(this); msg.setText("Exit Pinyon Shift and return to launcher?"); msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13); msg.setTextColor(0xFF93A597); msg.setPadding(0, dp(4), 0, dp(14)); c.addView(msg);
+        TextView msg = new TextView(this); msg.setText("Exit to launcher?"); msg.setTextColor(0xFF93A597); msg.setPadding(0, dp(2), 0, dp(12)); c.addView(msg);
         LinearLayout row = new LinearLayout(this);
-        Button cancel = createDialogBtn("Cancel", false); cancel.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); } });
-        row.addView(cancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        View sp = new View(this); row.addView(sp, new LinearLayout.LayoutParams(dp(10), dp(1)));
-        Button quit = createDialogBtn("Quit", true); quit.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { d.dismiss(); finishAffinity(); System.exit(0); } });
-        row.addView(quit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        Button cancel = createDialogBtn("Cancel", false); cancel.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { d.dismiss(); } });
+        Button quit = createDialogBtn("Quit", true);
+        quit.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                d.dismiss();
+                Intent intent = new Intent(PinyonShiftActivity.this, SetupActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(intent);
+                finish();
+            }
+        });
+        row.addView(cancel, new LinearLayout.LayoutParams(0, -2, 1.0f)); row.addView(new View(this), new LinearLayout.LayoutParams(dp(10), 1)); row.addView(quit, new LinearLayout.LayoutParams(0, -2, 1.0f));
         c.addView(row); d.show();
     }
 
@@ -266,24 +194,40 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     @Override
     protected void onResume() {
         super.onResume();
+        enforceCutoutMode();
+        if (Build.VERSION.SDK_INT >= 30) {
+            try { SDLActivity.onNativeInsetsChanged(0, 0, 0, 0); } catch (Throwable ignored) {}
+        }
         applySurfaceResolution(prefs.getInt("res_scale", 720));
         applyDisplayRefreshRate(currentFpsTarget);
-        if (sensorManager != null && gameRotationSensor != null && "tilt_a".equals(controlScheme)) {
+        boolean gyroOn = isGyroActive();
+        if (sensorManager != null && gameRotationSensor != null && gyroOn) {
             sensorManager.registerListener(sensorListener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME);
+        }
+        String asp = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
+        try { nativeAction(4, "hor_plus".equals(asp) ? 1.0f : 0.0f); } catch (UnsatisfiedLinkError ignored) {}
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            enforceCutoutMode();
+            if (Build.VERSION.SDK_INT >= 30) {
+                try { SDLActivity.onNativeInsetsChanged(0, 0, 0, 0); } catch (Throwable ignored) {}
+            }
         }
     }
 
     private void applyDisplayRefreshRate(int targetFps) {
-        if (Build.VERSION.SDK_INT >= 30 && getWindow() != null) {
-            WindowManager.LayoutParams params = getWindow().getAttributes();
-            if (targetFps == 30 || targetFps == 60) params.preferredRefreshRate = 60.0f;
-            else if (targetFps == 120) params.preferredRefreshRate = 120.0f;
-            getWindow().setAttributes(params);
-        }
-        if (Build.VERSION.SDK_INT >= 30 && mSurface != null && mSurface.getHolder() != null && mSurface.getHolder().getSurface() != null) {
-            try {
-                mSurface.getHolder().getSurface().setFrameRate((float) targetFps, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
-            } catch (Throwable ignored) {}
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (getWindow() != null) {
+                WindowManager.LayoutParams p = getWindow().getAttributes();
+                p.preferredRefreshRate = (targetFps == 120) ? 120.0f : 60.0f; getWindow().setAttributes(p);
+            }
+            if (mSurface != null && mSurface.getHolder() != null && mSurface.getHolder().getSurface() != null) {
+                try { mSurface.getHolder().getSurface().setFrameRate((float) targetFps, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -314,27 +258,16 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_BACK) {
-                inMenuMode = !inMenuMode;
-                pulseButton(inMenuMode ? BTN_START : BTN_B, 120);
-                if (rr3Overlay != null) rr3Overlay.postInvalidate();
-                return true;
-            }
-            int b = code == KeyEvent.KEYCODE_DPAD_UP ? BTN_DPAD_UP : code == KeyEvent.KEYCODE_DPAD_DOWN ? BTN_DPAD_DOWN :
-                    code == KeyEvent.KEYCODE_DPAD_LEFT ? BTN_DPAD_LEFT : code == KeyEvent.KEYCODE_DPAD_RIGHT ? BTN_DPAD_RIGHT :
-                    (code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_SPACE) ? BTN_A :
-                    code == KeyEvent.KEYCODE_BUTTON_B ? BTN_B : code == KeyEvent.KEYCODE_BUTTON_X ? BTN_X :
-                    code == KeyEvent.KEYCODE_BUTTON_Y ? BTN_Y : code == KeyEvent.KEYCODE_BUTTON_START ? BTN_START : 0;
+            int c = event.getKeyCode();
+            if (c == KeyEvent.KEYCODE_BACK) { inMenuMode = !inMenuMode; pulseButton(inMenuMode ? BTN_START : BTN_B, 120); if (rr3Overlay != null) rr3Overlay.postInvalidate(); return true; }
+            int b = c == 19 ? BTN_DPAD_UP : c == 20 ? BTN_DPAD_DOWN : c == 21 ? BTN_DPAD_LEFT : c == 22 ? BTN_DPAD_RIGHT : (c == 96 || c == 66 || c == 62) ? BTN_A : c == 97 ? BTN_B : c == 99 ? BTN_X : c == 100 ? BTN_Y : c == 108 ? BTN_START : 0;
             if (b != 0) { pulseButton(b, 120); return true; }
         }
         return super.dispatchKeyEvent(event);
     }
 
     private void flushOverrides() {
-        try {
-            nativeSetPadState(currentSteerX, currentThrottle, currentBrake, currentLookX, currentLookY, currentButtons);
-        } catch (UnsatisfiedLinkError ignored) {}
+        try { nativeSetPadState(currentSteerX, currentThrottle, currentBrake, currentLookX, currentLookY, currentButtons); } catch (UnsatisfiedLinkError ignored) {}
     }
 
     private void pulseButton(final int mask, int durationMs) {
@@ -345,64 +278,43 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     }
 
     private void triggerShift(final boolean shiftUp) {
-        boolean smartClutch = prefs.getBoolean(PREF_SMART_CLUTCH, true);
         final int shiftBtn = shiftUp ? BTN_B : BTN_X;
-        if (smartClutch) {
+        if (prefs.getBoolean(PREF_SMART_CLUTCH, true)) {
             currentButtons |= BTN_LEFT_SHOULDER; flushOverrides(); vibrate(this, 10, 100);
-            mainHandler.postDelayed(new Runnable() {
-                @Override public void run() { currentButtons |= shiftBtn; flushOverrides(); }
-            }, 40);
-            mainHandler.postDelayed(new Runnable() {
-                @Override public void run() { currentButtons &= ~(BTN_LEFT_SHOULDER | shiftBtn); flushOverrides(); }
-            }, 80);
-        } else {
-            pulseButton(shiftBtn, 90);
-        }
+            mainHandler.postDelayed(new Runnable() { @Override public void run() { currentButtons |= shiftBtn; flushOverrides(); } }, 40);
+            mainHandler.postDelayed(new Runnable() { @Override public void run() { currentButtons &= ~(BTN_LEFT_SHOULDER | shiftBtn); flushOverrides(); } }, 80);
+        } else pulseButton(shiftBtn, 90);
     }
 
     static String adrenoModel() {
-        try (BufferedReader reader = new BufferedReader(new FileReader("/sys/class/kgsl/kgsl-3d0/gpu_model"))) {
-            String line = reader.readLine();
-            Matcher match = line != null ? Pattern.compile("Adreno.*?(\\d{3})").matcher(line) : null;
-            if (match != null && match.find()) return match.group(1);
+        try (BufferedReader r = new BufferedReader(new FileReader("/sys/class/kgsl/kgsl-3d0/gpu_model"))) {
+            String l = r.readLine();
+            Matcher m = l != null ? Pattern.compile("Adreno.*?(\\d{3})").matcher(l) : null;
+            if (m != null && m.find()) return m.group(1);
         } catch (IOException ignored) {}
         String hw = ((Build.HARDWARE != null ? Build.HARDWARE : "") + " " + (Build.BOARD != null ? Build.BOARD : "")
                 + " " + (Build.VERSION.SDK_INT >= 31 && Build.SOC_MODEL != null ? Build.SOC_MODEL : "")).toUpperCase(Locale.ROOT);
-        String[][] m = {{"SM8750", "830"}, {"SM7635", "810"}, {"VOLCANO", "810"}, {"SM8650", "750"},
-                {"SM8550", "740"}, {"QCS8550", "740"}, {"SM8635", "735"}, {"SM7675", "732"},
-                {"SM8450", "730"}, {"SM8475", "730"}, {"SM7475", "725"}, {"SM7550", "720"},
-                {"SM8350", "660"}, {"SM8250", "650"}};
-        for (String[] p : m) if (hw.contains(p[0])) return p[1];
+        for (String p : new String[]{"SM8750:830","SM7635:810","VOLCANO:810","SM8650:750","SM8550:740","QCS8550:740","SM8635:735","SM7675:732","SM8450:730","SM8475:730","SM7475:725","SM7550:720","SM8350:660","SM8250:650"}) {
+            String[] x = p.split(":"); if (hw.contains(x[0])) return x[1];
+        }
         return null;
     }
 
     static String recommendedDriver(String adreno) {
         if (adreno == null || adreno.isEmpty()) return null;
-        try {
-            if (Integer.parseInt(adreno) >= 600) return "turnip-gen8-v37";
-        } catch (NumberFormatException ignored) {}
+        try { if (Integer.parseInt(adreno) >= 600) return "turnip-gen8-v37"; } catch (NumberFormatException ignored) {}
         return null;
     }
 
-    private void installBundledDrivers() {
-        installBundledDrivers(getAssets(), driversDir);
-    }
-
-    private static void setDefaultEnvironment(String name, String value) {
-        if (Os.getenv(name) == null) setEnvironment(name, value);
-    }
-
-    private static void setEnvironment(String name, String value) {
-        try { Os.setenv(name, value, true); } catch (ErrnoException ignored) {}
-    }
+    private void installBundledDrivers() { installBundledDrivers(getAssets(), driversDir); }
+    private static void setDefaultEnvironment(String name, String value) { if (Os.getenv(name) == null) setEnvironment(name, value); }
+    private static void setEnvironment(String name, String value) { try { Os.setenv(name, value, true); } catch (ErrnoException ignored) {} }
 
     private void initSensors() {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             gameRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
-            if (gameRotationSensor == null) {
-                gameRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
-            }
+            if (gameRotationSensor == null) gameRotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         }
     }
 
@@ -412,11 +324,15 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
         @Override
         public void onSensorChanged(SensorEvent event) {
-            if (!"tilt_a".equals(controlScheme) || inMenuMode) return;
+            if (!isGyroActive() || inMenuMode) return;
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
-            SensorManager.getOrientation(rotationMatrix, orientationAngles);
-            float rollRad = orientationAngles[2];
-            float rollDeg = (float) Math.toDegrees(rollRad);
+            float[] remapped = new float[9];
+            int rot = 0; try { rot = getWindowManager().getDefaultDisplay().getRotation(); } catch (Throwable ignored) {}
+            if (rot == Surface.ROTATION_90) SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remapped);
+            else if (rot == Surface.ROTATION_270) SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remapped);
+            else System.arraycopy(rotationMatrix, 0, remapped, 0, 9);
+            SensorManager.getOrientation(remapped, orientationAngles);
+            float rollDeg = (float) Math.toDegrees(orientationAngles[2]);
 
             if (!gyroCalibrated) {
                 baselineRoll = rollDeg;
@@ -428,26 +344,25 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             if (delta < -180.0f) delta += 360.0f;
             currentTiltDegrees = delta;
 
-            float deadband = 2.0f;
-            float maxAngle = 32.0f;
-            float steer = 0.0f;
+            if (rr3Overlay != null) rr3Overlay.setTiltAngle(currentTiltDegrees);
+            if (rr3Overlay != null && rr3Overlay.touchSteerActive) return;
+
+            float deadband = 2.0f, maxAngle = 30.0f, steer = 0.0f;
             if (Math.abs(delta) > deadband) {
-                float effective = (Math.abs(delta) - deadband) / (maxAngle - deadband);
-                effective = Math.min(1.0f, Math.max(0.0f, effective));
-                float curved = (float) Math.pow(effective, 1.4);
-                steer = Math.copySign(curved, delta);
+                float eff = Math.min(1.0f, (Math.abs(delta) - deadband) / (maxAngle - deadband));
+                steer = Math.copySign((float) Math.pow(eff, 1.3), delta);
             }
             currentSteerX = steer;
             flushOverrides();
-
-            if (rr3Overlay != null) {
-                rr3Overlay.setTiltAngle(currentTiltDegrees);
-            }
         }
 
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {}
     };
+
+    private boolean isGyroActive() {
+        return "tilt_a".equals(controlScheme) && prefs.getBoolean("experimental_gyro", false);
+    }
 
     public void recalibrateGyro() {
         gyroCalibrated = false;
@@ -455,55 +370,58 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     }
 
     private void initHaptics() {
-        sVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                android.os.VibratorManager vm = (android.os.VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                if (vm != null) sVibrator = vm.getDefaultVibrator();
+            } catch (Throwable ignored) {}
+        }
+        if (sVibrator == null) {
+            try { sVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE); } catch (Throwable ignored) {}
+        }
     }
 
     public static void vibrate(Context context, int ms, int amplitude) {
         if (sVibrator == null && context != null) {
-            sVibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            if (Build.VERSION.SDK_INT >= 31) {
+                try {
+                    android.os.VibratorManager vm = (android.os.VibratorManager) context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                    if (vm != null) sVibrator = vm.getDefaultVibrator();
+                } catch (Throwable ignored) {}
+            }
+            if (sVibrator == null) {
+                try { sVibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE); } catch (Throwable ignored) {}
+            }
         }
         if (sVibrator == null || !sVibrator.hasVibrator()) return;
-        if (Build.VERSION.SDK_INT >= 26) {
-            sVibrator.vibrate(VibrationEffect.createOneShot(ms, Math.min(255, Math.max(1, amplitude))));
-        } else {
-            sVibrator.vibrate(ms);
-        }
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                sVibrator.vibrate(VibrationEffect.createOneShot(ms, Math.min(255, Math.max(1, amplitude))));
+            } else {
+                sVibrator.vibrate(ms);
+            }
+        } catch (Throwable ignored) {}
     }
 
     private void attachMobileOverlays() {
         runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                ViewGroup content = findViewById(android.R.id.content);
-                if (content == null) return;
-
+            @Override public void run() {
+                ViewGroup content = findViewById(android.R.id.content); if (content == null) return;
                 rr3Overlay = new RR3OverlayView(PinyonShiftActivity.this);
-                content.addView(rr3Overlay, new ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-                quickHudDrawer = createQuickHudDrawer();
-                quickHudDrawer.setVisibility(View.GONE);
-                content.addView(quickHudDrawer);
+                content.addView(rr3Overlay, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                quickHudDrawer = createQuickHudDrawer(); quickHudDrawer.setVisibility(View.GONE); content.addView(quickHudDrawer);
             }
         });
     }
 
-    private View bindClick(View v, Object tag) {
-        v.setTag(tag);
-        v.setOnClickListener(this);
-        return v;
-    }
-
-    private void addToggle(LinearLayout p, String text, boolean active, String tag) {
-        p.addView(bindClick(createChipButton(text, active), tag));
-    }
+    private View bindClick(View v, Object tag) { v.setTag(tag); v.setOnClickListener(this); return v; }
+    private void addToggle(LinearLayout p, String text, boolean active, String tag) { p.addView(bindClick(createChipButton(text, active), tag)); }
+    private void addSwitch(LinearLayout p, String name, boolean val, String tag) { addToggle(p, name + ": " + (val ? "ON" : "OFF"), val, tag); }
 
     private void addHudRow(LinearLayout items, String title, String[] labels, String[] tags, int activeIdx) {
-        addHudSectionTitle(items, title);
-        LinearLayout row = new LinearLayout(this);
+        addHudSectionTitle(items, title); LinearLayout row = new LinearLayout(this);
         for (int i = 0; i < labels.length; i++) {
-            Button b = createChipButton(labels[i], i == activeIdx);
-            row.addView(bindClick(b, tags[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+            row.addView(bindClick(createChipButton(labels[i], i == activeIdx), tags[i]), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
         }
         items.addView(row);
     }
@@ -513,9 +431,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         boolean show = quickHudDrawer.getVisibility() != View.VISIBLE;
         if (show) {
             readBatteryTemp(registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)));
-            if (hudTempText != null) {
-                hudTempText.setText(String.format(Locale.ROOT, "Battery Temp: %.1f°C", currentBatteryTempC));
-            }
+            if (hudTempText != null) hudTempText.setText(String.format(Locale.ROOT, "Battery Temp: %.1f°C", currentBatteryTempC));
             quickHudDrawer.bringToFront();
         }
         quickHudDrawer.setVisibility(show ? View.VISIBLE : View.GONE);
@@ -523,156 +439,112 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
     private View createQuickHudDrawer() {
         int accent = getThemeAccent(this);
-        FrameLayout drawer = new FrameLayout(this);
-        drawer.setBackgroundColor(Color.argb(245, 16, 24, 19));
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT);
-        lp.gravity = Gravity.START;
-        drawer.setLayoutParams(lp);
-
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout items = new LinearLayout(this);
-        items.setOrientation(LinearLayout.VERTICAL);
-        items.setPadding(dp(16), dp(16), dp(16), dp(16));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("FH1 Live Tuning");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(accent);
+        FrameLayout drawer = new FrameLayout(this); drawer.setBackgroundColor(0xF5101813);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT); lp.gravity = Gravity.START; drawer.setLayoutParams(lp);
+        ScrollView scroll = new ScrollView(this); LinearLayout items = new LinearLayout(this);
+        items.setOrientation(LinearLayout.VERTICAL); items.setPadding(dp(16), dp(16), dp(16), dp(16));
+        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this); title.setText("FH1 Live Tuning"); title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16); title.setTypeface(Typeface.DEFAULT_BOLD); title.setTextColor(accent);
         header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        Button closeBtn = createChipButton("Close", false);
-        bindClick(closeBtn, "hud_close");
-        header.addView(closeBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        header.addView(bindClick(createChipButton("Close", false), "hud_close"), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         items.addView(header);
-
-        hudTempText = new TextView(this);
-        hudTempText.setText(String.format(Locale.ROOT, "Battery Temp: %.1f°C", currentBatteryTempC));
-        hudTempText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        hudTempText.setTextColor(Color.rgb(147, 165, 151));
-        hudTempText.setPadding(0, dp(4), 0, dp(10));
+        hudTempText = new TextView(this); hudTempText.setText(String.format(Locale.ROOT, "Battery Temp: %.1f°C", currentBatteryTempC));
+        hudTempText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12); hudTempText.setTextColor(0xFF93A597); hudTempText.setPadding(0, dp(4), 0, dp(10));
         items.addView(hudTempText);
-
         addHudSectionTitle(items, "Quick Toggles");
-        addToggle(items, autoThrottle ? "Auto Accelerate: ON" : "Auto Accelerate: OFF", autoThrottle, "toggle_auto_throttle");
-        addToggle(items, showFpsOverlay ? "Performance Overlay: ON" : "Performance Overlay: OFF", showFpsOverlay, "toggle_fps_overlay");
-        addToggle(items, inMenuMode ? "Menu Mode D-Pad: ON" : "Menu Mode D-Pad: OFF", inMenuMode, "toggle_menu_mode");
-
-        addHudRow(items, "Target FPS", new String[]{"30 FPS", "45 FPS", "60 FPS", "120 FPS"},
-                new String[]{"fps_30", "fps_45", "fps_60", "fps_120"},
-                currentFpsTarget == 120 ? 3 : currentFpsTarget == 60 ? 2 : currentFpsTarget == 45 ? 1 : 0);
-
-        addHudRow(items, "Render Preset", new String[]{"Potato", "Balanced", "Ultra"},
-                new String[]{"preset_potato", "preset_balanced", "preset_ultra"}, -1);
-
-        addHudRow(items, "Output Upscaler", new String[]{"FSR 1.0", "CAS", "Bilinear"},
-                new String[]{"up_fsr", "up_cas", "up_bilinear"}, -1);
-
+        addSwitch(items, "Auto Accelerate", autoThrottle, "toggle_auto_throttle");
+        addSwitch(items, "Performance Overlay", showFpsOverlay, "toggle_fps_overlay");
+        addSwitch(items, "Menu Mode D-Pad", inMenuMode, "toggle_menu_mode");
+        addSwitch(items, "Experimental Gyro", prefs.getBoolean("experimental_gyro", false), "toggle_gyro");
+        addHudRow(items, "Control Scheme", new String[]{"Arrows", "Tilt Gyro", "Classic"}, new String[]{"ctrl_arrows", "ctrl_tilt_a", "ctrl_classic"}, "tilt_a".equals(controlScheme) ? 1 : "classic".equals(controlScheme) ? 2 : 0);
+        addSwitch(items, "Treasure Map", prefs.getBoolean("treasure_map", true), "toggle_treasure_map");
+        addHudRow(items, "Target FPS", new String[]{"30 FPS", "45 FPS", "60 FPS", "120 FPS"}, new String[]{"fps_30", "fps_45", "fps_60", "fps_120"}, currentFpsTarget == 120 ? 3 : currentFpsTarget == 60 ? 2 : currentFpsTarget == 45 ? 1 : 0);
+        addHudRow(items, "Render Preset", new String[]{"Potato", "Balanced", "Ultra"}, new String[]{"preset_potato", "preset_balanced", "preset_ultra"}, -1);
+        addHudRow(items, "Output Upscaler", new String[]{"FSR 1.0", "CAS", "Bilinear"}, new String[]{"up_fsr", "up_cas", "up_bilinear"}, -1);
         addHudSectionTitle(items, "Display & Aspect");
         String curAsp = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
-        addHudRow(items, "Aspect Ratio", new String[]{"Hor+ Ultrawide", "16:9 Fit"},
-                new String[]{"asp_hor_plus", "asp_16_9"},
-                "hor_plus".equals(curAsp) ? 0 : 1);
-
-        boolean vsyncOn = prefs.getBoolean("vsync", true);
-        addToggle(items, vsyncOn ? "VSync: ON" : "VSync: OFF", vsyncOn, "toggle_vsync");
-
+        addHudRow(items, "Aspect Ratio", new String[]{"Hor+ Ultrawide", "16:9 Fit"}, new String[]{"asp_hor_plus", "asp_16_9"}, "hor_plus".equals(curAsp) ? 0 : 1);
+        addSwitch(items, "VSync", prefs.getBoolean("vsync", true), "toggle_vsync");
         int curOp = prefs.getInt("touch_opacity", 100);
-        addHudRow(items, "Touch Controls Customization", new String[]{"100%", "75%", "50%", "Hidden"},
-                new String[]{"op_100", "op_75", "op_50", "op_0"},
-                curOp == 0 ? 3 : curOp == 50 ? 2 : curOp == 75 ? 1 : 0);
-
-        boolean curHor = prefs.getBoolean("touch_horizon", true);
-        addToggle(items, curHor ? "Steering Horizon: ON" : "Steering Horizon: OFF", curHor, "toggle_horizon");
-
+        addHudRow(items, "Touch Opacity", new String[]{"100%", "75%", "50%", "Hidden"}, new String[]{"op_100", "op_75", "op_50", "op_0"}, curOp == 0 ? 3 : curOp == 50 ? 2 : curOp == 75 ? 1 : 0);
+        addSwitch(items, "Steering Horizon", prefs.getBoolean("touch_horizon", true), "toggle_horizon");
         addHudSectionTitle(items, "Controls & Help");
         addToggle(items, "Recalibrate Gyro 0°", true, "gyro_cal");
         addToggle(items, "Touch Controls Guide", false, "touch_guide");
-
         Button quitBtn = createChipButton("Quit to Launcher", false);
-        GradientDrawable qgd = (GradientDrawable) quitBtn.getBackground();
-        if (qgd != null) qgd.setColor(0xDD3A1618);
-        quitBtn.setTextColor(0xFFFF6B6B);
-        items.addView(bindClick(quitBtn, "quit_game"));
-
-        scroll.addView(items);
-        drawer.addView(scroll);
-        return drawer;
+        GradientDrawable qgd = (GradientDrawable) quitBtn.getBackground(); if (qgd != null) qgd.setColor(0xDD3A1618);
+        quitBtn.setTextColor(0xFFFF6B6B); items.addView(bindClick(quitBtn, "quit_game"));
+        scroll.addView(items); drawer.addView(scroll); return drawer;
     }
 
     @Override
     public void onClick(View v) {
-        Object tag = v.getTag();
-        if (tag == null) return;
-        String t = tag.toString();
-        toggleQuickHud();
-        if ("quit_game".equals(t)) {
-            confirmQuit();
-        } else if ("toggle_auto_throttle".equals(t)) {
-            autoThrottle = !autoThrottle;
-            prefs.edit().putBoolean("auto_throttle", autoThrottle).apply();
-            if (!inMenuMode) currentThrottle = autoThrottle ? 1.0f : 0.0f;
-            flushOverrides();
-            toast("Auto Accelerate: " + (autoThrottle ? "ON" : "OFF"));
+        Object tag = v.getTag(); if (tag == null) return;
+        String t = tag.toString(); toggleQuickHud();
+        if ("quit_game".equals(t)) confirmQuit();
+        else if ("toggle_auto_throttle".equals(t)) {
+            autoThrottle = !autoThrottle; prefs.edit().putBoolean("auto_throttle", autoThrottle).apply();
+            if (!inMenuMode) currentThrottle = autoThrottle ? 1.0f : 0.0f; flushOverrides();
+            toast("Auto Throttle: " + (autoThrottle ? "ON" : "OFF"));
         } else if ("toggle_fps_overlay".equals(t)) {
-            showFpsOverlay = !showFpsOverlay;
-            prefs.edit().putBoolean("fps_overlay", showFpsOverlay).apply();
+            showFpsOverlay = !showFpsOverlay; prefs.edit().putBoolean("fps_overlay", showFpsOverlay).apply();
             if (rr3Overlay != null) rr3Overlay.setShowFpsOverlay(showFpsOverlay);
-            toast("Performance Overlay: " + (showFpsOverlay ? "ON" : "OFF"));
+            toast("FPS Overlay: " + (showFpsOverlay ? "ON" : "OFF"));
         } else if ("toggle_menu_mode".equals(t)) {
-            inMenuMode = !inMenuMode;
-            if (inMenuMode) currentThrottle = 0.0f;
-            else if (autoThrottle) currentThrottle = 1.0f;
-            flushOverrides();
+            inMenuMode = !inMenuMode; if (inMenuMode) currentThrottle = 0.0f; else if (autoThrottle) currentThrottle = 1.0f;
+            flushOverrides(); if (rr3Overlay != null) rr3Overlay.postInvalidate();
+            toast("Mode: " + (inMenuMode ? "MENU" : "DRIVE"));
+        } else if ("toggle_gyro".equals(t)) {
+            boolean next = !prefs.getBoolean("experimental_gyro", false); prefs.edit().putBoolean("experimental_gyro", next).apply();
+            if (sensorManager != null && gameRotationSensor != null) {
+                if (next && "tilt_a".equals(controlScheme)) sensorManager.registerListener(sensorListener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME);
+                else sensorManager.unregisterListener(sensorListener);
+            }
+            toast("Gyro: " + (next ? "ON" : "OFF"));
+        } else if (t.startsWith("ctrl_")) {
+            String c = t.substring(5); controlScheme = c; prefs.edit().putString("control_scheme", controlScheme).apply();
+            if (sensorManager != null && gameRotationSensor != null) {
+                if (isGyroActive()) sensorManager.registerListener(sensorListener, gameRotationSensor, SensorManager.SENSOR_DELAY_GAME);
+                else sensorManager.unregisterListener(sensorListener);
+            }
             if (rr3Overlay != null) rr3Overlay.postInvalidate();
-            toast("Menu Mode: " + (inMenuMode ? "ACTIVE" : "DRIVING"));
+            toast("Controls: " + ("tilt_a".equals(controlScheme) ? "Tilt Gyro" : "arrows".equals(controlScheme) ? "Arrows" : "Classic"));
+        } else if ("toggle_treasure_map".equals(t)) {
+            boolean next = !prefs.getBoolean("treasure_map", true); prefs.edit().putBoolean("treasure_map", next).apply();
+            try { nativeSetCVar("pinyon_shift_dlc_treasure_map", next ? "true" : "false"); } catch (UnsatisfiedLinkError ignored) {}
+            toast("Treasure Map: " + (next ? "ON" : "OFF"));
         } else if (t.startsWith("fps_")) {
-            int f = Integer.parseInt(t.substring(4));
-            setPacedFpsTarget(f, f + " FPS");
-            try { nativeAction(3, (float)f); } catch (UnsatisfiedLinkError ignored) {}
+            int f = Integer.parseInt(t.substring(4)); setPacedFpsTarget(f, f + " FPS");
+            try { nativeAction(3, (float) f); } catch (UnsatisfiedLinkError ignored) {}
         } else if (t.startsWith("preset_")) {
-            String p = t.substring(7);
-            int pIdx = "potato".equals(p) ? 0 : "ultra".equals(p) ? 2 : 1;
-            try { nativeAction(6, (float)pIdx); } catch (UnsatisfiedLinkError ignored) {}
-            toast("Preset: " + ("potato".equals(p) ? "Potato" : "ultra".equals(p) ? "Ultra" : "Balanced"));
+            String p = t.substring(7); int pIdx = "potato".equals(p) ? 0 : "ultra".equals(p) ? 2 : 1;
+            try { nativeAction(6, (float) pIdx); } catch (UnsatisfiedLinkError ignored) {}
+            toast("Preset: " + p);
         } else if (t.startsWith("up_")) {
-            String u = t.substring(3);
-            int uIdx = "fsr".equals(u) ? 1 : "cas".equals(u) ? 2 : 0;
-            try { nativeAction(5, (float)uIdx); } catch (UnsatisfiedLinkError ignored) {}
+            String u = t.substring(3); int uIdx = "fsr".equals(u) ? 1 : "cas".equals(u) ? 2 : 0;
+            try { nativeAction(5, (float) uIdx); } catch (UnsatisfiedLinkError ignored) {}
             toast("Upscaler: " + u.toUpperCase(Locale.ROOT));
         } else if (t.startsWith("asp_")) {
-            boolean hp = "asp_hor_plus".equals(t);
-            prefs.edit().putString(PREF_ASPECT_MODE, hp ? "hor_plus" : "letterbox").apply();
+            boolean hp = "asp_hor_plus".equals(t); prefs.edit().putString(PREF_ASPECT_MODE, hp ? "hor_plus" : "letterbox").apply();
             try { nativeAction(4, hp ? 1.0f : 0.0f); } catch (UnsatisfiedLinkError ignored) {}
-            toast("Aspect: " + (hp ? "Hor+ Ultrawide" : "16:9 Fit"));
+            toast("Aspect: " + (hp ? "Hor+" : "16:9"));
         } else if ("toggle_vsync".equals(t)) {
-            boolean next = !prefs.getBoolean("vsync", true);
-            prefs.edit().putBoolean("vsync", next).apply();
+            boolean next = !prefs.getBoolean("vsync", true); prefs.edit().putBoolean("vsync", next).apply();
             try { nativeAction(7, next ? 1.0f : 0.0f); } catch (UnsatisfiedLinkError ignored) {}
-            toast("VSync: " + (next ? "ENABLED" : "DISABLED"));
-
+            toast("VSync: " + (next ? "ON" : "OFF"));
         } else if (t.startsWith("op_")) {
-            int op = Integer.parseInt(t.substring(3));
-            prefs.edit().putInt("touch_opacity", op).apply();
+            int op = Integer.parseInt(t.substring(3)); prefs.edit().putInt("touch_opacity", op).apply();
             if (rr3Overlay != null) rr3Overlay.updateTouchOpacity(op / 100.0f);
-            toast("Touch Opacity: " + (op == 0 ? "Hidden" : op + "%"));
+            toast("Opacity: " + (op == 0 ? "Hidden" : op + "%"));
         } else if ("toggle_horizon".equals(t)) {
-            boolean next = !prefs.getBoolean("touch_horizon", true);
-            prefs.edit().putBoolean("touch_horizon", next).apply();
+            boolean next = !prefs.getBoolean("touch_horizon", true); prefs.edit().putBoolean("touch_horizon", next).apply();
             if (rr3Overlay != null) rr3Overlay.updateShowHorizon(next);
-            toast("Steering Horizon: " + (next ? "ON" : "OFF"));
-        } else if ("gyro_cal".equals(t)) {
-            recalibrateGyro();
-        } else if ("touch_guide".equals(t)) {
-            showTouchGuide(this);
-        } else if ("shutter".equals(t)) {
-            SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_F8);
-            SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_F8);
-            vibrate(this, 20, 180);
-            toast("Capturing photo...");
+            toast("Horizon: " + (next ? "ON" : "OFF"));
+        } else if ("gyro_cal".equals(t)) recalibrateGyro();
+        else if ("touch_guide".equals(t)) showTouchGuide(this);
+        else if ("shutter".equals(t)) {
+            SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_F8); SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_F8);
+            vibrate(this, 20, 180); toast("Photo captured");
         }
     }
 
@@ -691,92 +563,44 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
 
     private void initThermalPacer() {
-        IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        thermalReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                readBatteryTemp(intent);
-                checkThermalPacing();
-            }
-        };
-        Intent sticky = registerReceiver(thermalReceiver, filter);
-        readBatteryTemp(sticky);
+        thermalReceiver = new BroadcastReceiver() { @Override public void onReceive(Context c, Intent i) { readBatteryTemp(i); checkThermalPacing(); } };
+        readBatteryTemp(registerReceiver(thermalReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)));
     }
-
     private void readBatteryTemp(Intent intent) {
-        if (intent != null) {
-            int raw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0);
-            if (raw > 0) currentBatteryTempC = raw / 10.0f;
-        }
+        if (intent != null) { int raw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0); if (raw > 0) currentBatteryTempC = raw / 10.0f; }
         if (currentBatteryTempC <= 0.0f || currentBatteryTempC == 25.0f) {
-            try {
-                File f = new File("/sys/class/power_supply/battery/temp");
-                if (f.exists()) {
-                    BufferedReader br = new BufferedReader(new FileReader(f));
-                    String l = br.readLine();
-                    br.close();
-                    if (l != null) {
-                        float v = Float.parseFloat(l.trim());
-                        currentBatteryTempC = (v > 100.0f) ? (v / 10.0f) : v;
-                    }
-                }
+            try (BufferedReader br = new BufferedReader(new FileReader("/sys/class/power_supply/battery/temp"))) {
+                String l = br.readLine(); if (l != null) { float v = Float.parseFloat(l.trim()); currentBatteryTempC = (v > 100.0f) ? (v / 10.0f) : v; }
             } catch (Exception ignored) {}
         }
     }
-
     private void checkThermalPacing() {
         if (!thermalPacerEnabled) return;
-        if (currentBatteryTempC >= 44.0f && currentFpsTarget > 30) {
-            setPacedFpsTarget(30, "Thermal alert (44°C) - 30 FPS");
-        } else if (currentBatteryTempC >= 42.0f && currentFpsTarget > 45) {
-            setPacedFpsTarget(45, "Thermal threshold (42°C) - 45 FPS");
-        } else if (currentBatteryTempC < 39.5f && currentFpsTarget < 60) {
-            setPacedFpsTarget(60, "Thermals normal (<40°C) - 60 FPS");
-        }
+        if (currentBatteryTempC >= 44.0f && currentFpsTarget > 30) setPacedFpsTarget(30, "44°C: 30 FPS");
+        else if (currentBatteryTempC >= 42.0f && currentFpsTarget > 45) setPacedFpsTarget(45, "42°C: 45 FPS");
+        else if (currentBatteryTempC < 39.5f && currentFpsTarget < 60) setPacedFpsTarget(60, "<40°C: 60 FPS");
     }
-
     private void setPacedFpsTarget(int fps, String msg) {
-        currentFpsTarget = fps;
-        toast(msg);
-        try {
-            nativeAction(3, (float) fps);
-            nativeSetCVar("pinyon_shift_fh1_render_fps_limit", String.valueOf(fps));
-        } catch (UnsatisfiedLinkError ignored) {}
+        currentFpsTarget = fps; toast(msg);
+        try { nativeAction(3, (float) fps); nativeSetCVar("pinyon_shift_fh1_render_fps_limit", String.valueOf(fps)); } catch (UnsatisfiedLinkError ignored) {}
     }
-
     private void startPhotoWatcher(final File photosDir) {
         if (!photosDir.exists()) photosDir.mkdirs();
-        int mask = FileObserver.CLOSE_WRITE | FileObserver.MOVED_TO;
-        photoObserver = new FileObserver(photosDir.getAbsolutePath(), mask) {
-            @Override
-            public void onEvent(int event, String path) {
-                if (path == null || !path.endsWith(".png")) return;
-                final File photo = new File(photosDir, path);
-                if (!photo.isFile()) return;
-                exportToGallery(photo);
-            }
+        photoObserver = new FileObserver(photosDir.getAbsolutePath(), FileObserver.CLOSE_WRITE | FileObserver.MOVED_TO) {
+            @Override public void onEvent(int event, String path) { if (path != null && path.endsWith(".png")) exportToGallery(new File(photosDir, path)); }
         };
         photoObserver.startWatching();
     }
-
     private void exportToGallery(final File photo) {
         try {
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, photo.getName());
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
-            if (Build.VERSION.SDK_INT >= 29) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ForzaHorizon");
-                values.put(MediaStore.Images.Media.IS_PENDING, 1);
-            }
-            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            ContentValues v = new ContentValues(); v.put(MediaStore.Images.Media.DISPLAY_NAME, photo.getName()); v.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            if (Build.VERSION.SDK_INT >= 29) v.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ForzaHorizon");
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
             if (uri != null) {
                 try (InputStream in = new FileInputStream(photo); OutputStream out = getContentResolver().openOutputStream(uri)) { copy(in, out); }
-                if (Build.VERSION.SDK_INT >= 29) {
-                    values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0); getContentResolver().update(uri, values, null, null);
-                }
-                vibrate(this, 30, 200); toast("Saved to Pictures/ForzaHorizon");
+                vibrate(this, 30, 200); toast("Photo saved");
             }
-        } catch (Exception error) { Log.e(TAG, "failed saving screenshot to gallery", error); }
+        } catch (Exception ignored) {}
     }
 
     private class RR3OverlayView extends View {
@@ -795,22 +619,51 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         private final long[] downT = new long[MAX_P];
         private final int[] zone = new int[MAX_P];
 
-        private static final int Z_NONE = 0;
-        private static final int Z_BRAKE = 1;
-        private static final int Z_THROTTLE = 2;
-        private static final int Z_CENTER = 3;
-        private static final int Z_EBRAKE = 4;
+        private static final int Z_NONE = 0, Z_BRAKE = 1, Z_THROTTLE = 2, Z_CENTER = 3, Z_EBRAKE = 4, Z_STEER_LEFT = 5, Z_STEER_RIGHT = 6;
+        private boolean steerLeftHeld = false, steerRightHeld = false;
+        public boolean touchSteerActive = false;
+
+        private void updateArrowSteer() {
+            boolean l = false, r = false;
+            for (int i = 0; i < MAX_P; i++) {
+                if (zone[i] == Z_STEER_LEFT) l = true;
+                else if (zone[i] == Z_STEER_RIGHT) r = true;
+            }
+            if (l != steerLeftHeld || r != steerRightHeld) {
+                if ((l && !steerLeftHeld) || (r && !steerRightHeld)) {
+                    vibrate(PinyonShiftActivity.this, 12, 100);
+                    try { performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); } catch (Throwable ignored) {}
+                }
+                steerLeftHeld = l; steerRightHeld = r;
+                touchSteerActive = (l || r);
+                currentSteerX = l ? -1.0f : (r ? 1.0f : 0.0f);
+                flushOverrides();
+                postInvalidate();
+            }
+        }
+
+        private void updatePedals() {
+            boolean brk = false, thr = false;
+            for (int i = 0; i < MAX_P; i++) {
+                if (zone[i] == Z_BRAKE) brk = true;
+                else if (zone[i] == Z_THROTTLE) thr = true;
+            }
+            currentBrake = brk ? 1.0f : 0.0f;
+            brakeAlpha = brk ? 0.25f : 0.0f;
+            if (brk) {
+                currentThrottle = (autoThrottle && !thr) ? 0.0f : (thr ? 1.0f : 0.0f);
+            } else {
+                currentThrottle = (thr || autoThrottle) ? 1.0f : 0.0f;
+            }
+            flushOverrides();
+            postInvalidate();
+        }
 
         private long lastCenterTapTime = 0;
-        private boolean leftHeld = false;
-        private boolean rightHeld = false;
-        private float touchOpacity = 1.0f;
         private boolean showHorizon = true;
-
-        private float measuredFps = 30.0f;
-        private float measuredFrameMs = 33.3f;
-        private int framesDrawn = 0;
-        private long lastFpsCalcMs = 0;
+        private float touchOpacity = 1.0f, measuredFps = 30.0f, measuredFrameMs = 33.3f;
+        private long lastFpsCalcMs = 0, statusFlashUntil = 0;
+        private String statusFlashText = null;
 
         public RR3OverlayView(Context context) {
             super(context);
@@ -832,27 +685,18 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         }
         public void setShowFpsOverlay(boolean show) { showFpsOverlay = show; postInvalidate(); }
         public void setTiltAngle(float degrees) { tiltDeg = degrees; postInvalidate(); }
+        public void flashStatus(String msg) { statusFlashText = msg; statusFlashUntil = SystemClock.uptimeMillis() + 1500; postInvalidate(); }
 
-        private String statusFlashText = null;
-        private long statusFlashUntil = 0;
-        public void flashStatus(String msg) {
-            statusFlashText = msg;
-            statusFlashUntil = SystemClock.uptimeMillis() + 1500;
-            postInvalidate();
+        private void drawCircleBtn(Canvas c, float cx, float cy, float r, String txt, int fill, int stroke, int txtCol, float sz) {
+            pillPaint.setColor(fill); c.drawCircle(cx, cy, r, pillPaint);
+            strokePaint.setColor(stroke); c.drawCircle(cx, cy, r, strokePaint);
+            textPaint.setColor(txtCol); textPaint.setTextSize(dp(sz)); c.drawText(txt, cx, cy + dp(sz * 0.35f), textPaint);
         }
-
-        private void drawDpadBtn(Canvas c, float cx, float cy, float r, String sym, boolean pressed) {
-            pillPaint.setColor(pressed ? 0xFF5CE68B : 0xDD18221B); c.drawRoundRect(cx - r, cy - r, cx + r, cy + r, dp(8), dp(8), pillPaint);
-            strokePaint.setColor(pressed ? 0xFF0B1F11 : 0xFF2A3A2F); c.drawRoundRect(cx - r, cy - r, cx + r, cy + r, dp(8), dp(8), strokePaint);
-            textPaint.setColor(pressed ? 0xFF0B1F11 : Color.WHITE); textPaint.setTextSize(dp(14)); c.drawText(sym, cx, cy + dp(4.5f), textPaint);
+        private void drawDpadBtn(Canvas c, float cx, float cy, float r, String sym, boolean p) {
+            pillPaint.setColor(p ? 0xFF5CE68B : 0xDD18221B); c.drawRoundRect(cx - r, cy - r, cx + r, cy + r, dp(8), dp(8), pillPaint);
+            strokePaint.setColor(p ? 0xFF0B1F11 : 0xFF2A3A2F); c.drawRoundRect(cx - r, cy - r, cx + r, cy + r, dp(8), dp(8), strokePaint);
+            textPaint.setColor(p ? 0xFF0B1F11 : Color.WHITE); textPaint.setTextSize(dp(14)); c.drawText(sym, cx, cy + dp(4.5f), textPaint);
         }
-
-        private void drawActionCircle(Canvas c, float cx, float cy, float r, String txt, int fillCol, int strokeCol, int txtCol, boolean pressed) {
-            pillPaint.setColor(pressed ? Color.WHITE : fillCol); c.drawCircle(cx, cy, r, pillPaint);
-            strokePaint.setColor(pressed ? Color.WHITE : strokeCol); c.drawCircle(cx, cy, r, strokePaint);
-            textPaint.setColor(pressed ? Color.BLACK : txtCol); textPaint.setTextSize(dp(15)); c.drawText(txt, cx, cy + dp(5.5f), textPaint);
-        }
-
         private void drawPillBtn(Canvas c, float x, float y, float w, float h, String label, int fill, int stroke, int txtCol) {
             pillPaint.setColor(fill); c.drawRoundRect(x, y, x + w, y + h, h * 0.5f, h * 0.5f, pillPaint);
             strokePaint.setColor(stroke); c.drawRoundRect(x, y, x + w, y + h, h * 0.5f, h * 0.5f, strokePaint);
@@ -869,72 +713,29 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             if (nowMs - lastFpsCalcMs >= 250) {
                 try {
                     float ft = nativeGetFrameTimeMs();
-                    if (ft > 0.1f) {
-                        measuredFrameMs = ft;
-                        measuredFps = 1000.0f / ft;
-                    }
+                    if (ft > 0.1f) { measuredFrameMs = ft; measuredFps = 1000.0f / ft; }
                 } catch (UnsatisfiedLinkError ignored) {}
                 lastFpsCalcMs = nowMs;
             }
 
             boolean flashing = (nowMs < statusFlashUntil && statusFlashText != null);
             if (showFpsOverlay || flashing) {
-                float badgeW = flashing ? dp(154) : dp(148), badgeH = dp(26);
-                pillPaint.setColor(0xCC0F1411);
-                canvas.drawRoundRect(dp(12), dp(12), dp(12) + badgeW, dp(12) + badgeH, dp(13), dp(13), pillPaint);
-                strokePaint.setColor(0x80253328);
-                strokePaint.setStrokeWidth(dp(1));
-                canvas.drawRoundRect(dp(12), dp(12), dp(12) + badgeW, dp(12) + badgeH, dp(13), dp(13), strokePaint);
+                float bw = flashing ? dp(154) : dp(148), bh = dp(26);
+                pillPaint.setColor(0xCC0F1411); strokePaint.setColor(0x80253328); strokePaint.setStrokeWidth(dp(1));
+                canvas.drawRoundRect(dp(12), dp(12), dp(12) + bw, dp(12) + bh, dp(13), dp(13), pillPaint);
+                canvas.drawRoundRect(dp(12), dp(12), dp(12) + bw, dp(12) + bh, dp(13), dp(13), strokePaint);
                 pillPaint.setColor(flashing ? 0xFF5CE68B : (measuredFps >= 28.0f ? 0xFF5CE68B : (measuredFps >= 20.0f ? 0xFFFFD740 : 0xFFFF5252)));
                 canvas.drawCircle(dp(22), dp(25), dp(3.5f), pillPaint);
-                textPaint.setColor(Color.WHITE);
-                textPaint.setTextSize(dp(10.5f));
-                textPaint.setTextAlign(Paint.Align.LEFT);
-                if (flashing) {
-                    canvas.drawText(statusFlashText, dp(30), dp(28.5f), textPaint);
-                } else {
-                    canvas.drawText(String.format(Locale.ROOT, "%.1f FPS · %.1fms · %.1f°C", measuredFps, measuredFrameMs, currentBatteryTempC),
-                            dp(30), dp(28.5f), textPaint);
-                }
+                textPaint.setColor(Color.WHITE); textPaint.setTextSize(dp(10.5f)); textPaint.setTextAlign(Paint.Align.LEFT);
+                canvas.drawText(flashing ? statusFlashText : String.format(Locale.ROOT, "%.1f FPS · %.1fms · %.1f°C", measuredFps, measuredFrameMs, currentBatteryTempC), dp(30), dp(28.5f), textPaint);
                 textPaint.setTextAlign(Paint.Align.CENTER);
                 postInvalidateOnAnimation();
             }
 
-            float modeW = dp(84), modeH = dp(24);
-            float modeX = (w - modeW) * 0.5f, modeY = dp(12);
-            if (inMenuMode) {
-                drawPillBtn(canvas, modeX, modeY, modeW, modeH, "DRIVE", 0xEE1A2B20, 0xFF5CE68B, 0xFF5CE68B);
-            } else {
-                drawPillBtn(canvas, modeX, modeY, modeW, modeH, "MENU", 0xCC1A1F1C, 0x80354439, Color.WHITE);
-            }
-
-            float rIcon = dp(14);
-            pillPaint.setColor(0x99141816);
-            strokePaint.setColor(0x33FFFFFF);
-            strokePaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(w - dp(66), dp(24), rIcon, pillPaint);
-            canvas.drawCircle(w - dp(66), dp(24), rIcon, strokePaint);
-            strokePaint.setColor(0xEEFFFFFF);
-            strokePaint.setStrokeWidth(dp(1.2f));
-            float cxC = w - dp(66), cyC = dp(24);
-            canvas.drawRoundRect(cxC - dp(5.5f), cyC - dp(3.5f), cxC + dp(5.5f), cyC + dp(4.5f), dp(1.5f), dp(1.5f), strokePaint);
-            canvas.drawCircle(cxC, cyC + dp(0.5f), dp(2.2f), strokePaint);
-            canvas.drawLine(cxC - dp(3.5f), cyC - dp(4.2f), cxC - dp(1.5f), cyC - dp(4.2f), strokePaint);
-
-            strokePaint.setColor(0x33FFFFFF);
-            strokePaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(w - dp(24), dp(24), rIcon, pillPaint);
-            canvas.drawCircle(w - dp(24), dp(24), rIcon, strokePaint);
-            strokePaint.setColor(0xEEFFFFFF);
-            strokePaint.setStrokeWidth(dp(1.2f));
-            float cxT = w - dp(24), cyT = dp(24);
-            canvas.drawLine(cxT - dp(5.5f), cyT - dp(3.2f), cxT + dp(5.5f), cyT - dp(3.2f), strokePaint);
-            canvas.drawLine(cxT - dp(5.5f), cyT, cxT + dp(5.5f), cyT, strokePaint);
-            canvas.drawLine(cxT - dp(5.5f), cyT + dp(3.2f), cxT + dp(5.5f), cyT + dp(3.2f), strokePaint);
-            pillPaint.setColor(0xEEFFFFFF);
-            canvas.drawCircle(cxT - dp(2), cyT - dp(3.2f), dp(1.3f), pillPaint);
-            canvas.drawCircle(cxT + dp(2), cyT, dp(1.3f), pillPaint);
-            canvas.drawCircle(cxT - dp(1), cyT + dp(3.2f), dp(1.3f), pillPaint);
+            float modeW = dp(84), modeH = dp(24), modeX = (w - modeW) * 0.5f, modeY = dp(12);
+            drawPillBtn(canvas, modeX, modeY, modeW, modeH, inMenuMode ? "DRIVE" : "MENU", inMenuMode ? 0xEE1A2B20 : 0xCC1A1F1C, inMenuMode ? 0xFF5CE68B : 0x80354439, inMenuMode ? 0xFF5CE68B : Color.WHITE);
+            drawCircleBtn(canvas, w - dp(66), dp(24), dp(14), "CAM", 0x99141816, 0x33FFFFFF, Color.WHITE, 8);
+            drawCircleBtn(canvas, w - dp(24), dp(24), dp(14), "☰", 0x99141816, 0x33FFFFFF, Color.WHITE, 12);
 
             if (inMenuMode) {
                 boolean lb = (currentButtons & BTN_LEFT_SHOULDER) != 0, rb = (currentButtons & BTN_RIGHT_SHOULDER) != 0;
@@ -954,22 +755,19 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
                 float ax = w - dp(96), ay = h - dp(96);
                 pillPaint.setColor(0x80121A15); canvas.drawCircle(ax, ay, dp(48), pillPaint);
-                drawActionCircle(canvas, ax, ay + dp(46), dp(22), "A", 0xDD1B4D2E, 0xFF5CE68B, 0xFFE8F5E9, (currentButtons & BTN_A) != 0);
-                drawActionCircle(canvas, ax + dp(46), ay, dp(22), "B", 0xDD8B1818, 0xFFFF5252, Color.WHITE, (currentButtons & BTN_B) != 0);
-                drawActionCircle(canvas, ax - dp(46), ay, dp(22), "X", 0xDD154378, 0xFF448AFF, Color.WHITE, (currentButtons & BTN_X) != 0);
-                drawActionCircle(canvas, ax, ay - dp(46), dp(22), "Y", 0xDD7A6014, 0xFFFFD740, 0xFFFFF9C4, (currentButtons & BTN_Y) != 0);
+                boolean bA = (currentButtons & BTN_A) != 0, bB = (currentButtons & BTN_B) != 0, bX = (currentButtons & BTN_X) != 0, bY = (currentButtons & BTN_Y) != 0;
+                drawCircleBtn(canvas, ax, ay + dp(46), dp(22), "A", bA ? Color.WHITE : 0xDD1B4D2E, bA ? Color.WHITE : 0xFF5CE68B, bA ? Color.BLACK : 0xFFE8F5E9, 15);
+                drawCircleBtn(canvas, ax + dp(46), ay, dp(22), "B", bB ? Color.WHITE : 0xDD8B1818, bB ? Color.WHITE : 0xFFFF5252, bB ? Color.BLACK : Color.WHITE, 15);
+                drawCircleBtn(canvas, ax - dp(46), ay, dp(22), "X", bX ? Color.WHITE : 0xDD154378, bX ? Color.WHITE : 0xFF448AFF, bX ? Color.BLACK : Color.WHITE, 15);
+                drawCircleBtn(canvas, ax, ay - dp(46), dp(22), "Y", bY ? Color.WHITE : 0xDD7A6014, bY ? Color.WHITE : 0xFFFFD740, bY ? Color.BLACK : 0xFFFFF9C4, 15);
                 return;
             }
 
             // Translucent Drive Mode Actions: Rewind (left) and Handbrake (right)
             float rAction = dp(20);
-            pillPaint.setColor(0x99141816);
-            strokePaint.setColor(0x33FFFFFF);
-            strokePaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(dp(36), dp(60), rAction, pillPaint);
-            canvas.drawCircle(dp(36), dp(60), rAction, strokePaint);
-            strokePaint.setColor(Color.WHITE);
-            float rx = dp(36), ry = dp(60);
+            pillPaint.setColor(0x99141816); strokePaint.setColor(0x33FFFFFF); strokePaint.setStrokeWidth(dp(1));
+            canvas.drawCircle(dp(36), dp(60), rAction, pillPaint); canvas.drawCircle(dp(36), dp(60), rAction, strokePaint);
+            strokePaint.setColor(Color.WHITE); float rx = dp(36), ry = dp(60);
             canvas.drawLine(rx + dp(1), ry - dp(5.5f), rx - dp(4.5f), ry, strokePaint);
             canvas.drawLine(rx - dp(4.5f), ry, rx + dp(1), ry + dp(5.5f), strokePaint);
             canvas.drawLine(rx + dp(6.5f), ry - dp(5.5f), rx + dp(1), ry, strokePaint);
@@ -978,51 +776,70 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             boolean eBrakeActive = (currentButtons & BTN_A) != 0;
             pillPaint.setColor(eBrakeActive ? 0xDD5CE68B : 0x99141816);
             strokePaint.setColor(eBrakeActive ? 0xFF0B1F11 : 0x33FFFFFF);
-            strokePaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(w - dp(36), dp(60), rAction, pillPaint);
-            canvas.drawCircle(w - dp(36), dp(60), rAction, strokePaint);
-            strokePaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE);
-            strokePaint.setStrokeWidth(dp(1.5f));
+            canvas.drawCircle(w - dp(36), dp(60), rAction, pillPaint); canvas.drawCircle(w - dp(36), dp(60), rAction, strokePaint);
+            strokePaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE); strokePaint.setStrokeWidth(dp(1.5f));
             canvas.drawCircle(w - dp(36), dp(60), dp(10), strokePaint);
-            textPaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE);
-            textPaint.setTextSize(dp(11));
-            textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            textPaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE); textPaint.setTextSize(dp(11)); textPaint.setTypeface(Typeface.DEFAULT_BOLD);
             canvas.drawText("P", w - dp(36), dp(63.5f), textPaint);
+
+            // Subtle Material 3 Steering Arrows (left thumb comfort height)
+            float arrowY = h * 0.70f, arrowR = dp(30);
+            float arrowLeftX = dp(50), arrowRightX = dp(126);
+            boolean lActive = steerLeftHeld, rActive = steerRightHeld;
+            pillPaint.setColor(lActive ? 0xDD5CE68B : 0x8818221B); strokePaint.setColor(lActive ? 0xFF0B1F11 : 0x44FFFFFF); strokePaint.setStrokeWidth(dp(1.2f));
+            canvas.drawCircle(arrowLeftX, arrowY, arrowR, pillPaint); canvas.drawCircle(arrowLeftX, arrowY, arrowR, strokePaint);
+            textPaint.setColor(lActive ? 0xFF0B1F11 : 0xEEFFFFFF); textPaint.setTextSize(dp(22)); textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            canvas.drawText("‹", arrowLeftX, arrowY + dp(7), textPaint);
+            pillPaint.setColor(rActive ? 0xDD5CE68B : 0x8818221B); strokePaint.setColor(rActive ? 0xFF0B1F11 : 0x44FFFFFF);
+            canvas.drawCircle(arrowRightX, arrowY, arrowR, pillPaint); canvas.drawCircle(arrowRightX, arrowY, arrowR, strokePaint);
+            textPaint.setColor(rActive ? 0xFF0B1F11 : 0xEEFFFFFF);
+            canvas.drawText("›", arrowRightX, arrowY + dp(7), textPaint);
 
             if (touchOpacity <= 0.01f) return;
 
-            if (currentBrake > 0.0f || brakeAlpha > 0.01f) {
+            // Split pedal indicators on the right half (Brake UP, Throttle DOWN)
+            float pedalH = dp(34);
+            float brkY = h * 0.36f, thrY = h * 0.70f;
+            float pX1 = w - dp(94), pX2 = w - dp(14);
+
+            boolean bActive = currentBrake > 0.0f || brakeAlpha > 0.01f;
+            pillPaint.setColor(bActive ? Color.argb((int)(130 * touchOpacity), 255, 60, 60) : Color.argb((int)(35 * touchOpacity), 35, 20, 20));
+            strokePaint.setColor(bActive ? Color.argb((int)(240 * touchOpacity), 255, 80, 80) : Color.argb((int)(40 * touchOpacity), 255, 255, 255));
+            strokePaint.setStrokeWidth(dp(1.2f));
+            canvas.drawRoundRect(pX1, brkY - pedalH * 0.5f, pX2, brkY + pedalH * 0.5f, dp(8), dp(8), pillPaint);
+            canvas.drawRoundRect(pX1, brkY - pedalH * 0.5f, pX2, brkY + pedalH * 0.5f, dp(8), dp(8), strokePaint);
+            textPaint.setColor(bActive ? Color.WHITE : Color.argb((int)(150 * touchOpacity), 255, 255, 255));
+            textPaint.setTextSize(dp(12));
+            canvas.drawText("BRAKE", (pX1 + pX2) * 0.5f, brkY + dp(4.5f), textPaint);
+
+            boolean tActive = currentThrottle > 0.0f;
+            pillPaint.setColor(tActive ? Color.argb((int)(130 * touchOpacity), 92, 230, 139) : Color.argb((int)(35 * touchOpacity), 20, 35, 22));
+            strokePaint.setColor(tActive ? Color.argb((int)(240 * touchOpacity), 92, 230, 139) : Color.argb((int)(40 * touchOpacity), 255, 255, 255));
+            canvas.drawRoundRect(pX1, thrY - pedalH * 0.5f, pX2, thrY + pedalH * 0.5f, dp(8), dp(8), pillPaint);
+            canvas.drawRoundRect(pX1, thrY - pedalH * 0.5f, pX2, thrY + pedalH * 0.5f, dp(8), dp(8), strokePaint);
+            textPaint.setColor(tActive ? Color.WHITE : Color.argb((int)(150 * touchOpacity), 255, 255, 255));
+            canvas.drawText(autoThrottle ? "AUTO GAS" : "GAS", (pX1 + pX2) * 0.5f, thrY + dp(4.5f), textPaint);
+
+            if (bActive) {
                 float a = Math.max(currentBrake, brakeAlpha);
-                vignettePaint.setColor(Color.argb((int) (a * 200 * touchOpacity), 255, 50, 50));
-                canvas.drawRect(0, 0, dp(6), h, vignettePaint);
+                vignettePaint.setColor(Color.argb((int) (a * 140 * touchOpacity), 255, 50, 50));
+                canvas.drawRect(w * 0.55f, 0, w, h * 0.52f, vignettePaint);
             }
-            if (currentThrottle > 0.0f) {
-                vignettePaint.setColor(Color.argb((int) (currentThrottle * 180 * touchOpacity), 92, 230, 139));
-                canvas.drawRect(w - dp(6), 0, w, h, vignettePaint);
-            }
-
-            if ("tilt_a".equals(controlScheme) && showHorizon) {
-                canvas.save();
-                canvas.translate(w * 0.5f, dp(54));
-                canvas.rotate(-tiltDeg);
-                float barW = dp(36);
-                horizonPaint.setColor(Color.argb((int) (120 * touchOpacity), 255, 255, 255));
-                canvas.drawLine(-barW, 0, barW, 0, horizonPaint);
-                canvas.drawLine(0, -dp(4), 0, dp(4), horizonPaint);
-                canvas.restore();
+            if (tActive) {
+                vignettePaint.setColor(Color.argb((int) (currentThrottle * 140 * touchOpacity), 92, 230, 139));
+                canvas.drawRect(w * 0.55f, h * 0.52f, w, h, vignettePaint);
             }
 
-            textPaint.setColor(Color.argb((int) (80 * touchOpacity), 255, 255, 255));
-            textPaint.setTextSize(dp(11));
-            canvas.drawText("BRAKE", w * 0.16f, h - dp(18), textPaint);
-            canvas.drawText(autoThrottle ? "AUTO RT" : "THROTTLE", w * 0.84f, h - dp(18), textPaint);
+            if (isGyroActive() && showHorizon) {
+                canvas.save(); canvas.translate(w * 0.5f, dp(54)); canvas.rotate(-tiltDeg);
+                float barW = dp(36); horizonPaint.setColor(Color.argb((int) (120 * touchOpacity), 255, 255, 255));
+                canvas.drawLine(-barW, 0, barW, 0, horizonPaint); canvas.drawLine(0, -dp(4), 0, dp(4), horizonPaint); canvas.restore();
+            }
 
-            float pillW = dp(76), pillH = dp(22);
-            float px = (w - pillW) * 0.5f, py = h - dp(28);
+            float pillW = dp(76), pillH = dp(22); float px = (w - pillW) * 0.5f, py = h - dp(28);
             pillPaint.setColor(Color.argb((int) (50 * touchOpacity), 25, 35, 30));
             canvas.drawRoundRect(px, py, px + pillW, py + pillH, dp(11), dp(11), pillPaint);
-            textPaint.setColor(Color.argb((int) (110 * touchOpacity), 255, 255, 255));
-            textPaint.setTextSize(dp(10));
+            textPaint.setColor(Color.argb((int) (110 * touchOpacity), 255, 255, 255)); textPaint.setTextSize(dp(10));
             canvas.drawText("[X] INTERACT", w * 0.5f, py + dp(14.5f), textPaint);
         }
 
@@ -1116,46 +933,43 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
                         flushOverrides(); postInvalidate(); return true;
                     }
 
-                    if (prefs.getBoolean(PREF_HUD_HITBOXES, true)) {
-                        if (x < w * 0.18f && y > h * 0.72f) {
-                            pulseButton(BTN_BACK, 150); inMenuMode = true; currentThrottle = 0.0f;
-                            flushOverrides(); postInvalidate(); return true;
-                        }
-                        if (x < w * 0.16f && y < h * 0.16f) {
-                            pulseButton(BTN_START, 150); inMenuMode = true; currentThrottle = 0.0f;
-                            flushOverrides(); postInvalidate(); return true;
-                        }
-                    }
-
                     if (x > w * 0.38f && x < w * 0.62f && y > h - dp(36)) { pulseButton(BTN_X, 150); return true; }
 
                     int z = Z_NONE;
-                    if (x < w * 0.35f) {
-                        z = Z_BRAKE; leftHeld = true; currentBrake = 1.0f;
-                        if (autoThrottle) currentThrottle = 0.0f;
-                        brakeAlpha = 0.25f; vibrate(PinyonShiftActivity.this, 10, 80);
-                    } else if (x > w * 0.65f) {
-                        z = Z_THROTTLE; rightHeld = true; currentThrottle = 1.0f;
+                    if (x < dp(190) && y > h * 0.38f) {
+                        z = (x < dp(88)) ? Z_STEER_LEFT : Z_STEER_RIGHT;
+                    } else if (x >= w * 0.50f) {
+                        z = (y < h * 0.52f) ? Z_BRAKE : Z_THROTTLE;
                         vibrate(PinyonShiftActivity.this, 10, 80);
+                        try { performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); } catch (Throwable ignored) {}
                     } else {
                         z = Z_CENTER;
                     }
                     if (pointerId < MAX_P) zone[pointerId] = z;
+                    if (z == Z_STEER_LEFT || z == Z_STEER_RIGHT) updateArrowSteer();
+                    else if (z == Z_BRAKE || z == Z_THROTTLE) updatePedals();
                     flushOverrides(); postInvalidate(); return true;
                 }
 
                 case MotionEvent.ACTION_MOVE: {
                     for (int i = 0; i < event.getPointerCount(); i++) {
                         int pId = event.getPointerId(i);
-                        if (pId < MAX_P && zone[pId] == Z_CENTER && prefs.getBoolean(PREF_LOOK_AROUND, true)) {
-                            float dx = event.getX(i) - downX[pId];
-                            float dy = event.getY(i) - downY[pId];
-                            currentLookX = Math.min(1.0f, Math.max(-1.0f, dx / dp(80)));
-                            currentLookY = Math.min(1.0f, Math.max(-1.0f, -dy / dp(80)));
+                        if (pId < MAX_P) {
+                            if (zone[pId] == Z_STEER_LEFT || zone[pId] == Z_STEER_RIGHT) {
+                                zone[pId] = (event.getX(i) < dp(88)) ? Z_STEER_LEFT : Z_STEER_RIGHT;
+                                updateArrowSteer();
+                            } else if (zone[pId] == Z_BRAKE || zone[pId] == Z_THROTTLE) {
+                                float py = event.getY(i), px = event.getX(i);
+                                zone[pId] = (px >= w * 0.45f) ? ((py < h * 0.52f) ? Z_BRAKE : Z_THROTTLE) : Z_CENTER;
+                                updatePedals();
+                            } else if (zone[pId] == Z_CENTER && prefs.getBoolean(PREF_LOOK_AROUND, true)) {
+                                float dx = event.getX(i) - downX[pId], dy = event.getY(i) - downY[pId];
+                                currentLookX = Math.min(1.0f, Math.max(-1.0f, dx / dp(80)));
+                                currentLookY = Math.min(1.0f, Math.max(-1.0f, -dy / dp(80)));
+                            }
                         }
                     }
-                    flushOverrides();
-                    return true;
+                    flushOverrides(); return true;
                 }
 
                 case MotionEvent.ACTION_UP:
@@ -1168,46 +982,35 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
                     if (z == Z_EBRAKE) {
                         currentButtons &= ~BTN_A;
+                    } else if (z == Z_STEER_LEFT || z == Z_STEER_RIGHT) {
+                        if (pId < MAX_P) zone[pId] = Z_NONE;
+                        updateArrowSteer();
+                    } else if (z == Z_BRAKE || z == Z_THROTTLE) {
+                        if (pId < MAX_P) zone[pId] = Z_NONE;
+                        updatePedals();
                     } else if (z == Z_CENTER) {
-                        currentLookX = 0.0f;
-                        currentLookY = 0.0f;
+                        currentLookX = currentLookY = 0.0f;
                         if (dur < 350) {
-                            if (dy < -dp(35) && Math.abs(dx) < dp(45)) {
-                                triggerShift(true);
-                            } else if (dy > dp(35) && Math.abs(dx) < dp(45)) {
-                                triggerShift(false);
-                            } else if (dx < -dp(50) && Math.abs(dy) < dp(45)) {
-                                pulseButton(BTN_Y, 250);
-                            } else if (Math.abs(dx) < dp(20) && Math.abs(dy) < dp(20)) {
+                            if (dy < -dp(35) && Math.abs(dx) < dp(45)) triggerShift(true);
+                            else if (dy > dp(35) && Math.abs(dx) < dp(45)) triggerShift(false);
+                            else if (dx < -dp(50) && Math.abs(dy) < dp(45)) pulseButton(BTN_Y, 250);
+                            else if (Math.abs(dx) < dp(20) && Math.abs(dy) < dp(20)) {
                                 long now = System.currentTimeMillis();
-                                if (now - lastCenterTapTime < 320) {
-                                    pulseButton(BTN_RIGHT_SHOULDER, 120);
-                                    lastCenterTapTime = 0;
-                                } else {
-                                    lastCenterTapTime = now;
-                                }
+                                if (now - lastCenterTapTime < 320) { pulseButton(BTN_RIGHT_SHOULDER, 120); lastCenterTapTime = 0; }
+                                else lastCenterTapTime = now;
                             }
                         }
-                    } else if (z == Z_BRAKE) {
-                        leftHeld = false;
-                        currentBrake = 0.0f;
-                        brakeAlpha = 0.0f;
-                        if (autoThrottle) currentThrottle = 1.0f;
-                    } else if (z == Z_THROTTLE) {
-                        rightHeld = false;
-                        currentThrottle = autoThrottle ? 1.0f : 0.0f;
                     }
 
                     if (pId < MAX_P) zone[pId] = Z_NONE;
-                    flushOverrides();
-                    postInvalidate();
-                    return true;
+                    flushOverrides(); postInvalidate(); return true;
                 }
 
                 case MotionEvent.ACTION_CANCEL: {
-                    leftHeld = rightHeld = false; currentBrake = brakeAlpha = currentLookX = currentLookY = 0.0f;
+                    currentBrake = brakeAlpha = currentLookX = currentLookY = 0.0f;
                     currentThrottle = autoThrottle ? 1.0f : 0.0f; currentButtons = 0;
-                    flushOverrides(); postInvalidate(); return true;
+                    for (int i = 0; i < MAX_P; i++) zone[i] = Z_NONE;
+                    updateArrowSteer(); updatePedals(); flushOverrides(); postInvalidate(); return true;
                 }
             }
             return super.onTouchEvent(event);
@@ -1215,124 +1018,65 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     }
 
     public static void showTouchGuide(Context context) {
-        if (!(context instanceof PinyonShiftActivity)) return;
-        PinyonShiftActivity act = (PinyonShiftActivity) context;
-        LinearLayout c = new LinearLayout(act);
-        final Dialog d = act.createCardDialog("Touch Controls & Gestures", c);
-        TextView msg = new TextView(act);
-        msg.setText("- Steering: Device gyro tilt\n- Left: Brake | Right: Throttle (Auto RT)\n- Menu: On-screen D-Pad & A/B/X/Y\n- Top Pill: FH1 Live Tuning\n- Center: Flick shift, drag look, swipe rewind\n- Drive: Rewind (Y) & E-Brake (A)");
-        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
-        msg.setTextColor(0xFFC0CEC4);
-        msg.setPadding(0, act.dp(4), 0, act.dp(14));
-        c.addView(msg);
-        Button ok = act.createDialogBtn("Got It", true);
-        ok.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { d.dismiss(); }
-        });
-        c.addView(ok);
-        d.show();
-    }
-
-    static void installBundledDrivers(AssetManager assets, File driversDir) {
-        try {
-            String[] drivers = assets.list("drivers");
-            if (drivers == null) return;
-            for (String driver : drivers) {
-                File target = new File(driversDir, driver);
-                if (target.exists()) continue;
-                String[] files = assets.list("drivers/" + driver);
-                if (files == null || files.length == 0) continue;
-                target.mkdirs();
-                for (String name : files) {
-                    try (InputStream in = assets.open("drivers/" + driver + "/" + name);
-                         OutputStream out = new FileOutputStream(new File(target, name))) {
-                        copy(in, out);
-                    }
-                }
-            }
-        } catch (IOException error) {
-            Log.w(TAG, "failed installing bundled drivers", error);
-        }
+        if (context instanceof PinyonShiftActivity) ((PinyonShiftActivity) context).toast("Left: Steer · Right: Brake/Gas · Top: Tuning");
     }
 
     static int getThemeAccent(Context ctx) {
-        SharedPreferences p = ctx.getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE);
-        return p.getInt("theme_accent", Color.rgb(92, 208, 138));
+        return ctx.getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE).getInt("theme_accent", Color.rgb(92, 208, 138));
     }
 
     static void copy(InputStream in, OutputStream out) throws IOException {
-        byte[] buffer = new byte[8192];
-        for (int read; (read = in.read(buffer)) > 0; ) {
-            out.write(buffer, 0, read);
-        }
+        byte[] b = new byte[8192]; for (int r; (r = in.read(b)) > 0; ) out.write(b, 0, r);
     }
-
-    static void deleteTree(File f) {
-        File[] ch = f.listFiles();
-        if (ch != null) for (File c : ch) deleteTree(c);
-        f.delete();
-    }
-
-    static void copyTree(File s, File d) throws IOException {
-        if (s.isDirectory()) {
-            d.mkdirs();
-            File[] ch = s.listFiles();
-            if (ch != null) for (File c : ch) copyTree(c, new File(d, c.getName()));
-            return;
-        }
-        d.getParentFile().mkdirs();
-        try (InputStream in = new FileInputStream(s); OutputStream out = new FileOutputStream(d)) { copy(in, out); }
-    }
-
-    static List<InetAddress> broadcastAddresses() {
-        List<InetAddress> r = new ArrayList<>();
+    static void installBundledDrivers(AssetManager a, File d) {
         try {
-            for (NetworkInterface n : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (!n.isUp() || n.isLoopback()) continue;
-                for (InterfaceAddress ia : n.getInterfaceAddresses()) if (ia.getBroadcast() != null) r.add(ia.getBroadcast());
+            String[] drv = a.list("drivers"); if (drv == null) return;
+            for (String dr : drv) {
+                File t = new File(d, dr); if (t.exists()) continue;
+                String[] fls = a.list("drivers/" + dr); if (fls == null || fls.length == 0) continue;
+                t.mkdirs();
+                for (String n : fls) try (InputStream in = a.open("drivers/" + dr + "/" + n); OutputStream out = new FileOutputStream(new File(t, n))) { copy(in, out); }
             }
-            r.add(InetAddress.getByName("255.255.255.255"));
+        } catch (IOException ignored) {}
+    }
+    static void deleteTree(File f) { File[] ch = f.listFiles(); if (ch != null) for (File c : ch) deleteTree(c); f.delete(); }
+    static void copyTree(File s, File d) throws IOException {
+        if (s.isDirectory()) { d.mkdirs(); File[] ch = s.listFiles(); if (ch != null) for (File c : ch) copyTree(c, new File(d, c.getName())); return; }
+        d.getParentFile().mkdirs(); try (InputStream in = new FileInputStream(s); OutputStream out = new FileOutputStream(d)) { copy(in, out); }
+    }
+    static List<java.net.InetAddress> broadcastAddresses() {
+        List<java.net.InetAddress> r = new ArrayList<>();
+        try {
+            for (java.net.NetworkInterface n : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces()))
+                if (n.isUp() && !n.isLoopback()) for (java.net.InterfaceAddress a : n.getInterfaceAddresses()) if (a.getBroadcast() != null) r.add(a.getBroadcast());
+            r.add(java.net.InetAddress.getByName("255.255.255.255"));
         } catch (IOException ignored) {}
         return r;
     }
-
-    static String unpackDriver(ContentResolver resolver, File driversDir, Uri uri) throws IOException {
+    static String unpackDriver(android.content.ContentResolver res, File dir, Uri uri) throws IOException {
         String base = "driver";
-        try (Cursor c = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (c != null && c.moveToFirst()) {
-                String d = c.getString(0);
-                if (d != null) base = d.replaceAll("(?i)\\.(zip|adpkg)$", "");
-            }
+        try (android.database.Cursor c = res.query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) base = c.getString(0).replaceAll("(?i)\\.(zip|adpkg)$", "");
         }
-        File target = new File(driversDir, base);
-        if (target.exists()) deleteTree(target);
-        target.mkdirs();
-        try (InputStream raw = resolver.openInputStream(uri); ZipInputStream zip = new ZipInputStream(raw)) {
-            for (ZipEntry e; (e = zip.getNextEntry()) != null; zip.closeEntry()) {
+        File target = new File(dir, base); if (target.exists()) deleteTree(target); target.mkdirs();
+        try (InputStream raw = res.openInputStream(uri); java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(raw)) {
+            for (java.util.zip.ZipEntry e; (e = zip.getNextEntry()) != null; zip.closeEntry()) {
                 if (e.getName().contains("..")) continue;
                 File out = new File(target, e.getName());
                 if (e.isDirectory()) out.mkdirs();
-                else {
-                    out.getParentFile().mkdirs();
-                    try (OutputStream fos = new FileOutputStream(out)) { copy(zip, fos); }
-                }
+                else { out.getParentFile().mkdirs(); try (OutputStream fos = new FileOutputStream(out)) { copy(zip, fos); } }
             }
         }
         return base;
     }
 
-
     private void toast(final String text) {
         runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (rr3Overlay != null) rr3Overlay.flashStatus(text);
-            }
+            @Override public void run() { if (rr3Overlay != null) rr3Overlay.flashStatus(text); }
         });
     }
 
     private int dp(float value) {
-        return Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
+        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
 }
