@@ -86,9 +86,10 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         if (autoThrottle) currentThrottle = 1.0f;
         super.onCreate(savedInstanceState);
         enforceCutoutMode();
-        int res = prefs.getInt("res_scale", 720);
-        if (res <= 2) { res = (res == 2) ? 1440 : 720; prefs.edit().putInt("res_scale", res).apply(); }
+        int res = prefs.getInt("res_scale", 1080);
+        if (res <= 540) { res = 1080; prefs.edit().putInt("res_scale", 1080).apply(); }
         applySurfaceResolution(res);
+        applyBrightness(prefs.getInt("screen_brightness", 100));
         initHaptics(); initSensors(); initThermalPacer();
         startPhotoWatcher(new File(stateDir, "photos"));
         attachMobileOverlays();
@@ -145,11 +146,18 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         if (mSurface == null) return;
         ViewGroup.LayoutParams lp = mSurface.getLayoutParams();
         if (lp != null) { lp.width = lp.height = ViewGroup.LayoutParams.MATCH_PARENT; mSurface.setLayoutParams(lp); }
-        if (s == 540 || s == 360) {
+        if (s == 720) {
             DisplayMetrics dm = getResources().getDisplayMetrics();
             float asp = (float) Math.max(dm.widthPixels, dm.heightPixels) / (float) Math.max(1, Math.min(dm.widthPixels, dm.heightPixels));
-            mSurface.getHolder().setFixedSize(Math.round(s * asp), s);
+            mSurface.getHolder().setFixedSize(Math.round(720 * asp), 720);
         } else mSurface.getHolder().setSizeFromLayout();
+    }
+
+    void applyBrightness(int b) {
+        if (getWindow() == null) return;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = (b <= 0) ? -1.0f : Math.max(0.05f, Math.min(1.0f, b / 100.0f));
+        getWindow().setAttributes(lp);
     }
 
     private void confirmQuit() {
@@ -185,7 +193,10 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         if (Build.VERSION.SDK_INT >= 30) {
             try { SDLActivity.onNativeInsetsChanged(0, 0, 0, 0); } catch (Throwable ignored) {}
         }
-        applySurfaceResolution(prefs.getInt("res_scale", 720));
+        int res = prefs.getInt("res_scale", 1080);
+        if (res <= 540) { res = 1080; prefs.edit().putInt("res_scale", 1080).apply(); }
+        applySurfaceResolution(res);
+        applyBrightness(prefs.getInt("screen_brightness", 100));
         applyDisplayRefreshRate(currentFpsTarget);
         boolean gyroOn = isGyroActive();
         if (sensorManager != null && gameRotationSensor != null && gyroOn) {
@@ -464,6 +475,8 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         addHudSectionTitle(items, "Live Performance & Graphics");
         addHudRow(items, "Graphics Preset", new String[]{"Quality 30", "Smooth 60", "Ultra"}, new String[]{"preset_quality", "preset_smooth", "preset_ultra"}, -1);
         addHudRow(items, "Target FPS", new String[]{"30 FPS", "45 FPS", "60 FPS", "Max"}, new String[]{"fps_30", "fps_45", "fps_60", "fps_0"}, currentFpsTarget == 0 ? 3 : currentFpsTarget == 60 ? 2 : currentFpsTarget == 45 ? 1 : 0);
+        int curBr = prefs.getInt("screen_brightness", 100);
+        addHudRow(items, "Brightness", new String[]{"100%", "80%", "60%", "40%"}, new String[]{"br_100", "br_80", "br_60", "br_40"}, curBr <= 40 ? 3 : curBr <= 60 ? 2 : curBr <= 80 ? 1 : 0);
         addHudRow(items, "Reflections", new String[]{"100%", "50%", "25%", "Off"}, new String[]{"ref_100", "ref_50", "ref_25", "ref_0"}, 2);
         addHudRow(items, "Output Upscaler", new String[]{"FSR 1.0", "CAS", "Bilinear"}, new String[]{"up_fsr", "up_cas", "up_bilinear"}, -1);
 
@@ -494,6 +507,11 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         if ("quit_game".equals(t)) confirmQuit();
         else if ("open_host_settings".equals(t)) {
             try { nativeAction(2, 0.0f); } catch (UnsatisfiedLinkError ignored) {}
+        } else if (t.startsWith("br_")) {
+            int b = Integer.parseInt(t.substring(3));
+            prefs.edit().putInt("screen_brightness", b).apply();
+            applyBrightness(b);
+            toast("Brightness: " + b + "%");
         } else if ("toggle_auto_throttle".equals(t)) {
             autoThrottle = !autoThrottle; prefs.edit().putBoolean("auto_throttle", autoThrottle).apply();
             if (!inMenuMode) currentThrottle = autoThrottle ? 1.0f : 0.0f; flushOverrides();
@@ -797,52 +815,28 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             }
 
             float rAction = dp(20);
-            pillPaint.setColor(0x99141816); strokePaint.setColor(0x33FFFFFF); strokePaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(dp(36), dp(60), rAction, pillPaint); canvas.drawCircle(dp(36), dp(60), rAction, strokePaint);
-            textPaint.setColor(Color.WHITE); textPaint.setTextSize(dp(13)); textPaint.setTypeface(Typeface.DEFAULT_BOLD);
-            canvas.drawText("«", dp(36), dp(64.5f), textPaint);
+            drawCircleBtn(canvas, dp(36), dp(60), rAction, "«", 0x99141816, 0x33FFFFFF, Color.WHITE, 13);
 
             boolean eBrakeActive = (currentButtons & BTN_A) != 0;
-            pillPaint.setColor(eBrakeActive ? 0xDD5CE68B : 0x99141816);
-            strokePaint.setColor(eBrakeActive ? 0xFF0B1F11 : 0x33FFFFFF);
-            canvas.drawCircle(w - dp(36), dp(60), rAction, pillPaint); canvas.drawCircle(w - dp(36), dp(60), rAction, strokePaint);
-            strokePaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE); strokePaint.setStrokeWidth(dp(1.5f));
-            canvas.drawCircle(w - dp(36), dp(60), dp(10), strokePaint);
-            textPaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE); textPaint.setTextSize(dp(11)); textPaint.setTypeface(Typeface.DEFAULT_BOLD);
-            canvas.drawText("P", w - dp(36), dp(63.5f), textPaint);
+            drawCircleBtn(canvas, w - dp(36), dp(60), rAction, "P", eBrakeActive ? 0xDD5CE68B : 0x99141816, eBrakeActive ? 0xFF0B1F11 : 0x33FFFFFF, eBrakeActive ? 0xFF0B1F11 : Color.WHITE, 11);
 
             float arrowY = h * 0.70f, arrowR = dp(30);
-            float[] aX = {dp(50), dp(126)};
-            boolean[] aAct = {steerLeftHeld, steerRightHeld};
-            String[] aSym = {"‹", "›"};
-            strokePaint.setStrokeWidth(dp(1.2f)); textPaint.setTextSize(dp(22));
-            for (int i = 0; i < 2; i++) {
-                pillPaint.setColor(aAct[i] ? 0xDD5CE68B : 0x8818221B); strokePaint.setColor(aAct[i] ? 0xFF0B1F11 : 0x44FFFFFF);
-                canvas.drawCircle(aX[i], arrowY, arrowR, pillPaint); canvas.drawCircle(aX[i], arrowY, arrowR, strokePaint);
-                textPaint.setColor(aAct[i] ? 0xFF0B1F11 : 0xEEFFFFFF);
-                canvas.drawText(aSym[i], aX[i], arrowY + dp(7), textPaint);
-            }
+            float[] aX = {dp(50), dp(126)}; boolean[] aAct = {steerLeftHeld, steerRightHeld}; String[] aSym = {"‹", "›"};
+            for (int i = 0; i < 2; i++) drawCircleBtn(canvas, aX[i], arrowY, arrowR, aSym[i], aAct[i] ? 0xDD5CE68B : 0x8818221B, aAct[i] ? 0xFF0B1F11 : 0x44FFFFFF, aAct[i] ? 0xFF0B1F11 : 0xEEFFFFFF, 22);
 
             if (touchOpacity <= 0.01f) return;
-            float pedalH = dp(34), pX1 = w - dp(94), pX2 = w - dp(14);
+            float pedalH = dp(34), pX1 = w - dp(94), pX2 = w - dp(14), pW = pX2 - pX1;
             boolean bActive = currentBrake > 0.0f || brakeAlpha > 0.01f, tActive = currentThrottle > 0.0f;
             float[] pedY = {h * 0.36f, h * 0.70f}; boolean[] pedAct = {bActive, tActive};
-            int[][] pedCols = {{255, 60, 60}, {92, 230, 139}};
-            String[] pedTxt = {"BRAKE", autoThrottle ? "AUTO GAS" : "GAS"};
-            textPaint.setTextSize(dp(12));
+            int[][] pedCols = {{255, 60, 60}, {92, 230, 139}}; String[] pedTxt = {"BRAKE", autoThrottle ? "AUTO GAS" : "GAS"};
             for (int i = 0; i < 2; i++) {
                 int[] c = pedCols[i];
-                pillPaint.setColor(pedAct[i] ? Color.argb((int)(130 * touchOpacity), c[0], c[1], c[2]) : Color.argb((int)(35 * touchOpacity), c[0] / 7, c[1] / 7, c[2] / 7));
-                strokePaint.setColor(pedAct[i] ? Color.argb((int)(240 * touchOpacity), c[0], c[1], c[2]) : Color.argb((int)(40 * touchOpacity), 255, 255, 255));
-                canvas.drawRoundRect(pX1, pedY[i] - pedalH * 0.5f, pX2, pedY[i] + pedalH * 0.5f, dp(8), dp(8), pillPaint);
-                canvas.drawRoundRect(pX1, pedY[i] - pedalH * 0.5f, pX2, pedY[i] + pedalH * 0.5f, dp(8), dp(8), strokePaint);
-                textPaint.setColor(pedAct[i] ? Color.WHITE : Color.argb((int)(150 * touchOpacity), 255, 255, 255));
-                canvas.drawText(pedTxt[i], (pX1 + pX2) * 0.5f, pedY[i] + dp(4.5f), textPaint);
+                int fill = pedAct[i] ? Color.argb((int)(130 * touchOpacity), c[0], c[1], c[2]) : Color.argb((int)(35 * touchOpacity), c[0] / 7, c[1] / 7, c[2] / 7);
+                int strk = pedAct[i] ? Color.argb((int)(240 * touchOpacity), c[0], c[1], c[2]) : Color.argb((int)(40 * touchOpacity), 255, 255, 255);
+                drawPillBtn(canvas, pX1, pedY[i] - pedalH * 0.5f, pW, pedalH, pedTxt[i], fill, strk, pedAct[i] ? Color.WHITE : Color.argb((int)(150 * touchOpacity), 255, 255, 255));
             }
-
             if (bActive) {
-                float a = Math.max(currentBrake, brakeAlpha);
-                vignettePaint.setColor(Color.argb((int) (a * 24 * touchOpacity), 255, 60, 60));
+                vignettePaint.setColor(Color.argb((int) (Math.max(currentBrake, brakeAlpha) * 24 * touchOpacity), 255, 60, 60));
                 canvas.drawRoundRect(w - dp(36), dp(6), w - dp(6), dp(18), dp(4), dp(4), vignettePaint);
             }
             if (tActive) {
@@ -1043,9 +1037,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         return ctx.getSharedPreferences("pinyon_shift_settings", MODE_PRIVATE).getInt("theme_accent", Color.rgb(92, 208, 138));
     }
 
-    static void copy(InputStream in, OutputStream out) throws IOException {
-        byte[] b = new byte[8192]; for (int r; (r = in.read(b)) > 0; ) out.write(b, 0, r);
-    }
+    static void copy(InputStream in, OutputStream out) throws IOException { byte[] b = new byte[8192]; for (int r; (r = in.read(b)) > 0; ) out.write(b, 0, r); }
     static void installBundledDrivers(AssetManager a, File d) {
         try {
             String[] drv = a.list("drivers"); if (drv == null) return;
@@ -1057,7 +1049,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             }
         } catch (IOException ignored) {}
     }
-    static void deleteTree(File f) { File[] ch = f.listFiles(); if (ch != null) for (File c : ch) deleteTree(c); f.delete(); }
+    static void deleteTree(File f) { if (f != null && f.exists()) { File[] ch = f.listFiles(); if (ch != null) for (File c : ch) deleteTree(c); f.delete(); } }
     static void copyTree(File s, File d) throws IOException {
         if (s.isDirectory()) { d.mkdirs(); File[] ch = s.listFiles(); if (ch != null) for (File c : ch) copyTree(c, new File(d, c.getName())); return; }
         d.getParentFile().mkdirs(); try (InputStream in = new FileInputStream(s); OutputStream out = new FileOutputStream(d)) { copy(in, out); }
