@@ -3,6 +3,7 @@
 // verified FH1 v4 title-update counterparts.
     {0x82000D48u, 0x82000D48u},  // data: data
     {0x82000D68u, 0x82000D68u},  // data: data
+    {0x8200E724u, 0x82014B1Cu},  // data: data-ref
     {0x82026B38u, 0x820307A4u},  // data: data
     {0x8203363Cu, 0x82042C6Cu},  // data: data
     {0x820336A4u, 0x82042CD4u},  // data: data
@@ -76,12 +77,16 @@
     {0x832BE9ECu, 0x833AA4DCu},  // data: data
     {0x832DF00Cu, 0x833CAACCu},  // data: data
     {0x832DF024u, 0x833CAAE4u},  // data: data
+    {0x832E1260u, 0x833CCD20u},  // data: data-ref
+    {0x832E126Cu, 0x833CCD2Cu},  // data: data-ref
+    {0x832E29A0u, 0x833D02E0u},  // data: data
     {0x832E4A80u, 0x833D23E0u},  // data: data
     {0x832E4A9Cu, 0x833D23F4u},  // data: data
     {0x832E5510u, 0x833D2FFCu},  // data: data
     {0x832E6364u, 0x833D3F34u},  // data: data
     {0x832FEE8Cu, 0x833EDA1Cu},  // data: data
     {0x832FF1D8u, 0x833EDDA4u},  // data: data
+    {0x833023C1u, 0x833F0F91u},  // data: data
     {0x83305CC4u, 0x833F4A80u},  // data: data
     {0x833067E0u, 0x833F5600u},  // data: data
     {0x83439490u, 0x8352EA5Cu},  // data: data

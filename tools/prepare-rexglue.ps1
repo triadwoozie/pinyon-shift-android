@@ -49,7 +49,10 @@ function Repair-MaterializedLinks {
     param([Parameter(Mandatory)] [string]$RepositoryRoot)
     $mspackRoot = Join-Path $RepositoryRoot 'thirdparty/libmspack'
     if (-not (Test-Path -LiteralPath (Join-Path $mspackRoot '.git'))) { return }
+    # A failed git here (dubious ownership of the nested repository in 0.5.1,
+    # #639) listed no links, so the text placeholders were compiled as C.
     $entries = @(& $git -C $mspackRoot ls-files -s | Where-Object { $_ -match '^120000 ' })
+    if ($LASTEXITCODE -ne 0) { throw "Unable to list the libmspack links in $mspackRoot." }
     foreach ($entry in $entries) {
         if ($entry -notmatch '^120000 [0-9a-f]+ 0\t(.+)$') {
             throw "Unable to parse a libmspack symlink entry: $entry"
@@ -131,9 +134,13 @@ else {
     }
     & $git -C $sdkRoot submodule sync --recursive
     if ($LASTEXITCODE -ne 0) { throw 'Unable to synchronize ShiftGlue dependency URLs.' }
+    # --force checks every dependency out again even when its commit already
+    # matches: an interrupted first setup (or a scanner) left o1heap's files
+    # missing, update skipped it, and CMake could not find o1heap.c (#580).
+    # Nothing here is edited by hand; local changes were refused above.
     Invoke-PinyonGitWithRetry -Activity 'Downloading ShiftGlue dependencies' -Arguments @(
         '-c', 'http.version=HTTP/1.1', '-C', $sdkRoot,
-        'submodule', 'update', '--init', '--recursive', '--jobs', '8'
+        'submodule', 'update', '--init', '--recursive', '--force', '--jobs', '8'
     )
 }
 

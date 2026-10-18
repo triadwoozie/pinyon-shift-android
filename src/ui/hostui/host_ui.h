@@ -238,6 +238,9 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
   std::unique_ptr<rex::ui::ImmediateTexture> selection_mask_;
   std::unique_ptr<rex::ui::ImmediateTexture> button_a_;
   std::unique_ptr<rex::ui::ImmediateTexture> button_b_;
+  // Our own PlayStation face marks, for when the pad in hand is one.
+  std::unique_ptr<rex::ui::ImmediateTexture> button_cross_;
+  std::unique_ptr<rex::ui::ImmediateTexture> button_circle_;
 
   // Per-draw state.
   Canvas canvas_;

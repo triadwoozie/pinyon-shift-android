@@ -14,6 +14,7 @@ deleted; files are never edited in place.
   title-update-profile.py status  --state-root STATE
   title-update-profile.py backup  --state-root STATE
   title-update-profile.py restore --state-root STATE
+  title-update-profile.py check-base --state-root STATE
 """
 from __future__ import annotations
 
@@ -21,12 +22,18 @@ import argparse
 import datetime
 import hashlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
 
 CONTENT_USER = "0000000000000000"  # shared Marketplace installations
 TITLE = "4D5309C9"
+DEFAULT_XUID = "B13EBABEBABEBABE"
+V4_SAVE = ("This save was made with title update v4 (on Xenia or the v4 build), and the "
+           "base build can't load it: the game would ask for an update from Xbox Live. "
+           "Import your own title update v4 in the launcher's DLC panel (Import update), "
+           "turn on Use v4 and play again.")
 
 
 def profiles(state: Path) -> list[Path]:
@@ -115,12 +122,44 @@ def restore(state: Path) -> dict:
     return {"restored": source.name, "profiles": names, "v4_saves_kept_in": str(aside)}
 
 
+def _setting(state: Path, name: str) -> str | None:
+    config = state / "config" / "pinyon_shift.toml"
+    try:
+        text = config.read_text(encoding="utf-8-sig")
+    except OSError:
+        return None
+    match = re.search(rf'^{name}[ \t]*=[ \t]*"([^"]*)"', text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def base_build_refusal(state: Path) -> str | None:
+    """Why the base build can't start the profile it would load, or None.
+    A v4 save makes the base game ask for a title update from Xbox Live
+    (#555). Mods that play their own profile (XE) don't load it."""
+    for mod in filter(None, (_setting(state, "enabled_mods") or "").split(",")):
+        manifest = state / "mods" / mod.strip() / "mod.toml"
+        if manifest.is_file() and re.search(r"^profile[ \t]*=", manifest.read_text(
+                encoding="utf-8", errors="replace"), re.MULTILINE):
+            return None
+    xuid = (_setting(state, "user_xuid") or DEFAULT_XUID).upper()
+    if profile_version(state / "user" / xuid) != "v4":
+        return None
+    if backups(state):
+        return V4_SAVE + (" To go back to the save from before v4 instead, run "
+                          "tools/pinyon.py title-update restore.")
+    return V4_SAVE
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("action", choices=("status", "backup", "restore"))
+    parser.add_argument("action", choices=("status", "backup", "restore", "check-base"))
     parser.add_argument("--state-root", type=Path, required=True)
     args = parser.parse_args()
     state = args.state_root.resolve()
+    if args.action == "check-base":
+        refusal = base_build_refusal(state)
+        print(json.dumps({"refusal": refusal}))
+        return 3 if refusal else 0
     try:
         result = {"status": status, "backup": backup, "restore": restore}[args.action](state)
     except (OSError, ValueError) as error:

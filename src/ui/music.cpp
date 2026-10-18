@@ -50,7 +50,8 @@ std::string ShortFolder() {
   if (REXCVAR_GET(pinyon_shift_music_folder).empty()) return "THE STATE'S MUSIC FOLDER";
   const auto folder = Folder();
   const auto parent = folder.parent_path().filename();
-  return Upper((parent.empty() ? folder.filename() : parent / folder.filename()).string());
+  return Upper(rex::path_to_utf8(parent.empty() ? folder.filename()
+                                               : parent / folder.filename()));
 }
 
 std::filesystem::path g_playing_folder;

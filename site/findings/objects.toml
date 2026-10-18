@@ -1,0 +1,339 @@
+# Reverse-engineering records for the "Game objects" page.
+
+# ------------------------------------------------------------- Game and world
+
+[[finding]]
+group = """Game and world"""
+base = """0x832DF024, sub_8247FC10, sub_824AFB20, sub_825F6FB0"""
+v4 = """0x833CAAE4, sub_824AF1E8, sub_82E55D58, sub_8269B4F8"""
+name = """game holder, world, user and components"""
+what = """The global at `0x832DF024` points at the game object, the root of most run-time state. From it: `[[[0x832DF024] + 4] + 4]` is the world (as `sub_8247FC10` and the reference copy in `sub_824AFB20` reach it), `[[0x832DF024] + 108]` is the user, and `[[[0x832DF024] + 4] + 76]` is the component list, an array indexed by a component type's index (`sub_825F6FB0`). The world in turn holds the time-of-day object (`+232`), the session with the game mode (`+124`) and the car vector (`+128`/`+132`)."""
+how = """Followed from the title's own setters (time of day, credits, activity reveal); every trainer feature and mod symbol reads through this chain."""
+confidence = """confirmed"""
+source = """config/mod/fh1-symbols.toml game.components, game.user; src/pinyon_shift_runtime_hooks.cpp PinyonShiftHoldTimeOfDay, PinyonShiftApplyCredits; src/dlc_treasure_map.cpp"""
+
+[[finding]]
+group = """Game and world"""
+base = """0x832DF00C"""
+v4 = """0x833CAACC"""
+name = """application object"""
+what = """Global pointer to the application object. Its word at `+896` is the selected event ID and `+948` the event hub ID; the UI flow's movie string lives at `[0x832DF00C] + 32 + 3176`. Selecting an event through `+896` works without the event loader's name."""
+how = """Read while tracing event entry and the wristband ceremony; writing `+896` and `+948` opened the event hub on a chosen event."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp RallySeriesLoader, RallyNativeHubEnter; docs/NATIVE_PORT_BACKLOG.md NP-2.9"""
+
+# ------------------------------------------------------ Session and game mode
+
+[[finding]]
+group = """Session and game mode"""
+base = """sub_824878D0"""
+v4 = """sub_824B75E8"""
+name = """game mode"""
+what = """`sub_824878D0(world)` returns the game mode, the word at `+56` of the session object at `world + 124`. It is 17 in free roam (also inside Dak's Garage) and turns 3 as an event is entered (between the event's first and third menu steps); it stays 3 through the race, pause, results and quit, and is 17 again once a retire returns to free roam. The wristband action also accepts 18, whose meaning is not known; v4 adds 20 for its Rally stages. There is no null check: the session pointer at `+124` is null while free roam loads or unloads. Colorado is track 317, and v4's Rally `ColoradoDirt` world track 1148."""
+how = """Logged on every change over the `fh1-race-retire` route; found through the wristband action's mode check; world fields read during route runs; crash analysis of a host query during loading. The offsets are unchanged in v4."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; config/mod/fh1-symbols.toml world.game_mode; docs/DLC_BACKLOG.md Fourth stages and save migration; docs/ANDROID_PORT_BACKLOG.md The 0x38 stop was a host query"""
+
+[[finding]]
+group = """Session and game mode"""
+base = """0x828BC9D8, 0x832DF024"""
+v4 = """0x8296E780"""
+name = """free-roam collectibles live"""
+what = """`sub_828BC9D8` returns non-zero while free-roam collectibles are live: in free roam, and not during the first-time career. It ignores its argument (r3). It reaches the world as `[[[0x832DF024] + 4] + 4]` and reads the game mode through `sub_824878D0` without a check, so a call while free roam loads or unloads reads guest `0x38` and stops the game. The discount signs' reveal checks it."""
+how = """Reading the generated code; used to gate collectible changes and as the readiness gate for host-run unlocks; crash analysis on Android (a host query landing during loading)."""
+confidence = """confirmed"""
+source = """config/mod/fh1-symbols.toml activities.live; src/dlc_treasure_map.cpp; src/cheats_map.cpp; docs/ANDROID_PORT_BACKLOG.md The 0x38 stop was a host query"""
+
+# ---------------------------------------------------------------- Time of day
+
+[[finding]]
+group = """Time of day"""
+base = """sub_82486CF0, sub_825CB718, 0x8200E704"""
+v4 = """0x824B6990, 0x8265A428"""
+name = """time-of-day object"""
+what = """The world's `+232` is the time-of-day object (`sub_82486CF0` returns it). Its float at `+10488` is seconds since midnight, advanced each frame by `sub_825CB718`, which also lights the scene from it. A set byte at `+10505` means a script holds the time, and the title's setters (`sub_82943D00`, `sub_8290D2A8`) then leave it alone. In free roam the clock ran at 28 game seconds per real second (a 51-minute day); the seed's daytime free roam sits around 40,000-50,000 s, and holding `+10488` at 79,200 (22:00) every frame renders free roam at night."""
+how = """`FirstTimeCareer.xml` gives time as `hr * 60 * 60`; a route scan for values in the seconds range rising steadily (five copies at 46,729 s; poking them to 79,200 turned free roam to night), then xrefs from the 86,400.0 constant at `0x8200E704` back to its users. Earlier scans for a rising day fraction or hour count found nothing."""
+confidence = """confirmed"""
+note = """The object is on the heap, so its address differs between runs."""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; config/mod/fh1-symbols.toml time_of_day.*; src/pinyon_shift_runtime_hooks.cpp PinyonShiftHoldTimeOfDay; docs/NATIVE_PORT_BACKLOG.md NP-8.5; docs/native-renderer/FH1_RENDER_TEST_AUTOMATION.md"""
+
+[[finding]]
+group = """Time of day"""
+base = """sub_825C7DD0"""
+v4 = """0x82656D40"""
+name = """time-of-day request"""
+what = """`sub_825C7DD0` requests a time-of-day transition: r3 is the time-of-day object, f1 the target seconds (add 86,400 to pass midnight) and f2 the rate in game seconds per real second."""
+how = """Traced from the title's own time setters; argument use read from the generated code."""
+confidence = """confirmed"""
+source = """config/mod/fh1-symbols.toml time_of_day.request; docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+# ------------------------------------------------- Vehicles, camera and crowd
+
+[[finding]]
+group = """Vehicles, camera and crowd"""
+base = """sub_8248BAE8, sub_8249E570, sub_828FEAF8"""
+v4 = """sub_824BB8F8, sub_8250B050"""
+name = """player car and AI control"""
+what = """`sub_8248BAE8(world)` returns the player's car slot (a pointer to the car) from the world's car vector at `+128`/`+132` (one entry in a solo world). `sub_8249E570(car, mode)` sets the car's control mode, 0 for the player and 1 for AI, as `CDisableAIPlayerCarControls` (`sub_828FEAF8`) uses it: it hands the car to AI driving with normal physics and route tracking, and returns it to the player. Car fields: `+0x3B70` and the control mode word `+0x3B78` (read by the setter), race serial `+14564`, an ended flag `+14603`, driver type `+11728` (0 for the player) and a control object `+15216`. In the base game's render-test drive the word at `+0x3B78` reads 1 while the player drives, so it does not tell the player's car from an AI one there; the driver type does, at the same offset in v4 (read at run time in both builds). Car fields after about `0x3B00` move by 16 bytes in v4 (`+0x3B80`/`+0x3B88`). The AI does not finish every route: on Rally route 10 it stops against a barrier at 41 %, and in v4's scripted first-run Rally stage it fights the intro's own control (stopped at 19 %) or, engaged later, ends in the trees at 22 % as with no input."""
+how = """Calling the setter handed the player car to the title's AI for whole stages; fields read in race traces; v4 render-test runs with and without it, with the v4 mapping verified (identical code apart from the moved field)."""
+confidence = """confirmed"""
+note = """Why the AI stalls on those routes is unknown."""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueTitleUpdateRaceTask, QueueRallyRaceTrace; docs/TITLE_UPDATE_V4_BACKLOG.md TU-4; docs/TITLE_UPDATE_V4_BACKLOG.md TU-6; docs/DLC_BACKLOG.md Diagnostic AI control handoff and final-stage return"""
+
+[[finding]]
+group = """Vehicles, camera and crowd"""
+base = """0x82BC5A3C, sub_82BC5870"""
+v4 = """0x82C84424"""
+name = """vehicle presentation transform"""
+what = """At `0x82BC5A3C`, the instruction after `sub_82BC5870` returns, a vehicle slot's pose is final and stored: the owner (r31) has the active slot index at `owner+1500`, slot stride 1056, float4 position at `slot+15120` and forward vector at `slot+15184`. The site is shared by the player's car, traffic and other vehicles. It is the presentation transform, rewritten from the physics body every frame, so writing it can neither freeze nor teleport a car. During a world-cell rebase the title exposes the new local pose two or three frames before the camera and world basis follow (a 31-33 unit mismatch)."""
+how = """Runtime write-watch, then a midasm hook at the store identifying generation, source, owner and slot; telemetry and discontinuity logs; freeze and teleport attempts failed."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.1; docs/native-renderer/RESEARCH.md Vehicles and shadow epochs; config/mod/fh1-symbols.toml vehicle.pose_written; config/rexglue/analysis/main-xex.toml midasm_hook 0x82BC5A3C"""
+
+[[finding]]
+group = """Vehicles, camera and crowd"""
+base = """sub_82486C40, sub_82486C70, sub_82858638, sub_82486B40, sub_825A86F8"""
+v4 = """sub_824B68E0, sub_824B6910, sub_82908AC0, sub_824B6758, sub_826207B0"""
+name = """camera controllers and free camera"""
+what = """The world has several camera controllers: `sub_82486C40(world)` counts them and `sub_82486C70(world, i)` returns one. `sub_82858638(controller, mode)` sets a controller's mode; mode 6 is the free camera. `sub_82486B40(world, i)` returns a player camera and `sub_825A86F8` resets it to the player. The script actions `CChangeToFreeCamera` (`sub_828F2DB0`) and `CResetCameraToPlayer` (`sub_82937158`) are built from these calls."""
+how = """Script functors are registered by name (`sub_828F7180` for `CChangeToFreeCamera`); following their vtables gave the calls, and calling them from a host task switches the camera."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; config/mod/fh1-symbols.toml camera.*"""
+
+[[finding]]
+group = """Vehicles, camera and crowd"""
+base = """sub_82E08A00, 0x82E08A30, 0x82E09140, 0x82E09144, 0x82E09458, 0x82E0945C"""
+v4 = """0x82ECAB68, 0x82ECB27C, 0x82ECB594"""
+name = """trackside procedural crowd"""
+what = """The start-line spectators are about 280 12-byte instance records (`u32` 0, an f16 near 1, a `u16` animation frame, a clip index). `sub_82E08A00` on the render thread (`proceduralGeometry`; r29 is the procedural models object after the prologue) advances each visible instance by a step loaded from `+0x3EAE4` of the render context, which the title keeps at one per frame, so the crowd animates at the render rate rather than at 30 Hz. At the end of a clip, after 190-370 frames, it picks a new random clip (`0x82E09140`, step added at `0x82E09144`) or loops (`0x82E09458`, step added at `0x82E0945C` in r10)."""
+how = """Memory snapshots at frame limits 120 and 30; a page-access probe naming the reader; midasm hooks at `0x82E08A30` and the two add sites giving each call real-time 30 Hz steps (16 frames per 60 at 120 fps); a play-test report of a fast race crowd at high frame rates."""
+confidence = """confirmed"""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-1.5 crowd disposition; src/pinyon_shift_runtime_hooks.cpp PinyonShiftCrowdStepBegin; docs/NATIVE_PORT_BACKLOG.md NP-3.7"""
+
+[[finding]]
+group = """Vehicles, camera and crowd"""
+base = """sub_82DE2130"""
+name = """CCrowdPresentation is not the race crowd"""
+what = """`CCrowdPresentation::Update` (`sub_82DE2130`) advances by the simulation delta in 25 ms frames, but it is never called in the car purchase, race start or race routes, and `CAnimatedModelPresentation`'s fixed step never fired in a race either. The start-line spectators are the procedural crowd."""
+how = """Probe hooks at function entry on three routes."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-1.5 crowd disposition, DR-1.5 high-frame-rate steppers"""
+
+# ----------------------------------------------------------- Car dynamics
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_8249E4B8, 0x8223759C"""
+v4 = """sub_8250AF98"""
+name = """car dynamics interface"""
+what = """`[car + 11664]` (`0x2D90`) is the car's `ICarDynamics`, the interface to its physics (vtable `0x8223759C`, 339 slots). It is a subobject of `CCarDynamics` at `+0xAD0`, so a `CCarDynamics` offset is the interface offset plus `0xAD0`. The car's own code reaches it through `sub_8249E4B8` (returns `car + 11664`) about 220 times. The engine, gear, speed, ABS and wheel fields in this group are offsets from it; the `CCarDynamics` layout is the same in v4."""
+how = """Getter and vtable calls in the car code; every getter below matched in v4 with the same offsets; read each frame at run time for DualSense trigger effects, in the base and v4 builds with the same values."""
+confidence = """confirmed"""
+source = """docs/DUALSENSE_BACKLOG.md DS-3; src/pinyon_shift_runtime_hooks.cpp QueueCarTelemetry"""
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_82D1D078"""
+name = """engine speed, redline and limiter"""
+what = """Engine speeds are floats in rad/s; the getters multiply by 9.5493 (60/2π) for RPM. `+324` is the engine speed, `+452` the redline (the dashboard shift light comes on at 0.9 × it), `+456` the limiter the engine speed is clamped to, `+1228` idle and `+2244` the transmission. The guest's rumble uses (RPM − idle) / (limiter − idle) as its engine channel. In the render-test car: 700 to 800 RPM at idle, a 7300 RPM redline and about 7900 RPM on the limiter."""
+how = """The tachometer and telemetry getters; read at run time on a launch, through the gears and in reverse."""
+confidence = """confirmed"""
+source = """docs/DUALSENSE_BACKLOG.md DS-3"""
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_82D1D868"""
+v4 = """sub_82DDF7C8"""
+name = """gear and shift state"""
+what = """`+2240` is the gear as a byte: 0 reverse, 1 to 8 forward, 9 neutral (the dashboard prints the reverse and neutral strings for 0 and 9). `+3932` reads 4 while a shift is in progress, which drives the rumble's shift pulse."""
+how = """Dashboard getter and its strings; at run time the byte went 1, 2, 3 through the gears and 0 in reverse. The shift-state value is from the rumble builder only."""
+confidence = """confirmed"""
+note = """The shift-state value 4 is probable: not checked at run time."""
+source = """docs/DUALSENSE_BACKLOG.md DS-3"""
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_82D1CE38"""
+v4 = """sub_82DDED78"""
+name = """vehicle speed"""
+what = """`+3128` is the car's speed as a float in m/s: the speedometer converts it through the unit table, and the rumble scales it by 1/22.352 (22.352 m/s is 50 mph). At run time it read 22 m/s at 6200 RPM in second gear."""
+how = """Speedometer and rumble getters; run-time reads on a launch."""
+confidence = """probable"""
+source = """docs/DUALSENSE_BACKLOG.md DS-3"""
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_82D1D880, sub_82D365B0"""
+v4 = """sub_82DDF7E0"""
+name = """ABS, traction and stability flags"""
+what = """The cockpit ABS light is `[+3020] != 0 && [+3436] != 0`. `+3020` is the ABS-active flag: the brake model `sub_82D365B0` clears it on every physics step and sets it on the steps where it releases a wheel whose slip ratio is past its threshold, so it flickers during an ABS stop rather than staying on. `+3436` is the ABS assist setting. The TCS light is `[+3004] > 0.1` (a float intervention amount) and the STM light `[+3016] != 0`."""
+how = """The cockpit-light update in `CDigitalGauge`; at run time `+3436` read 1 with the seed save's assists, and `+3020` set on scattered steps of each hard stop (seen as the DualSense ABS effect switching on and off)."""
+confidence = """confirmed"""
+note = """TCS and STM are from the light update only, not checked at run time."""
+source = """docs/DUALSENSE_BACKLOG.md DS-3"""
+
+[[finding]]
+group = """Car dynamics"""
+base = """sub_82D2F348, sub_82D36DF8"""
+v4 = """sub_82DDFD20"""
+name = """wheel blocks and slip ratio"""
+what = """Four 1024-byte wheel blocks start at `+3936`: wheels 0 and 1 are the front axle, 2 and 3 the rear (left and right order is a guess). In a block, `+496` is the smoothed slip ratio divided by the tyre's peak slip ratio, so 1 is peak grip and beyond it the wheel spins or locks; `+492` is the raw value the tyre model `sub_82D2F348` writes each step. The sign follows the car's forward axis: positive when the wheel turns faster than the ground (wheelspin going forward), negative when slower (locking going forward, and also wheelspin in reverse). `+12` is the wheel speed in rad/s, `+337` the surface index (a byte into the physics surface table), `+796` nonzero while the wheel touches the ground."""
+how = """The tyre model and the ABS model that releases a wheel past the threshold; at run time on a rear-drive launch the rear wheels read +4 to +12 spinning in first, about +0.4 accelerating cleanly in second, −2.75 at the front locking under braking, and −6 to −14 spinning in reverse."""
+confidence = """confirmed"""
+note = """The surface index was not enumerated at run time."""
+source = """docs/DUALSENSE_BACKLOG.md DS-3"""
+
+# ------------------------------------------------ Activities and collectibles
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """0x832FEE8C, sub_828A52F0"""
+v4 = """0x833EDA1C, sub_82956A20"""
+name = """activity manager"""
+what = """The activity manager is a game component: its entry in the component list is at the index stored in `0x832FEE8C`. Its activities are a vector of pointers at `+4` (begin) and `+8` (end). Each activity has a name at `+16` (an MSVC `std::string` such as `flyer_001`, length `+32`, capacity `+36`) and a revealed byte at `+8`. `sub_828A52F0` is the shared start of every activity's reveal (vtable `+72`): it sets the revealed byte and, once, the revealed byte (`+40`) of the activity's saved record."""
+how = """Reading the generated code of the Treasure Map purchase completion; host reads while applying the reveal."""
+confidence = """confirmed"""
+source = """src/dlc_treasure_map.cpp; config/mod/fh1-symbols.toml activity.reveal"""
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """sub_828AF6F8, sub_828A52F0, sub_828AF780, sub_828B99C8, sub_828BC658"""
+v4 = """sub_829613C8, sub_82956A20, sub_82961450"""
+name = """Treasure Map reveal"""
+what = """Buying the Treasure Map token calls `sub_828AF6F8` on the activity manager, which runs the reveal (vtable `+72`) of each discount sign, barn find, speed camera, average speed zone and gas station. The reveal sets the activity's revealed byte (`+8`) and its saved record's (`+40`), so the profile keeps it; until then an unfound marker is not drawn. At load a revealed record re-runs the reveal (`sub_828B99C8`), and a barn find whose rumour starts later shows its exact location (`sub_828BC658`, at status 5). There is no other entitlement: the map screen offers the purchase while `sub_828AF780` finds an unrevealed activity (it returns 1 when all are revealed, and also for an empty list while free roam loads). A mid-career save already has all 22 speed cameras, 9 zones and 10 gas stations revealed."""
+how = """Following the reveal's callers (`sub_82560B80`) and vtables; host-run reveal in free roam, then save and reload; collectible logs from a save."""
+confidence = """confirmed"""
+note = """How speed cameras, zones and gas stations get revealed in normal play is not traced."""
+source = """src/dlc_treasure_map.cpp; src/cheats_map.cpp"""
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """0x82078E54, sub_828BA0C0, 0x828D94FC"""
+v4 = """0x820892CC, sub_8296BE38, 0x8298B244"""
+name = """CActivityGeneric"""
+what = """Generic activity: vtable `0x82078E54`, name at `+16`, a state byte at `+44`, trigger embedded at `+48`, X and Z at `+112` and `+120`. The trigger's position is at `trigger+64..76`, and its byte at `+192` carries a position-set flag (0x20). Its base parser binds triggers only to named GameObjs. `sub_828BA0C0(activity)` enters the activity and owns loading, game control and the return anchor."""
+how = """Hook at `0x828D94FC` after the trigger attributes are read, reading the `X`/`Z` keys through the reader's float reader (vtable `+180`); calling the enter function started Rally stages."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftReadRallyEntryPosition, QueueRallyRaceTrace"""
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """0x82078DE4, sub_828C3460, sub_828C0C80"""
+v4 = """0x8208925C, sub_82972A38 (smash)"""
+name = """CActivityFlyers"""
+what = """A discount sign: vtable `0x82078DE4` (set up by `sub_828C3460`), revealed byte `+8`, name `+16`, map marker handle `+56` (tag "flyer"), collected marker `+96` ("flyer_collected"), gameplay object `+136` (its float4 world position at `+112`), smashed byte `+140` and its saved `CFlyerState` record through `+148`. `sub_828C0C80(sign, notify)` smashes it: it sets the smashed byte, sets the record's found byte (`+44`) and swaps the marker for the collected one."""
+how = """Reading the smash and setup functions; offsets checked on v4."""
+confidence = """confirmed"""
+source = """src/cheats_map.cpp; config/mod/fh1-symbols.toml flyer.*"""
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """0x82078B5C, sub_828B99C8, sub_828A5BF8, sub_828A78B0"""
+v4 = """0x82088FD4, sub_829573F8 (show location)"""
+name = """CActivityBarnFind"""
+what = """A barn find: vtable `0x82078B5C` (set up by `sub_828B99C8`), discovered byte `+44` (set by `sub_828B9448`), float4 position `+112`, marker handles `+320` ("barnfind") and `+360` ("barnfind_collected"), `CBarnFindState` at `+424` and a collected byte at `+513` (the record's `+45`). The record's status at `+56` is 3 before it spawns, 4 while the spawn is pending (`sub_828BC5E0`), 5 once spawned with its rumour running (`sub_828BC658`; only then can it be discovered), 1 when discovered (`sub_828B9BF8`) and 0 once collected (`sub_828BC3B0`). `sub_828A5BF8(barn find, show)` toggles its exact-location marker, and the collected marker once found; `sub_828A78B0` is its reveal."""
+how = """Reading the state functions; showing locations through the title's own call."""
+confidence = """confirmed"""
+source = """src/cheats_map.cpp; config/mod/fh1-symbols.toml barn_find.*"""
+
+[[finding]]
+group = """Activities and collectibles"""
+base = """sub_828E9EC0, sub_828E6028, sub_828E3580, sub_828E4ED8, sub_828E4F58"""
+v4 = """sub_8299BDC8, sub_82995330, sub_82996C98, sub_82996D18"""
+name = """map markers"""
+what = """Activities show on the map through marker handles. `sub_828E9EC0` creates one (r3 handle, r4 activity, r5 type tag such as "flyer" or "barnfind", r6 description, v1 world position); the `activity_type` tag is what the map profiles (`MapProfileFullscreen.xml`, `MapProfileMinimap.xml`) draw. `sub_828E3580` (the handle's vtable `+12`) puts its entity on the map and minimap, `sub_828E4ED8` does so with flags to mark the activity changed for the map UI or to add it again, and `sub_828E4F58` removes it. The handle (constructor `sub_828E6028`) holds its map entity at `+4`; the entity's byte at `+52` is set while it is on the map. The map's own FILTER still applies."""
+how = """Reading the marker calls made by the activities' setup and smash functions; calling them from host tasks showed and hid discount sign and barn find markers."""
+confidence = """confirmed"""
+source = """config/mod/fh1-symbols.toml map_marker.*; src/cheats_map.cpp"""
+
+# -------------------------------------------------------------------- Profile
+
+[[finding]]
+group = """Profile"""
+base = """sub_824F04B0, sub_824F2850, 0x82142440"""
+v4 = """sub_8255C600, sub_8255E5B8"""
+name = """career profile value tree"""
+what = """`sub_824F04B0(user)` returns the user's career profile, 0 when there is none. The profile's values (`Main/Credits`, `Main/XP`, `Main/TotalWinnings` and the rest) form a tree at `+32`; a byte at `+40` is set once they are loaded, and the generic accessors skip a profile without it. `sub_824F2850(profile, path, amount)` adds to the `u32` field named by a path string. Each value is a typed object (vtable `0x82142440`, the value at `+8`, type 3 at `+16` for a `u32`) in a heap below `0x40000000`."""
+how = """Traced from the `CGivePlayerMoney` script action (`sub_825AD820`); a scan of guest memory for the saved credit value at each save."""
+confidence = """confirmed"""
+note = """An earlier conclusion that money is kept encoded in memory came from a scan that missed the heap below `0x40000000`."""
+source = """config/mod/fh1-symbols.toml profile.*; src/pinyon_shift_runtime_hooks.cpp ScanLiveProfile, PinyonShiftApplyCredits; docs/NATIVE_PORT_BACKLOG.md NP-8.3"""
+
+[[finding]]
+group = """Profile"""
+base = """sub_824F04B0, sub_824E4F78, sub_824F2FA0, sub_825AD820"""
+v4 = """sub_8255C600, sub_82553558, sub_8255ED08"""
+name = """credits"""
+what = """`sub_824F04B0(user)` returns the career profile. `sub_824E4F78(profile)` reads `Main/Credits`; `sub_824F2FA0(profile, credits)` sets it, clamped to 999,999,999, tells the balance's listeners (the HUD) and marks the field for the next save. The `CGivePlayerMoney` script action (`sub_825AD820`) uses the pair. A byte at profile `+40` (v4 `+44`) is set once the profile's values are loaded; the generic accessors skip a profile without it."""
+how = """Traced from the `CGivePlayerMoney` script action; the trainer sets credits through the same calls from a host guest task, and the HUD and later saves show the new balance."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftApplyCredits; config/mod/fh1-symbols.toml profile.credits, profile.set_credits"""
+
+# ---------------------------------------------------- Lifetime and containers
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """sub_826E1B10, 0x826E1B3C"""
+v4 = """0x8247184C"""
+name = """intrusive pointer assignment"""
+what = """The shared (intrusive) pointer assignment helper `sub_826E1B10`, called for nearly every intrusive pointer copy: it AddRefs the source, stores it and releases the old one. At `0x826E1B3C` it loads the source's AddRef from vtable `+8`. Runs have reached it with a freed source object whose vtable word was heap data (ending `487C`)."""
+how = """Midasm hook that assigns null for non-image vtables; crash reports and dump analysis."""
+confidence = """confirmed"""
+issue = """#371"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftTraceRetainVtable; config/rexglue/analysis/main-xex.toml midasm_hook 0x826E1B3C"""
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """sub_824E81A8, 0x824E81D4, 0x824E81F4"""
+v4 = """sub_82E180E0, 0x82E1810C, 0x82E1812C"""
+name = """second intrusive pointer assignment"""
+what = """A second assignment helper with the same contract as `sub_826E1B10`: AddRef the new object through vtable `+8` (loaded at `0x824E81D4`), store it, then Release the old one through vtable `+12` (loaded at `0x824E81F4`). #584 reached its Release with the freed object the `sub_826E1B10` guard had refused a moment earlier, still held in another slot, and faulted reading the heap word `0x07E0487C + 12`. A midasm hook at each load skips the call when the vtable is outside the title image: a dangling new object is stored as null, and a dangling old one is not released. Either case is logged once as `object.assign.stale_addref` or `object.assign.stale_release` (16 at most)."""
+how = """Crash report #584 (guest lr `0x824E81E0`, the event `object.retain.stale_source` for the same object just before); the only function in either build with this instruction pattern, found by a scan of the generated code."""
+confidence = """confirmed"""
+issue = """#584"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftGuardAssignAddRef, PinyonShiftGuardAssignRelease; config/rexglue/analysis/main-xex.toml"""
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """sub_823F3048, 0x823F3108, 0x823F3110"""
+name = """allocator out-of-space stop"""
+what = """`sub_823F3048` asks each heap in a chain for a block (virtual `+80`, then `sub_823F2ED8`). When none can serve it and the heap's flag at `+372` is set, it stops the game on purpose with a store to guest address 4 (when the request is larger than the heap's remaining space, `+340` minus `+68`) or 5 (otherwise). A crash report with a write to guest `0x00000004` and lr `0x823F30B4` is this stop: a game heap ran out, not an emulation fault. #602 hit it after 31 minutes with the Forza Horizon XE mod at 2x resolution."""
+how = """Crash report #602 (write of guest `0x00000004`, lr `0x823F30B4`); reading the generated code of `sub_823F3048`."""
+confidence = """probable"""
+note = """Which heap ran out in #602, and whether XE's extra cars cause it, is not known."""
+issue = """#602"""
+source = """site/findings/executable.toml (sub_823F3048 and r6)"""
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """0x82C222EC, 0x82C222F0, 0x82C22308, 0x82C22318, 0x82C2231C"""
+v4 = """0x82CE2A5C, 0x82CE2A60, 0x82CE2A78, 0x82CE2A88"""
+name = """child release through parent+64"""
+what = """A parent's pending child pointer is at `parent+64`; a wrapper takes it and releases it through the child's vtable slot 3 at `0x82C22318`. Freed or reused children have been seen there; skipping to `0x82C2231C` avoids the release."""
+how = """Trace and guard midasm hooks before and after the child dispatch."""
+confidence = """confirmed"""
+issue = """#327 #359 #366 #368 #373 #376"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftGuardChildDispatch; config/rexglue/analysis/main-xex.toml pending child hooks"""
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """sub_82E48938, 0x82E48980, sub_82D842F8"""
+v4 = """0x82F0A3B0"""
+name = """queue vector append"""
+what = """`sub_82E48938` queues an item under a lock: after reading the queue's `+96` and its pending head at `+76`, it appends to a vector at `queue+80` (begin, end, capacity) through `sub_82D842F8`. Runs have reached it with a corrupt vector, which produced a write to guest `0x2F`."""
+how = """Crash reports and a midasm hook at `0x82E48980`."""
+confidence = """confirmed"""
+issue = """#343"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftGuardQueueAppend; config/rexglue/analysis/main-xex.toml midasm_hook 0x82E48980"""
+
+[[finding]]
+group = """Lifetime and containers"""
+base = """sub_82F9F130, 0x82F9F338, 0x82F9F36C"""
+v4 = """sub_830603D8, 0x830605E0"""
+name = """null output handle"""
+what = """`sub_82F9F130` can be reached with a null output handle, or a handle whose owner at `+68` is null: it reads the object at `+68` and then that object's `+208` without a null check. Its normal exit returns 0, and returning 0 through the exit at `0x82F9F36C` is safe."""
+how = """Crash report and a midasm hook at `0x82F9F338`."""
+confidence = """confirmed"""
+issue = """#367"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftGuardNullOutputHandle; config/rexglue/analysis/main-xex.toml midasm_hook 0x82F9F338"""

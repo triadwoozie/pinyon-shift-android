@@ -20,6 +20,18 @@ jobs:
       - name: Verify public source boundary
         shell: powershell
         run: .\tools\check-repository-boundary.ps1
+      - name: Provision the pinned Python
+        # As in ci.yml: the save, crash and title-update wrappers run
+        # pinyon.py on the player's pinned runtime.
+        shell: powershell
+        run: |
+          . ./tools/release-common.ps1
+          $python = (Get-PinyonReleaseToolchain).python
+          $root = Resolve-PinyonLocalPath -RelativePath $python.install_path
+          $archive = Join-Path $env:RUNNER_TEMP 'python-embed.zip'
+          Invoke-PinyonDownload -Uri $python.url -Destination $archive -Sha256 $python.sha256
+          [void](New-Item -ItemType Directory -Force -Path $root)
+          Expand-PinyonZip -Archive $archive -Destination $root
       - name: Test release tooling
         run: python -m unittest discover -s tools/tests -p "test_*.py"
       - name: Verify release tag and channel branch ancestry

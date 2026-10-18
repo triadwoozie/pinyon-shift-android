@@ -29,7 +29,7 @@ class HardwareCheckContractTests(unittest.TestCase):
         tool = TOOL.read_text(encoding="utf-8")
         menu = MENU.read_text(encoding="utf-8")
         presets = set(re.findall(r'new Recommendation\("([a-z0-9_]+)"', launcher))
-        self.assertEqual(presets, {"performance_120", "balanced_40", "low_spec_60"})
+        self.assertEqual(presets, {"performance_120", "balanced_40", "low_spec_60", "ultra_low_30"})
         for preset in presets:
             self.assertIn(f"'{preset}'", tool)
             self.assertIn(preset.upper().replace("_", " ").replace("LOW SPEC", "LOW-SPEC"), menu)

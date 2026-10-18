@@ -13,4 +13,6 @@ $arguments = @((Join-Path $PSScriptRoot 'manage-fh1-dlc.py'), $Action, '--state-
 if ($InputPath) { $arguments += @('--source', $InputPath) }
 if ($PackageId) { $arguments += @('--package-id', $PackageId) }
 & (Get-PinyonPython) @arguments
-if ($LASTEXITCODE -ne 0) { throw 'DLC management failed. See the package error above.' }
+# manage-fh1-dlc.py has written the reason to stderr; the launcher shows it
+# as it is, without a PowerShell error record around it (#573).
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

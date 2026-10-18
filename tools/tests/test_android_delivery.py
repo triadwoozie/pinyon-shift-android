@@ -21,7 +21,7 @@ def read(path):
 
 class ShareTests(unittest.TestCase):
     def setUp(self):
-        self.share = read(LAUNCHER / "AndroidShare.cs")
+        self.share = read(ROOT / "launcher" / "Shared" / "AndroidShare.cs")
         self.window = read(LAUNCHER / "MainWindow.xaml.cs")
 
     def test_only_private_addresses_are_answered(self):
@@ -51,7 +51,7 @@ class ShareTests(unittest.TestCase):
         self.assertIn("_androidShare?.Dispose();", self.window)
 
     def test_the_save_is_offered_but_not_preselected(self):
-        groups = self.window[self.window.index("private IReadOnlyList<ShareGroup> AndroidShareGroups"):]
+        groups = read(ROOT / "launcher" / "Shared" / "AndroidShareContent.cs")
         self.assertIn('new ShareGroup("save", "this PC\'s save", false, save)', groups)
         self.assertIn('"user-modded"', groups)
 
@@ -84,6 +84,19 @@ class BuildTests(unittest.TestCase):
     def test_the_package_records_what_it_holds(self):
         self.assertIn("pinyon-shift.json", self.build)
         self.assertRegex(self.build, r"title_update_v4 = \[bool\]\$TitleUpdateV4")
+
+    def test_archives_avoid_expand_archive(self):
+        # Windows PowerShell 5.1's Expand-Archive stopped partway through the
+        # command-line tools (#574).
+        self.assertNotIn("Expand-Archive", self.build)
+        self.assertIn("Expand-PinyonZip -Archive $archive -Destination $unpack", self.build)
+
+    def test_packages_install_with_the_pinned_sdkmanager(self):
+        # Android Studio's newer sdkmanager shim split "ndk;<version>" (#567).
+        self.assertIn(r"$sdkmanager = Join-Path $localSdk 'cmdline-tools\latest\bin\sdkmanager.bat'",
+                      self.build)
+        android = read(ROOT / "tools" / "pinyon_android.py")
+        self.assertIn('pinned = LOCAL_SDK / "cmdline-tools" / "latest" / "bin"', android)
 
     def test_usb_install_is_for_developers_and_resumes(self):
         usb = read(ROOT / "tools" / "install-android-usb.ps1")

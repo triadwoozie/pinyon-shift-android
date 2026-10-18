@@ -19,6 +19,7 @@
 
 #include "pinyon_shift_diagnostics.h"
 #include "ui/hostui/fh1_archive.h"
+#include "ui/hostui/pad_glyphs.h"
 #include "ui/hostui/xds_texture.h"
 
 namespace pinyon_shift::hostui {
@@ -183,6 +184,13 @@ bool HostUi::LoadAssets() {
   } else {
     REXLOG_WARN("Host UI: cannot open Horizon.zip; drawing without textures");
   }
+  constexpr int kGlyphSize = 64;
+  const auto cross = RasterizePadGlyph(PadGlyph::kCross, kGlyphSize);
+  const auto circle = RasterizePadGlyph(PadGlyph::kCircle, kGlyphSize);
+  button_cross_ = drawer_.CreateTexture(kGlyphSize, kGlyphSize, ImmediateTextureFilter::kLinear,
+                                        false, cross.data());
+  button_circle_ = drawer_.CreateTexture(kGlyphSize, kGlyphSize, ImmediateTextureFilter::kLinear,
+                                         false, circle.data());
   assets_loaded_ = true;
   REXLOG_INFO("Host UI assets loaded in {} ms",
               std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -943,7 +951,11 @@ void HostUi::DrawMenu(rex::ui::UIDrawContext& context) {
   const auto& rows = screen.rows();
   // A note takes the last row's place, above the button help.
   const std::string note = screen.note();
-  const size_t visible_rows = note.empty() ? kVisibleRows : kVisibleRows - 1;
+  // The body takes the place of the rows it pushes down, so the last rows
+  // scroll into view instead of sliding under the button help.
+  const size_t body_rows = size_t(std::ceil((rows_top - kRowsTop) / kRowPitch));
+  const size_t room = kVisibleRows > body_rows + 1 ? kVisibleRows - body_rows : 1;
+  const size_t visible_rows = note.empty() || room == 1 ? room : room - 1;
   size_t first = 0;
   if (rows.size() > visible_rows && screen.focus() >= visible_rows / 2) {
     first = std::min(screen.focus() - visible_rows / 2, rows.size() - visible_rows);
@@ -1001,8 +1013,16 @@ void HostUi::DrawMenu(rex::ui::UIDrawContext& context) {
     }
     help_x += DrawText(Face::kLabel, kHelpSize, label, help_x, kHelpBaseline, kWhite) + 32.0f;
   };
-  help(button_a_.get(), "SELECT");
-  help(button_b_.get(), screens_.size() > 1 ? "BACK" : "RESUME");
+  // Marks of the pad in hand: PlayStation pads get cross and circle.
+  bool playstation = false;
+  if (input_system_) {
+    if (const auto device = input_system_->ActiveDevice(0)) {
+      playstation = device->family == rex::input::PadFamily::kPlayStation;
+    }
+  }
+  help(playstation ? button_cross_.get() : button_a_.get(), "SELECT");
+  help(playstation ? button_circle_.get() : button_b_.get(),
+       screens_.size() > 1 ? "BACK" : "RESUME");
 
   RecordLayout(screen.title(), content_batch, content_vertex);
   Flush();

@@ -72,14 +72,46 @@ function Invoke-PinyonDownload {
     }
     $partial = "$Destination.partial"
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+    $curlLog = "$Destination.curl.log"
     try {
+        # A browser can fetch what curl can't (#597): curl ignores the system
+        # proxy, and Windows' schannel fails when it can't reach the
+        # certificate revocation server, as behind HTTPS-inspecting antivirus.
+        # Try curl, then curl without a hard revocation check, then
+        # PowerShell's downloader, which uses the system proxy.
+        $failures = [Collections.Generic.List[string]]::new()
         $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+        $downloaded = $false
         if ($null -ne $curl) {
-            & $curl.Source --fail --location --retry 3 --output $partial $Uri
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: $Uri" }
+            foreach ($extra in @(@(), @('--ssl-revoke-best-effort'))) {
+                if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+                & $curl.Source --fail --location --retry 3 --silent --show-error --stderr $curlLog @extra --output $partial $Uri
+                if ($LASTEXITCODE -eq 0) { $downloaded = $true; break }
+                $detail = @(if (Test-Path -LiteralPath $curlLog) {
+                    Get-Content -LiteralPath $curlLog | Where-Object { $_ -match '\S' } | Select-Object -Last 1
+                })
+                $failures.Add("curl exit $LASTEXITCODE$(if ($detail.Count) { ': ' + $detail[0] })")
+            }
         }
-        else {
-            Invoke-WebRequest -Uri $Uri -OutFile $partial -UseBasicParsing
+        if (-not $downloaded) {
+            if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor
+                    [Net.SecurityProtocolType]::Tls12
+                $progress = $ProgressPreference
+                $ProgressPreference = 'SilentlyContinue'
+                try { Invoke-WebRequest -Uri $Uri -OutFile $partial -UseBasicParsing }
+                finally { $ProgressPreference = $progress }
+                $downloaded = $true
+            }
+            catch {
+                $failures.Add("PowerShell: $($_.Exception.Message)")
+            }
+        }
+        if (-not $downloaded) {
+            throw ("Download failed: $Uri ($($failures -join '; ')). Check the connection, a proxy, " +
+                "or antivirus web filtering. Or download the file in a browser and save it as " +
+                "$Destination, then run setup again; it is checked by SHA-256 before use.")
         }
         $actual = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
         if ($actual -ne $Sha256) {
@@ -89,6 +121,38 @@ function Invoke-PinyonDownload {
     }
     finally {
         if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+        if (Test-Path -LiteralPath $curlLog) { Remove-Item -LiteralPath $curlLog -Force }
+    }
+}
+
+function Expand-PinyonZip {
+    param(
+        [Parameter(Mandatory)] [string]$Archive,
+        [Parameter(Mandatory)] [string]$Destination
+    )
+    # .NET's extractor rather than Expand-Archive: Windows PowerShell 5.1's
+    # Expand-Archive stopped partway through the Android command-line tools
+    # with "cannot find path ...\cmdline-tools\bin\" (#574).
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [void](New-Item -ItemType Directory -Force -Path $Destination)
+    $zip = [IO.Compression.ZipFile]::OpenRead([IO.Path]::GetFullPath($Archive))
+    try {
+        $root = [IO.Path]::GetFullPath($Destination).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        foreach ($entry in $zip.Entries) {
+            $target = [IO.Path]::GetFullPath((Join-Path $root $entry.FullName))
+            if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "The archive entry $($entry.FullName) is outside the destination."
+            }
+            if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
+                [void](New-Item -ItemType Directory -Force -Path $target)
+                continue
+            }
+            [void](New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent))
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+        }
+    }
+    finally {
+        $zip.Dispose()
     }
 }
 
@@ -149,11 +213,11 @@ function Get-PinyonVisualStudioRoot {
 function ConvertTo-PinyonCommandPath {
     param([AllowEmptyString()] [string]$PathValue)
 
+    # A quote is never part of a Windows path, and a stray one anywhere in an
+    # entry (PowerToys left `...\DSCModules"`) unbalances VsDevCmd's quoting:
+    # "\Microsoft was unexpected at this time" (#560).
     $entries = @($PathValue -split ';' | ForEach-Object {
-        $entry = $_.Trim()
-        if ($entry.Length -ge 2 -and $entry.StartsWith('"') -and $entry.EndsWith('"')) {
-            $entry = $entry.Substring(1, $entry.Length - 2).Trim()
-        }
+        $entry = $_.Replace('"', '').Trim()
         if (-not [string]::IsNullOrWhiteSpace($entry)) { $entry }
     })
     $entries -join ';'
@@ -764,6 +828,46 @@ function Reset-PinyonRelocatedCMakeCache {
     return $true
 }
 
+function Set-PinyonGitEnvironment {
+    param(
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [string]$Git
+    )
+
+    # Settings for this process and every git it starts, passed as command
+    # scope so they win over the player's global Git config without
+    # changing it:
+    # - Git refuses repositories owned by another account ("detected
+    #   dubious ownership", #599), as on drives formatted on another PC.
+    #   The checkout and its nested SDK repositories are the player's own.
+    # - A global http.sslCAInfo left by a removed or broken Git for Windows
+    #   failed every clone with "error adding trust anchors" (#604); the
+    #   pinned MinGit uses its own certificate bundle.
+    $trusted = $Root.Replace('\', '/').TrimEnd('/')
+    $settings = [Collections.Generic.List[string[]]]::new()
+    $settings.Add(@('safe.directory', $trusted))
+    $settings.Add(@('safe.directory', "$trusted/*"))
+    $bundle = Join-Path (Split-Path (Split-Path $Git -Parent) -Parent) 'mingw64\etc\ssl\certs\ca-bundle.crt'
+    if (Test-Path -LiteralPath $bundle -PathType Leaf) {
+        $settings.Add(@('http.sslCAInfo', $bundle.Replace('\', '/')))
+    }
+    $count = 0
+    $existing = [Environment]::GetEnvironmentVariable('GIT_CONFIG_COUNT')
+    if ($existing -match '^\d+$') { $count = [int]$existing }
+    for ($index = 0; $index -lt $count; $index++) {
+        if ([Environment]::GetEnvironmentVariable("GIT_CONFIG_KEY_$index") -eq 'safe.directory' -and
+            [Environment]::GetEnvironmentVariable("GIT_CONFIG_VALUE_$index") -eq "$trusted/*") {
+            return
+        }
+    }
+    foreach ($setting in $settings) {
+        [Environment]::SetEnvironmentVariable("GIT_CONFIG_KEY_$count", $setting[0])
+        [Environment]::SetEnvironmentVariable("GIT_CONFIG_VALUE_$count", $setting[1])
+        $count++
+    }
+    [Environment]::SetEnvironmentVariable('GIT_CONFIG_COUNT', [string]$count)
+}
+
 function Get-PinyonGit {
     $root = Get-PinyonRepoRoot
     $config = Get-PinyonReleaseToolchain
@@ -771,6 +875,7 @@ function Get-PinyonGit {
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
         throw 'Git is not available. Run provision-toolchain.ps1 first.'
     }
+    Set-PinyonGitEnvironment -Root $root -Git $candidate
     $candidate
 }
 

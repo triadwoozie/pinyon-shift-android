@@ -32,6 +32,7 @@ hostkey 1610 down
 hostkey 1630 down
 hostkey 1650 down
 hostkey 1670 down
+hostkey 1680 down
 hostkey 1690 enter
 capture 1720 prompt
 hostkey 1750 space

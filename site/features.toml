@@ -16,7 +16,7 @@ platforms = ["Windows", "Linux and Steam Deck", "macOS", "Android"]
 feature = "Resolution"
 link = "playing.md#graphics-presets"
 xbox = "1280 × 720"
-pinyon = "1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling; ultrawide with a 16:9 HUD"
+pinyon = "1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
 
 [[original]]
 feature = "Frame rate"
@@ -28,7 +28,7 @@ pinyon = "60 or 120 fps at the correct game speed"
 feature = "Graphics"
 link = "playing.md#graphics-presets"
 xbox = "Fixed"
-pinyon = "Presets, MSAA up to 4x, anisotropic filtering, optional bloom, motion blur and depth of field"
+pinyon = "Presets, MSAA up to 4x, FXAA on the world only, anisotropic filtering, a texture size cap for small graphics memory, a colour LUT, optional bloom, motion blur and depth of field; HUD scale and safe zone"
 
 [[original]]
 feature = "HDR"
@@ -55,6 +55,12 @@ xbox = "Three stations; a dashboard soundtrack replaces them"
 pinyon = "Your own music files in game, and up to three [custom radio stations](playing.md#custom-radio-stations) with their own names and logos"
 
 [[original]]
+feature = "Sound mix"
+link = "playing.md#sound-mix"
+xbox = "Fixed"
+pinyon = "Engine, other cars, tyres, wind, ambience and music levels, and the compressor on or off"
+
+[[original]]
 feature = "Mods"
 link = "modding.md"
 xbox = "No"
@@ -70,13 +76,25 @@ pinyon = "Your own packages, verified and imported; Treasure Map included; Horiz
 feature = "Controls"
 link = "playing.md#controllers"
 xbox = "Xbox 360 controller"
-pinyon = "XInput and SDL controllers with button mapping, keyboard driving with rebindable keys"
+pinyon = "XInput and SDL controllers with button mapping, keyboard driving with rebindable keys, DualSense adaptive triggers and lightbar"
 
 [[original]]
 feature = "Saves"
 link = "playing.md#saves"
 xbox = "Console storage"
 pinyon = "Automatic save backups, PNG photos, saves imported from Xenia"
+
+[[original]]
+feature = "Cheats"
+link = "playing.md#trainer"
+xbox = "None"
+pinyon = "A trainer on a separate profile: credits, wristbands, game speed, time of day, day length, free camera, collectibles on the map, any car in any event"
+
+[[original]]
+feature = "AI opponents"
+link = "playing.md#ai-opponents"
+xbox = "Rubber-banding AI and difficulty that adapts to your times"
+pinyon = "Optional clean racing without rubber-banding, or opponents one level harder"
 
 [[original]]
 feature = "Online services"
@@ -108,7 +126,7 @@ cells = [
   "yes: launcher ZIP",
   "yes: launcher archive; **Add to Steam** for Game Mode",
   "partly: launcher app; not notarized, so it is approved once in System Settings",
-  "partly: an APK built by the Windows launcher, installed over Wi-Fi or USB",
+  "partly: an APK built by the PC launcher, installed over Wi-Fi or USB (built off Windows: untested)",
 ]
 
 [[platform]]
@@ -118,7 +136,7 @@ cells = [
   "yes: in the launcher",
   "yes: in the launcher",
   "yes: in the launcher",
-  "partly: rebuild the APK on the PC",
+  "partly: rebuild the APK on the PC; the app offers it",
 ]
 
 [[platform]]
@@ -139,7 +157,7 @@ cells = [
 [[platform]]
 feature = "Graphics presets"
 link = "playing.md#graphics-presets"
-cells = ["yes", "yes", "yes", "partly: two presets of their own"]
+cells = ["yes", "yes", "yes", "partly: three presets of their own"]
 
 [[platform]]
 feature = "HDR"
@@ -154,7 +172,17 @@ cells = [
 [[platform]]
 feature = "Immersive camera"
 link = "playing.md#immersive-camera"
-cells = ["yes", "yes", "yes", "not yet"]
+cells = ["yes", "yes", "yes", "partly: shared from the PC with its mods; not tried in a race yet"]
+
+[[platform]]
+feature = "Sound mix"
+link = "playing.md#sound-mix"
+cells = ["yes", "yes", "yes", "yes"]
+
+[[platform]]
+feature = "AI opponents"
+link = "playing.md#ai-opponents"
+cells = ["yes", "yes", "yes", "yes"]
 
 [[platform]]
 feature = "Your music"
@@ -164,25 +192,35 @@ cells = ["yes: MP3 and WAV", "yes: MP3 and WAV", "partly: WAV only", "partly: WA
 [[platform]]
 feature = "Custom radio stations"
 link = "playing.md#custom-radio-stations"
-cells = ["yes", "yes", "yes", "not yet"]
+cells = ["yes", "yes", "yes", "partly: built on the PC and shared; not listened to yet"]
 
 [[platform]]
 feature = "Asset and texture mods"
 link = "modding.md"
-cells = ["partly: texture replacement not on the Vulkan renderer yet ([#518](https://github.com/arcanite24/pinyon-shift/issues/518))", "partly: texture replacement not on the Vulkan renderer yet ([#518](https://github.com/arcanite24/pinyon-shift/issues/518))", "partly: texture replacement not on the Vulkan renderer yet ([#518](https://github.com/arcanite24/pinyon-shift/issues/518))", "partly: texture replacement not on the Vulkan renderer yet ([#518](https://github.com/arcanite24/pinyon-shift/issues/518))"]
+cells = ["yes", "yes", "yes", "partly: DXT texture replacements need a GPU with BC formats ([#516](https://github.com/arcanite24/pinyon-shift/issues/516))"]
+
+[[platform]]
+feature = "Traffic and showcase cars"
+link = "playing.md#traffic-and-showcase-cars"
+cells = ["yes", "partly: the same database mod; tried on Windows only", "partly: the same database mod; tried on Windows only", "partly: shared from the PC with its mods; not tried"]
+
+[[platform]]
+feature = "Wider photo camera limits"
+link = "playing.md#gameplay-switches"
+cells = ["yes", "partly: the same INI mod; tried on Windows only", "partly: the same INI mod; tried on Windows only", "partly: shared from the PC with its mods; not tried"]
 
 [[platform]]
 feature = "Forza Horizon XE"
 link = "modding.md#the-xe-mod"
-cells = ["yes", "yes", "yes", "not yet"]
+cells = ["yes", "yes", "yes", "partly: shared from the PC to the base app; loads, not played through yet"]
 
 [[platform]]
 feature = "DLC import"
 link = "dlc.md"
 cells = [
   "yes",
-  "not yet: [Linux backlog](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LINUX_PORT_BACKLOG.md)",
-  "not yet",
+  "yes: in the launcher; on the Steam Deck a DLC car bought from the Autoshow and driven",
+  "partly: in the launcher; on a Mac the DLC cars load and drive in a scripted route",
   "partly: imported on the PC, copied with the game",
 ]
 
@@ -191,8 +229,8 @@ feature = "Title update v4"
 link = "dlc.md#title-update-v4"
 cells = [
   "yes",
-  "not yet: [Linux backlog](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LINUX_PORT_BACKLOG.md)",
-  "not yet",
+  "partly: in the launcher; on the Steam Deck 1000 Club runs and the Rally reaches its stage intro",
+  "partly: in the launcher; 1000 Club and the Rally entry reached in scripted routes",
   "partly: built on the PC",
 ]
 
@@ -202,18 +240,28 @@ link = "playing.md#controllers"
 cells = ["yes", "yes: Steam Input on the Deck", "yes", "yes: and touch controls"]
 
 [[platform]]
+feature = "DualSense triggers, lightbar and tilt steering"
+link = "playing.md#dualsense"
+cells = [
+  "yes: tested over USB; Bluetooth not tested yet",
+  "partly: built, not tried on a pad yet",
+  "partly: built, not tried on a pad yet",
+  "partly: built, not tried on a pad yet; USB-C only, Android passes rumble only over Bluetooth",
+]
+
+[[platform]]
 feature = "Keyboard driving"
 link = "playing.md#driving-on-a-keyboard"
 cells = ["yes", "yes", "yes: Cmd shortcuts for the F-keys", "n/a"]
 
 [[platform]]
 feature = "Racing wheels"
-link = "playing.md#controllers"
+link = "playing.md#racing-wheels"
 cells = [
-  "not yet: [#337](https://github.com/arcanite24/pinyon-shift/issues/337)",
-  "not yet: [#337](https://github.com/arcanite24/pinyon-shift/issues/337)",
-  "not yet: [#337](https://github.com/arcanite24/pinyon-shift/issues/337)",
-  "not yet: [#337](https://github.com/arcanite24/pinyon-shift/issues/337)",
+  "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
+  "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
+  "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
+  "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
 ]
 
 [[platform]]

@@ -69,10 +69,16 @@ try {
     # extracted and accepted when every file matches the supported
     # extracted-file catalog (#410).
     $contentCheck = -not $folderInput -and -not $verification.recognized
-    $sourceIsoSha256 = if ($contentCheck) { $verification.sha256 } else { $verification.iso_sha256 }
+    # Checked before any field of a match is read: an unrecognized folder's
+    # result has no iso_sha256, and strict mode failed on it with a bare
+    # "property not found" instead of this message (#649).
     if (-not $verification.recognized -and ($folderInput -or $VerifyOnly)) {
-        throw 'This game source is not a supported, complete retail revision.'
+        $mismatches = $verification.PSObject.Properties['mismatches']
+        $detail = if ($mismatches) { @($mismatches.Value | Select-Object -First 3) -join '; ' } else { '' }
+        throw ('This game source is not a supported, complete retail revision.' +
+            $(if ($detail) { " First differences: $detail" } else { '' }))
     }
+    $sourceIsoSha256 = if ($contentCheck) { $verification.sha256 } else { $verification.iso_sha256 }
     if ($contentCheck) {
         Write-PinyonEvent verify 15 'This disc image is not the reference dump; its files are checked after extraction.' -JsonEvents:$JsonEvents
     } else {

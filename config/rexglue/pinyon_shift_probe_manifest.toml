@@ -1,0 +1,26 @@
+# Pinyon Shift manifest for the probe build (NEXT_LEVEL_RESEARCH.md NL-2.3): the
+# base game's inputs and analysis, generated into a tree of its own because the
+# generator counts every function entry and records every indirect call's
+# target there (PINYON_SHIFT_RECOMP_PROBE, rexglue codegen --probes).
+
+[project]
+name = "pinyon_shift"
+sdk_version = "0.10.0"
+game_root = "../../.local/game/base"
+
+[entrypoint]
+file_path = "../../.local/game/base/default.xex"
+out_directory_path = "../../.local/generated-probe/default"
+includes = ["analysis/main-xex.toml"]
+
+[[modules]]
+guest_path = "SpeechFacade_default.xex"
+file_path = "../../.local/game/base/SpeechFacade_default.xex"
+out_directory_path = "../../.local/generated-probe/speech"
+includes = ["analysis/speech-facade.toml"]
+
+[[modules]]
+guest_path = "XMediaFacade_default.xex"
+file_path = "../../.local/game/base/XMediaFacade_default.xex"
+out_directory_path = "../../.local/generated-probe/xmedia"
+includes = ["analysis/xmedia-facade.toml"]

@@ -1,0 +1,562 @@
+# Developer leftovers: launch options, debug features, online services,
+# leftover modes and other game systems. Curated from docs/REVERSE_ENGINEERING.md
+# and the backlogs; flow-script records live in flow.toml.
+
+# ---------------------------------------------------------------- Launch options
+
+[[finding]]
+group = """Launch options"""
+base = """0x8200F000-0x82010DA0, sub_824F8150, sub_82C096E0, sub_82C09468"""
+name = """launch-option table"""
+what = """About 300 developer option names. `sub_824F8150`, slot 5 of the options object's vtable, is a per-token visitor: it offers one token to the matcher `sub_82C096E0` for each option (about 246 calls). A bare name toggles the option's byte flag and `name=true` or `name=1` sets it; `sub_82C09468` also takes part in matching `name=value` tokens. The names cover race setup (`launch`, `trackname`, `numlaps`, `numaicars`, `aiskill`, `timeofdayindex`, `numtrafficcars`), convenience (`skiptutorials`, `allowskipvoiceover`, `disablesplashintro`, `nohud`, `hidecockpitglass`, `NoHandOfGodReset`), restrictions (`eventrestrictions`, `showallcars`), photo mode, modes (`splitscreenlaunch`, `MultiscreenView`), debug menus (`forceEnableDebugMenus`, `debugmenudescriptions`) and performance (`highrescubemap`, `frontend30fps`, `mainthread30fps`, `framesperrender`, `maxaicars`, at `0x82010A2C`-`0x82010D84`)."""
+how = """String xrefs; the visitor and matchers read in the generated code."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems; docs/NATIVE_PORT_BACKLOG.md NP-8.1"""
+
+[[finding]]
+group = """Launch options"""
+base = """0x832E29A0, 0x832E2680, vtable 0x8200E724, getter sub_82479E88, constructor sub_824ECF48"""
+v4 = """0x833D02E0, vtable 0x82014B1C, visitor 0x82563570"""
+name = """launch-options object"""
+what = """A static singleton at `0x832E29A0`, built by its getter on the first call (once-guard bit in `0x832E4A70`) and read on demand; the getter has 356 call sites. Every call also stores the object's address in the word at `0x832E2680`. Its flags are bytes at fixed offsets: `nohud` +3213, `timeofdayindex` +2412, `showframerate` +4170, `zoomoutminimap` +4869, `allowskipvoiceover` +4924, `skiptutorials` +8362; `hidecockpitglass` is a global at `0x832B8700`. At run time the defaults read 1 for `zoomoutminimap` and `hidecockpitglass` and 0 for the others."""
+how = """Constructor and getter read in the generated code; probe mod reading the bytes at frames 1, 300 and 1200."""
+confidence = """confirmed"""
+note = """The two addresses quoted before (`0x832E2680` in NP-8.1, `0x832E29A0` here) are both right: the first is the pointer word the getter fills, the second the object."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems; docs/NATIVE_PORT_BACKLOG.md NP-8.1, NP-8.4"""
+
+[[finding]]
+group = """Launch options"""
+base = """options object flags"""
+name = """flags written at boot take effect"""
+what = """A mod writing `nohud` = 1 from the first file open and every frame removed the whole HUD (minimap, speedometer, event banner) in free roam, and the route still passed. Writing it only once the game runs changes nothing on screen: the HUD reads it only before an element first shows (see the HUD hidden byte on UI, HUD and input). `showframerate` = 1 drew nothing visible. Each other flag needs its own check."""
+how = """Probe mod writing the bytes with `write_guest`; capture compared with a run without it."""
+confidence = """confirmed"""
+note = """Confirmed for `nohud`; `showframerate` showed nothing."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+
+[[finding]]
+group = """Launch options"""
+base = """options object +4924, +4222, +4937"""
+v4 = """0x833D02E0 (vtable 0x82014B1C, visitor 0x82563570): +4952, +4238, +4965"""
+name = """host-set quality-of-life flags"""
+what = """Pinyon Shift sets three option bytes once the object's vtable word is in place (from the first guest file open and every frame) and restores the game's value when turned off. `noattractvideo` (+4222, read in `sub_827A27E0`): after about 53 s idle on the title screen (a stopwatch against a 53.0 constant) the game replays `forza_intro.wmv` and reloads the press-start scene; with the flag set it never does. `allowskipvoiceover` (+4924): `sub_8269BF60` reports a dialog unskippable while it has a voice-over and the flag is clear, and `sub_826BC830` skips its wait on the same test. `NoHandOfGodReset` (+4937): `sub_824BA660`, a per-car update, skips the automatic off-track reset while it is set."""
+how = """Visitors read in both builds; readers in the generated code; a 120 s title-idle route with the file-open log."""
+confidence = """probable"""
+note = """Confirmed for `noattractvideo`; probable for the voice-over and reset flags (readers only)."""
+issue = """#477"""
+source = """src/dev_options.cpp; docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Developer options and leftover systems"""
+
+[[finding]]
+group = """Launch options"""
+base = """options object +4921"""
+v4 = """+4949"""
+name = """photo camera collision switch"""
+what = """`disablephotomodecollisiondetection` (+4921) is read after `launch_options.get` in `sub_8285BFE0`, which skips its collision step right after clamping the photo camera's position, and in `sub_8266F8A0`. With the byte set, lowering the photo camera with the left trigger takes it into the road surface (the view fills with the terrain's flat colour); without it the camera stops just above the asphalt. The setting is F6 > GAMEPLAY > PHOTO CAMERA THROUGH WALLS (`pinyon_shift_photo_camera_through_walls`)."""
+how = """Option visitor `sub_824F8150` paired with the name strings in the image (each call's r4 and r5 at its `bl`); v4 offset from the same call order in `sub_82563570`; byte-load scan for readers; `fh1-photo-camera-walls` route with and without the flag."""
+confidence = """confirmed"""
+issue = """#488"""
+source = """src/dev_options.cpp; config/render-tests/fh1-photo-camera-walls.fh1test"""
+
+[[finding]]
+group = """Launch options"""
+base = """options object +4920"""
+v4 = """+4948"""
+name = """allowhighzoomaperture does nothing"""
+what = """`allowhighzoomaperture` (+4920) is parsed by the option visitor, but no guest code loads that byte, so it can't widen photo mode's zoom or aperture."""
+how = """Byte-load scan of the generated code for offset 4920 after `launch_options.get`."""
+confidence = """probable"""
+negative = true
+issue = """#488"""
+source = """src/dev_options.cpp"""
+
+[[finding]]
+group = """Launch options"""
+base = """camera.zip CameraSettings.ini [PhotoModeCam]"""
+name = """photo camera height, bounds and zoom keys"""
+what = """`MaxHeight` (stock 2) caps how far above the car the photo camera rises, and the HUD height readout follows it; `BoundaryCeilingHeight` (6) and `BoundaryCylinderRadius` (100) bound the camera's free movement; `MinFOVPhotoMode` (4.5) is the narrowest field of view, so the deepest zoom. Raising them to 30, 50, 300 and 1 through an INI merge lets the camera climb to 30 m and roam further, with no code change."""
+how = """`photo_mode_limits` built-in mod with `fh1-photo-mode-limits` on a seed, stock against modded: the raise capture reads 2.0 m stock and 30.0 m modded, and the far and bumper captures differ (mean absolute difference 51-76 against 5.6 before the inputs)."""
+confidence = """confirmed"""
+issue = """#488"""
+source = """mods_src/builtin/photo_mode_limits; config/render-tests/fh1-photo-mode-limits.fh1test; docs/MODDING.md Built-in mods"""
+
+[[finding]]
+group = """Launch options"""
+base = """options object +3809, +4976, +8362"""
+v4 = """+3817, +5012, +8399"""
+name = """options that do nothing in retail"""
+what = """`nocameravibration` (+3809) and `hidepoipins` (+4976) have no reader: no byte load at those offsets in the generated code, and a map route with `hidepoipins` set at boot is pixel-identical. `skiptutorials` (+8362) is read once, in `sub_8273B170`, only to skip the `Main/ShowroomKinectTutorialCompleted` check; a fresh-profile opening route with it set is pixel-identical."""
+how = """Byte-load scan of the generated code; map and fresh-profile opening routes with and without each flag."""
+confidence = """confirmed"""
+negative = true
+issue = """#477"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Developer options and leftover systems"""
+
+[[finding]]
+group = """Launch options"""
+base = """options object +8380, +8384, +8388, +4260"""
+v4 = """visitor 0x82563570"""
+name = """restriction options are read nowhere"""
+what = """`eventrestrictions` is a byte at +8380 (bare-name matcher) and `showallcars` a byte at +4260; `chooselegalcarforevent` (+8384) and `chooseillegalcarforevent` (+8388) are 32-bit numbers set by the value matcher `sub_82C09468`, which takes `name=<number>` with an optional `K`, `M` or `B` scale. No code reads any of the four: none of the getter's 356 callers loads those offsets, while the same scan finds the known readers of `nohud` (`sub_826BEC10`), `skiptutorials` (`sub_8273B170`) and `allowskipvoiceover` (`sub_8269BF60`, `sub_826BC830`). Writing them cannot lift event restrictions; the trainer hooks the restriction parser instead (Cars, events and DLC)."""
+how = """Visitor and matcher read in the generated code; scan of the getter's callers for loads from its result."""
+confidence = """confirmed"""
+note = """Static analysis."""
+negative = true
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Developer options and leftover systems"""
+[[finding]]
+group = """Launch options"""
+base = """sub_824F8150"""
+name = """host tokens at the first frame change nothing"""
+what = """Feeding the visitor tokens from the host at the first frame tick (`timeofdayindex=3`, `forceEnableDebugMenus`) changed nothing visible. Parsing a token is not enough: each switch's consumer has to be traced before it can be used."""
+how = """Host tokens injected at the first frame tick; captures."""
+confidence = """confirmed"""
+negative = true
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.1"""
+
+[[finding]]
+group = """Launch options"""
+base = """kernel command line, cl cvar"""
+name = """kernel command line not parsed"""
+what = """The retail title does not import the kernel command line and does not feed it to the visitor: `--cl="nohud=1 showframerate=1 ..."` leaves every flag at its default and changes nothing on screen."""
+how = """Probe mod reading the flags with and without `cl`; captures."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems; docs/NATIVE_PORT_BACKLOG.md NP-8.1"""
+
+[[finding]]
+group = """Launch options"""
+base = '''0x82143254 GAME:\cmdline.txt, sub_82C0A420, sub_824E4228'''
+name = """cmdline.txt never opened"""
+what = """`sub_82C0A420`, the options base constructor, keeps the default path of a token file, and `sub_824E4228` (vtable slot 3) handles `loadcmdlinedottxt=<path>` and `ignorecmdlinedottxt`. Retail never opens the file: no open is attempted, and a `cmdline.txt` in the game root changed nothing."""
+how = """Kernel open log; probe run with the file present."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems; docs/NATIVE_PORT_BACKLOG.md NP-8.1"""
+
+[[finding]]
+group = """Launch options"""
+base = """sub_825CEAD0, 0x825CEBA8"""
+name = """timeofdayindex does not set free-roam time"""
+what = """`sub_825CEAD0` reads the `timeofdayindex` option (+2412 of the options object), otherwise takes a byte of the event data, and stores the index in its load parameters. It runs once as free roam loads, with index 0. Forcing 2 or 3 there leaves free roam's lighting unchanged, so free roam's time comes from elsewhere."""
+how = """Hook and experiment on the free-roam route."""
+confidence = """confirmed"""
+negative = true
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4"""
+
+[[finding]]
+group = """Launch options"""
+base = '''0x820E01E8 d:\DebugOptions.ini, sub_82AA8AA0'''
+name = """DebugOptions.ini is network-library config"""
+what = """Opened at every boot (`d:` is the game root). Its keys (`forceLogger`, `errorMode`, `minSeverity`, `defaultTimeoutMs`, `defaultContentTimeoutMs`) belong to the socket and web-service library, not to the launch options."""
+how = """Kernel open log; strings next to the path."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+# -------------------------------------------------- Debug and developer features
+
+[[finding]]
+group = """Debug and developer features"""
+base = """forceEnableDebugMenus, debugmenudescriptions, 824F81FC, 824F81E8, CConsole, CDebugSkip, UI.zip DEBUG_TEMPLATE, DEV_IMPORT_PROFILE, DEV_REPLAY_HUD_TRIAL"""
+name = """debug menus"""
+what = """Option flags (`forceEnableDebugMenus` and `debugmenudescriptions`, read at `824F81FC` and `824F81E8`), console and skip classes, and UI scenes for developer menus remain. The menus themselves may be compiled out: setting the flag from the host showed nothing."""
+how = """Strings; `UI.zip` listing; host token experiment (NP-8.1)."""
+confidence = """guess"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems; docs/NATIVE_PORT_BACKLOG.md NP-8.1"""
+
+[[finding]]
+group = """Debug and developer features"""
+base = """Environments TestBed, DebugTrack, TuningTrack, BVT"""
+v4 = """same"""
+name = """dev tracks: not loadable"""
+what = """The database names developer environments, but only `colorado` and the UI tracks ship under `media/tracks`."""
+how = """`gamedb` query; directory listing."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Debug and developer features"""
+base = """CWatchReplay, CReplayDVRControls, watch_replay_flow.xml, IDS_SaveReplay, ReplayTheater, savereplaytodevkit, savewmvtodevkit, 040_D_WMV_Exporter"""
+name = """replays and the WMV exporter"""
+what = """The post-race replay player, strings for saved replays and a replay theater, and developer options and a scene for exporting replays to a devkit as WMV video."""
+how = """Strings; archive listing."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Debug and developer features"""
+base = """CTelemetryHud, IDS_Telemetry, 968_TELEMETRY, 827AC92C, 827ACC7C, 827B892C"""
+name = """telemetry pages"""
+what = """Forza's car telemetry screens survive as a HUD class, a string and a scene. Their data sources should lead to RPM, gear, slip and suspension values."""
+how = """Strings and xrefs."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+# --------------------------------------------------------------- Online services
+
+[[finding]]
+group = """Online services"""
+v4 = """Network::FreeRoamChallenges, CFreeRoamChallengeCoordinator, CCarChallengeState, COMPONENT_MEDAL_1..6"""
+name = """1000 Club is v4-only and online"""
+what = """The 1000 Club (car challenges) exists only in v4: `CCarChallengeState`, `CShowCarChallengeHomeScreen` and its selection screens, `CHudStatusCarChallenge`, `CWaitForCarChallengeMedalAwarded` and `COMPONENT_MEDAL_1` to `6`. It is implemented as `Network::FreeRoamChallenges` (`CFreeRoamChallengeCoordinator`; skills, distance, A-to-B and speed-camera challenges). Its pause entry checks for an Xbox LIVE sign-in, then for the Forza Horizon server, and shows "NO NETWORK ACCESS" or "FEATURE UNAVAILABLE" otherwise; a sign-in flag alone is not enough."""
+how = """String comparison of the base and v4 images; v4 runs with the 1000 Club package, with and without a reported LIVE sign-in."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds, TU-7"""
+
+[[finding]]
+group = """Online services"""
+v4 = """sub_824127B8, sub_824D2090, [0x833CABB0]"""
+name = """server-available check"""
+what = """`sub_824127B8(service)` answers whether the Forza Horizon server is available; `sub_824D2090` only wraps it. It reads the network service object at `[0x833CABB0]`: available when (`+9012 == 2` or `+13276`) and `+13205`. It has 64 call sites and is polled constantly (over 32,000 calls in one run)."""
+how = """Codegen hook at its entry returning true; the native 1000 Club flow then ran without a server."""
+confidence = """confirmed"""
+note = """v4 addresses; the base image has no 1000 Club."""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7; docs/FEATURE_BACKLOG.md FB-6"""
+
+[[finding]]
+group = """Online services"""
+v4 = """sub_827EBEE0 case 19, sub_824CB900, sub_827EAC98, sub_824D2090, sub_82753478, sub_82EAA148"""
+name = """1000 Club pause gates"""
+what = """The 1000 CLUB pause action (case 19 of `sub_827EBEE0`) checks LIVE sign-in with `sub_824CB900` (failure `sub_827EAC98`) and the server with `sub_824D2090` (failure `sub_82753478(menu, 4, 20)`), then opens the home screen through `sub_82EAA148`. A second path in the same switch (around `0x827EC224`) calls `sub_824127B8` directly, and the screen itself makes a third check."""
+how = """Traced with mid-function hooks; passing both gates opened the native home screen."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7; src/pinyon_shift_runtime_hooks.cpp PinyonShiftServerAvailableProbe"""
+
+[[finding]]
+group = """Online services"""
+v4 = """sub_829490D8, sub_82B7A328, sub_82947DF8, sub_824D8300, sub_8269B4F8, 0x833CE0EC"""
+name = """car challenge completion commit"""
+what = """A completed goal goes to `CScoreboardManager::SubmitCarChallenge` (`sub_829490D8`, r4 car ID, r5 challenge ID), which calls the web service `Forza.WebServices.Challenge` / `ChallengeCompleted` (`sub_82B7A328`) and keeps the goal pending. Only the server's answer (`sub_82947DF8`, task type 8) commits it through `sub_824D8300(challenge component, car, challenge)`, which sets the record's confirmed byte (+5) and moves its HUD state (+200) from 1 or 2 to 5. Without an answer the goal shows "UPLOADING" and is dropped on the next screen change; a commit while the HUD state is still 0 is ignored. The challenge component comes from `sub_8269B4F8` indexed by the global at `0x833CE0EC`."""
+how = """Traced in play; replacing the web call with a local commit about 120 frames later kept goals completed across events and restarts (user-confirmed)."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7; src/pinyon_shift_runtime_hooks.cpp PinyonShiftCarChallengeSubmitLocal"""
+
+[[finding]]
+group = """Online services"""
+v4 = """sub_824D20A0, sub_826F16B8, sub_824A3650, sub_8253E628, sub_826BFC98, sub_8294EB28, sub_8294EBA0"""
+name = """callers of the server check"""
+what = """In play the 64 call sites come down to seven callers: the pause action (`sub_827EBEE0`), the "1000 Club online" status `sub_824D20A0` (which combines the server answer with `sub_826F16B8` and is read by the home screen and the free-roam promotion), and five callers that belong to other online features. Answering only the pause gate and the 1000 Club status is enough for the whole 1000 Club flow; the other callers can keep the offline answer."""
+how = """Hook logging the caller (`lr`) of every server check; bisection on the `v4-club-begin` route."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7; src/pinyon_shift_runtime_hooks.cpp PinyonShiftServerAvailableProbe"""
+
+[[finding]]
+group = """Online services"""
+v4 = """0x82B94BB8, 0x82B920BC, 0x82B99C9C"""
+name = """boot-time service contact"""
+what = """At boot, before the pause menu, v4 calls `XamXStudioRequest` with ids 1, 4099 and 769 from `0x82B94BB8`, `0x82B920BC` and `0x82B99C9C`, followed by `NetDll_socket`."""
+how = """Import trace during boot."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7"""
+
+[[finding]]
+group = """Online services"""
+base = """sub_830A3510..sub_830A3D30"""
+name = """multiplayer is LIVE sessions"""
+what = """FH1 imports about 30 socket calls (including asynchronous `WSA*`), XNet addressing, key exchange and QoS, and sends session messages to app `0xFB` (create `0x10`, delete `0x11`, start `0x14`, end `0x15`, search `0x1C` and others) through `sub_830A3510`..`sub_830A3D30`. Strings show `Network::PartyLobby`, `CLobbyHostMigrationHandler`, `Xls::HopperClient`, `CPeerNet`, `DirectPlayPeer` and `CRaceSynchronizationManager`. "System Link" strings are absent from the v4 image."""
+how = """Import table, strings and static reading."""
+confidence = """probable"""
+note = """Localized string tables were not searched for System Link; peer-hosted sessions are unverified."""
+source = """docs/FEATURE_BACKLOG.md FB-8"""
+
+[[finding]]
+group = """Online services"""
+name = """sockets opened at the single-player menu"""
+what = """The title opens network sockets (system link, by our earlier reading) when the single-player menu appears, and dereferences null if `socket()` fails, so a host without socket permission cannot reach single player."""
+how = """Crash analysis on Android."""
+confidence = """confirmed"""
+note = """Confirmed for the socket opening and the null dereference; that the sockets serve system link is probable (see "multiplayer is LIVE sessions")."""
+source = """docs/ANDROID_PORT_BACKLOG.md No socket permission, no single player"""
+
+[[finding]]
+group = """Online services"""
+name = """Storefront dependencies"""
+what = """The Storefront (`Forza::CStorefront`, `CStorefrontUploadManager`) needs Forza web services over `XamXStudioRequest`, LSP endpoints (`/lsp/enumerate.ashx`), the `XamXlfs*` upload queues, signed-file checks (`CSignedFileSecurity`) and the same server gate as the 1000 Club. The livery editor itself (`CLiveryEditor`) is local."""
+how = """Strings and imports."""
+confidence = """probable"""
+source = """docs/FEATURE_BACKLOG.md FB-7"""
+
+[[finding]]
+group = """Online services"""
+name = """token store web service"""
+what = """The Treasure Map and Fast Travel Anywhere were sold in the in-game marketplace for Tokens, Forza assets counted and consumed by Turn 10's web service (`ForzaUserGetForzaAssetCounts`, `ForzaUserTwoPhaseConsumeForzaAsset`), never through XamContent or Marketplace packages. The service no longer exists, so the purchases cannot be made."""
+how = """Strings (`InGameMarketplace.str`, the pause map's BUY TREASURE MAP, service call names); transaction class names."""
+confidence = """confirmed"""
+note = """Where the title stores the Token balance was not traced."""
+source = """docs/DLC_BACKLOG.md DLC-7; src/dlc_treasure_map.cpp"""
+
+[[finding]]
+group = """Online services"""
+base = """sub_826DF9A0, sub_82560B80, 0x8201D920"""
+name = """CTreasureMapConsumeAssetTransaction"""
+what = """The Treasure Map purchase is a `CTreasureMapConsumeAssetTransaction` (vtable `0x8201D920`, base `Forza::CConsumableAssetManager::ITransaction`) that `sub_826DF9A0` makes for the map screen. Its completion `sub_82560B80` (vtable +28, r4 the result, 0 for success) shows the TREASURE MAP notification and calls the activity manager's reveal-all `sub_828AF6F8`; that is all a purchase does."""
+how = """Reading the generated code and vtables; the host runs the same reveal and the result persists."""
+confidence = """confirmed"""
+source = """src/dlc_treasure_map.cpp"""
+
+[[finding]]
+group = """Online services"""
+base = """0x82A90000-0x82B40000, 82ADA220, sub_82AC5B00, sub_82AF5930, sub_82AC6EB0"""
+name = """online and Kinect code range is not dead"""
+what = """The block at about `0x82A90000`-`0x82B40000` holds XDK online, Kinect (NUI), XHV2 voice and party code, but single-player play runs it, so it cannot be stubbed as a whole. In a desktop race 310 of its 3,123 generated functions ran, 13.2 million calls (about 1,016 a frame). Most of those calls go to two two-instruction leaves that game code also uses: `sub_82AF5930` (8,529,252 calls, all from `sub_82CE51F0`) and `sub_82AC6EB0` (3,258,524, from game and FMOD callers). The guest thread that starts at `82ADA220` is in the range: it calls `XamXStudioRequest` and `XamNuiCameraTiltSetCallback`, then requests the speech facade module. The XHV2 voice code at about `0x82AC0E20`-`0x82AC5BC0` is there too; `sub_82AC5B00` creates and closes the voice engine through `XamVoiceCreate` and `XamVoiceClose`. On the Odin the range is 0.23-0.25 % of the process."""
+how = """Function and call counts over the range from the probe build (NL-2.3, 115 s race); imports and callers in the generated code; the Odin runtime log (thread starts, first imports and module loads); Odin call-graph profiles (30 fps)."""
+confidence = """probable"""
+note = """The counts are measured; the range's bounds and its XDK identity come from its structure and imports and are probable. The two hot leaves are probably shared helpers the linker placed there, not online code."""
+negative = true
+source = """docs/NEAR_NATIVE_RESEARCH.md Considered and rejected (Stubbing the online range)"""
+
+# --------------------------------------------------- Leftover modes and hardware
+
+[[finding]]
+group = """Leftover modes and hardware"""
+base = """CSplitscreenLobby, CHudSplitscreen, CPauseSplitscreen, 948_HUD_Split_Screen, Splitscreen_Race.xml, Splitscreen_321_and_PostRace.xml, CameraOverrides.SplitscreenCamCockpitOffset*"""
+name = """split-screen"""
+what = """Lobby, HUD, pause, render scenarios and per-car camera offsets for two-player split-screen survive, although FH1 shipped without split-screen."""
+how = """Strings; archive listing; `gamedb`."""
+confidence = """guess"""
+note = """Code present; whether it works is unknown."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Leftover modes and hardware"""
+base = '''CMultiscreenServer, CMultiscreenClient, CHudMultiscreenClient, 835_C_MULTISCREEN_SETUP, MultiscreenDegreesBetweenScreens, CameraSettings.ini Driver\TripleScreenAdditionalZOffset'''
+name = """linked-console triple screen"""
+what = """Server and client classes, a HUD, a setup scene and angle settings for a mode in which three linked consoles show the front and side views."""
+how = """Strings; camera archive."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Leftover modes and hardware"""
+base = """HeadTracking/Enabled, 0x8200DEC0-0x8200DFBC, HeadTrackingX..HeadTrackingPitch 0x82073DD4-0x82073E18, CHeadTrackingSetup"""
+name = """Kinect head tracking"""
+what = """The settings (an enable flag and sensitivities at `0x8200DEC0`-`0x8200DFBC`), the input channels `HeadTrackingX` to `HeadTrackingPitch` and the setup class of the console's head-tracking feature survive. A host tracker could feed the inputs."""
+how = """Strings."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Leftover modes and hardware"""
+base = """CSoccerComponent, [CarSoccer], [ConesScoring], PittingProfiles, TiresAndFuel"""
+v4 = """same"""
+name = """Forza 4 modes: code only"""
+what = """Car Soccer, Bowling and pit-stop or wear code and tunables remain; no ball or pin assets ship."""
+how = """Strings; `gamedb`; media listing."""
+confidence = """guess"""
+note = """Guess that the code runs."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Leftover modes and hardware"""
+base = """Data_Car IsSelectable=0, IsDrivable=1 (23 rows)"""
+v4 = """same"""
+name = """hidden drivable cars"""
+what = """23 cars are marked drivable but not selectable: traffic cars (tour bus, Kenworth T440, Leaf, Prius and others) and the showcase Mini, 500 Abarth and 205 T16, each with its media archive, upgrade rows and name; id 1215 is the placeholder `NUL_Car_00`. With `IsSelectable = 1` the Autoshow lists them under their make, and they are bought, saved and driven like any car. Seven have `BaseCost = 0`. Only the three showcase cars have an Autoshow thumbnail (another car's), so the others show a black tile; the garage thumbnail the game renders after a purchase works. The game rates a bought car from its physics: the tour bus arrives as E 198."""
+how = """`gamedb` query; the hidden_cars mod with fh1-buy-car and fh1-hidden-car-drive on a seed: the tour bus bought, saved and driven about 1 km in free roam, the Kenworth T440 bought and raced in the Gauntlet. With the mod off, a modded profile that owns the bus still loads and drives it."""
+confidence = """confirmed"""
+note = """Tested on the base build. Not every one of the 22 was driven."""
+source = """mods_src/builtin/hidden_cars; config/render-tests/fh1-hidden-car-drive.fh1test; docs/MODDING.md Built-in mods"""
+
+# -------------------------------------------------------------- Gameplay systems
+
+[[finding]]
+group = """Gameplay systems"""
+base = """0x832E4A9C, sub_8291D3D0, sub_828C7770, vtable 8207F9CC, sub_82AF59D8, sub_82E4EED8"""
+v4 = """0x833D23F4, vtable 0x8209004C"""
+name = """CGameControl ownership"""
+what = """The pointer at `0x832E4A9C` leads to `CGameControl`, whose first word is the current owner token (zero when free) and whose event list is at +8/+12; `CIsGameControlInUse` (`sub_8291D3D0`, through `sub_828C7770`) tests it. Owners are `CInstance` objects (state instances) with the token at +48 (`sub_82AF59D8`) and the state name at +4 (`sub_82E4EED8`). While driving there is no owner; Dak's Garage holds the `workshop_02` instance's token, and after the system UI notification `XN_SYS_UI` an instance named `pause` owns control, even after the host menu closes. Starting an event load while the native garage menu is open leaves the load pending."""
+how = """Hooks and read-only snapshots of the owner and its name around host menus, the garage and services; experiment."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace; config/rexglue/analysis/main-xex.toml game-control hooks; docs/DLC_BACKLOG.md Rally entry from native services"""
+
+[[finding]]
+group = """Gameplay systems"""
+base = """0x832FF1D8, sub_8262B348, sub_8262B760, sub_82982870"""
+v4 = """0x833EDDA4, sub_826D3068"""
+name = """race statistics and finish"""
+what = """The global at `0x832FF1D8` is the race statistics manager; `sub_8262B348(statistics, car)` returns a car's timing record. The double at +72 is the race time, which freezes at the finish; +88 holds the final time (the two agree at a valid finish) and +168 the end reason (1 = success), written by `sub_8262B760`. The car's end flag at +14603 becomes 1 at the finish. `CWaitForEndCondition` (`sub_82982870`) watches the same player and flag. The race manager (game object +4) has a race-started byte at +14 and a time double at +32 that keeps running after the finish, so it is not the result."""
+how = """Observer read every few frames during Rally and festival races; the record froze at the finish while the HUD time matched, and stage completions were saved from these fields; a trace of the Rally event flow."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace; docs/DLC_BACKLOG.md Native stage timing and launcher recovery; src/pinyon_shift_runtime_hooks.cpp Rally comments"""
+
+[[finding]]
+group = """Gameplay systems"""
+name = """race serial and restart"""
+what = """Each event load gets a new race serial. A native restart (confirmation and zero-clock pre-race menus) keeps the same car serial and returns the race clock to zero before the start. The AI control latch survives a restart unless the game's own disable action runs first, which leaves a restarted car driving into a wall."""
+how = """Trace of native race state across restarts and stage transitions."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Base-disc stage transition probe; Private four-stage director and resume"""
+
+[[finding]]
+group = """Gameplay systems"""
+v4 = """game_rally_*_flow.xml, mode 20"""
+name = """native Rally entry and stages"""
+what = """Confirming Rally entry in v4 loads through the Rally loading screen, plays an in-car intro and starts a scripted first-run stage (a Subaru WRX on `ColoradoDirt`, with a progress HUD and a co-driver turn icon). Rally stages run in game mode 20; festival races are 3 and free roam, including the new-player opening drive, 17. The flows come from the update's `game_rally_*_flow.xml`."""
+how = """`v4-rally-enter` and `v4-rally-confirm` probes with captures; game mode reported by the render-test task; one championship played by hand on 2026-10-07."""
+confidence = """confirmed"""
+note = """Only one championship has been played; the other stages and the end sequence are not covered."""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-5, TU-6"""
+
+[[finding]]
+group = """Gameplay systems"""
+base = """CTeleportCarToFastTravelDestination, gamemodes.zip fast_travel.xml, map.xml"""
+name = """fast-travel teleport"""
+what = """Moves the car through the game's fade-and-stream path; `map.xml` gates it with `is_fast_travel_enabled`. A candidate for a teleport that does not fight the physics body."""
+how = """Strings; archive listing."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Gameplay systems"""
+base = """CSetSatNavDestinationPos, CSatNavDestinationManager, CLockSatNavDestination, 0x8207BC58"""
+name = """GPS destination"""
+what = """Classes that set and lock the sat-nav route target, and the `satnav_arrows_enabled` name at `0x8207BC58`."""
+how = """Strings."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Gameplay systems"""
+name = """rewind has unlimited uses"""
+what = """FH1's rewind is an assist with unlimited uses; its `RewindCoolDown` tunable only paces the first-career hint."""
+how = """Reading the tunables."""
+confidence = """probable"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.5"""
+
+
+# ---------------------------------------------------------------- AI opponents
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_826098B8, 0x82609910"""
+v4 = """sub_826B0170, 0x826B01C8"""
+name = """event AI assignment"""
+what = """Reads `Events.AISkill%s`, `AITemperament%s` and `AIRubberband%s` (`0x8202C624`, `0x8202C614`, `0x8202C6F0`) for the opponent difficulty (suffix from `sub_8249BCB8`: 0 `Easy`, 1 `Med`, 2 `Hard`, 3 `Pro`; the difficulty is byte `+662` of the race-setup object), adds each driver's `AIPlayers` modifiers (all `RubberBandModifier` are 0) and stores skill, temperament, difficulty and rubber-band id at driver-settings `+608`, `+612`, `+603` and `+640`. Skill is clamped to 1-80, temperament to 1-10; the modifier is added to a rubber-band id only when it is 1-10, so 0 and ids above 10 pass through. HARD raises the difficulty argument of the suffix call at `0x82609910` (v4 `0x826B01C8`) by one, up to 3."""
+how = """Generated code; `ai.opponents` events."""
+confidence = """confirmed"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_829ADAC0, sub_824B3AE8, 0x824B3E6C, sub_829AD0D8, sub_829ACD50, sub_829ACA50"""
+v4 = """sub_82A61F08, sub_82520EA0, 0x82521224"""
+name = """AI config"""
+what = """At car spawn (`sub_824B3AE8`, v4 `0x82520EA0`; its only caller, the call at `0x824B3E6C`, v4 `0x82521224`, with the config at `r1+464`, skill `r5`, temperament `r6`, difficulty `r8`) a 496-byte config is filled: the `AISkills` row at `+280` (braking min/max `+320`/`+324`, cornering min/max `+328`/`+332`, `DistBehindForMaxPerformance` `+336`, torque boost `+344`/`+348`, `NominalTorqueScale` `+352`) and the `AIRubberbands` row at `+368` (id, -1 without a row; mode-choice count `+376`; the nine distance and factor columns at `+416`-`+448` in table order). An event rubber-band id below 1 falls back to the skill's `Rubberbands_id` (clamped to 1-10), so the 81 events with 0 use rows 1-10, the strongest on Easy. NO RUBBER-BANDING and HARD rewrite the filled config after the call: rubber-band, torque-cut and catch-up distances out of reach (100 km), their factors neutral, `DistBehindForMaxPerformance` and the torque boost off, cheat level 0. HARD at difficulty 3 passes skill 1 and temperament 1."""
+how = """Generated code; column-name xrefs; `ai.trace`."""
+confidence = """confirmed"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+id = """ai-missing-rubber-band"""
+base = """AIRubberbands"""
+v4 = """same"""
+name = """missing id"""
+what = """An id with no row (event 92's `AIRubberbandPro` is 14) gets built-in values: rubber band from 100 m ahead, no torque cut, no catch-up, and three default mistake modes. Not "off"."""
+how = """`sub_829ACA50` and `sub_829AC770` defaults."""
+confidence = """confirmed"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_82B93A18, 0x833387BC"""
+name = """rubber-band state"""
+what = """Per AI update: stores the gap at controller `+164`. A mode starts only while the AI is level with or ahead of the player in position, at least `StartRubberbandingDistance` ahead, with mode choices for its row. Past `StartTorqueCutDistance` the mode is torque cut (8): torque × (1 − ramp × `TorqueCutFactor`), the ramp linear from the start to `MaxTorqueCutDistance`; otherwise a random mistake mode (0 none, 1/2 under-braking/cornering, 3/4 over, 5-7 lags). `TorqueCutFactor` 0 is neutral. `MaxRubberbandingEffectDistance` has no reader. Skipped when byte `0x833387BC` is set (no writer found)."""
+how = """Generated code; mode names from the string table order and the mode switch (`sub_82B89F10`)."""
+confidence = """confirmed"""
+note = """That `MaxRubberbandingEffectDistance` is unused is probable."""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_82B84610"""
+name = """catch-up"""
+what = """While no mode is on and the player leads: on above `StartCatchUpDistance` + `CatchUpGapPerPosition` × places behind, off below `StopCatchUpDistance` + the same. While on, `CatchUpFactor` (skill object `+140`) pulls braking toward 1.0 and cornering toward 1.25 (`sub_82B82F18`, `sub_82B82FB0`); it adds no torque. 0 is neutral."""
+how = """Generated code."""
+confidence = """confirmed"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_82B90EE8"""
+name = """skill re-roll"""
+what = """At spawn and at threshold crossings braking and cornering are drawn between the skill's minimum and maximum; an AI more than `DistBehindForMaxPerformance` (10-25 m in the stock rows) behind the player gets the maximum, a step rather than a ramp. The far-behind torque boost needs `DistBehindForTorqueBoost` > 0, which no stock skill 1-80 has."""
+how = """Generated code."""
+confidence = """confirmed"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """TrackSpecificAI, sub_829AD870"""
+name = """per-track override"""
+what = """Applied last over four rubber-band distances and the torque-boost distance, but its `Tracks_id` 8, 9 and 31 are not in `Tracks`, so it does nothing in FH1."""
+how = """Generated code; `gamedb` query."""
+confidence = """probable"""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_82B6AC10, 0x83338044-0x83338700"""
+name = """code-only boosts"""
+what = """A race-start torque boost by grid place (0.4 first to 0.1 last, held 300 m, decaying over 700 m) and a nemesis-rival boost (+0.3 torque, 1.5× skill), with a player catch-up variant 50-100 m behind that ends 500 m from the finish. Values at object `+8`; AI OPPONENTS leaves them."""
+how = """Generated code; tunable initializers."""
+confidence = """probable"""
+note = """Which counts gate the nemesis branch is a guess."""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+id = """ai-gap-measurement"""
+name = """rubber-banding measured on fh1-ai-gap"""
+what = """On `appdata-2026-09-27` (v4: `i443-camera-v4`, the same save). The seed's PROGRESS event assigned skills through the event path (`ai.assign path=event`, difficulty 1, no dynamic update during the run); its AI drove skills 49-55 with rubber-band rows 6-7 (the event's 0 falling back to the skill). With the player idle on the grid for 100 s, every stock AI that got ahead spent 50-55 of its 65-127 samples in a rubber-band mode, mostly torque cut (mode 8), with torque down to 0.600 (row 6: factor 0.4 from 140 to 500 m ahead). With NO RUBBER-BANDING no AI entered a mode or catch-up and torque stayed 1.000; with HARD too, at skills 33-39 (difficulty 2). Base, v4 and the Odin 2 Portal (Android, base build, a private state) gave the same counts. Gap over time alone does not separate the runs (stock and fair AI both reach about 1 km in 23-26 s, and some stall near 450-550 m in both)."""
+how = """`pinyon_shift_ai_trace`, `tools/summarize-ai-trace.py`, one run per setting on each build, 2026-10-12; the earlier database-row version measured the same."""
+confidence = """confirmed"""
+note = """For this event."""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+[[finding]]
+group = """AI opponents"""
+base = """sub_8261C3B8, 0x8261C5A0, sub_82613458, sub_8261FB48"""
+v4 = """sub_826C3800, 0x826C39E8"""
+name = """dynamic difficulty"""
+what = """After a race the profile's `Main/AISkill` moves by `AISkillAdjustments.SkillAdjustment` for the clamped time ratio (90-110) divided by up to `MaxNumRaces`, within 1 to `EasyDifficultyUpperBound`; `sub_82613458` maps it back to a skill id (1-20), a temperament (skill / 4) and a difficulty (the `UpperBound` keys). `sub_8261FB48` assigns it to drivers without touching the rubber-band id. At `0x8261C5A0` (v4 `0x826C39E8`) `f1` holds the looked-up adjustment; any choice but STOCK sets it to 0."""
+how = """Generated code; ini keys parsed by `sub_82521200` into the settings object `+1668`-`+1676`."""
+confidence = """confirmed"""
+note = """The meaning of the time ratio is probable."""
+source = """docs/FEATURE_BACKLOG.md FB-12.6; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAiSpawnConfig"""
+
+# --------------------------------------------------------- Data and tuning files
+
+[[finding]]
+group = """Data and tuning files"""
+v4 = """same"""
+name = """mergeable settings files"""
+what = '''`PhysicsSettings.ini` and `GameTunableSettings.ini` use `Section\Key value` lines with either `=` or a space. `AIOpenWorld.xml`'s `freeroam` settings set traffic through `CarList` `numInitialTrafficCars` and `numInitialFestivalCars`; zero gives no free-roam traffic.'''
+how = """Reading the files; merge experiments."""
+confidence = """confirmed"""
+source = """docs/MODDING.md Settings merged by key"""
+
+[[finding]]
+group = """Data and tuning files"""
+base = """AIRubberbands (24 rows), AISkills (87), AITemperaments, GameTunableSettings.ini [DynamicDifficulty], [AIAutoUpgrades], [HandOfGodReset]"""
+v4 = """same"""
+name = """AI and reset tuning"""
+what = """Catch-up behaviour, AI skill levels and temperaments, and the automatic off-track reset are data in the database and the tunables file."""
+how = """`gamedb` and ini reads."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+# ------------------------------------------------------ Crash guards and helpers
+
+[[finding]]
+group = """Crash guards and helpers"""
+base = """sub_82C6DEF0, 0x82C6DFA8"""
+v4 = """0x82D2EC30"""
+name = """stale source slot call"""
+what = """The call site at `0x82C6DFA8` in `sub_82C6DEF0` was seen calling through a stale source slot."""
+how = """Guard hook added after a crash dump."""
+confidence = """probable"""
+note = """The function's purpose is not established."""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x82C6DFA8"""

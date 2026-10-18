@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -22,8 +24,13 @@ using rex::X_STATUS;
 namespace {
 // Native frames are planar big-endian 6-channel, 256 samples at 48 kHz.
 // Allocate before starting the guest; no allocation or disk work in SubmitFrame.
-constexpr size_t kMaximumSamples = 8u * 48000u * 6u;
+// PINYON_SHIFT_AUDIO_PROBE_SECONDS lengthens the capture (default 8, up to 60).
+size_t kMaximumSamples = 8u * 48000u * 6u;
 std::unique_ptr<float[]> samples;
+// Each captured frame's submit time (steady clock, ns): gaps longer than the
+// device queue are dropouts that the PCM itself cannot show.
+std::unique_ptr<int64_t[]> submit_ns;
+size_t submits = 0;
 std::mutex mutex;
 std::atomic<bool> capturing{};
 bool pending = false;
@@ -34,6 +41,11 @@ void Capture(const uint32_t* buffer) {
   if (!capturing.load(std::memory_order_acquire)) return;
   std::lock_guard lock(mutex);
   if (!capturing.load(std::memory_order_relaxed)) return;
+  if (submits < kMaximumSamples / (256 * 6)) {
+    submit_ns[submits++] = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
+  }
   for (size_t i = 0; i < 256 && count < kMaximumSamples; ++i) {
     for (size_t channel = 0; channel < 6; ++channel)
       samples[count++] = std::bit_cast<float>(std::byteswap(buffer[channel * 256 + i]));
@@ -44,6 +56,8 @@ void Capture(const uint32_t* buffer) {
 class ProbeDriver final : public rex::audio::sdl::SDLAudioDriver {
  public:
   using SDLAudioDriver::SDLAudioDriver;
+  // Guest frames reach this through SDLAudioDriver::SubmitFrame, and frames
+  // the native FMOD output builds on the host (NN-4.4) come here directly.
   void SubmitHostFrame(const uint32_t* frame) override {
     Capture(frame);
     SDLAudioDriver::SubmitHostFrame(frame);
@@ -64,9 +78,16 @@ class ProbeSystem final : public rex::audio::sdl::SDLAudioSystem {
 }  // namespace
 
 void ConfigureAudioProbe(rex::RuntimeConfig& config) {
-  if (!fh1_render_test::Enabled() ||
-      platform::EnvironmentVariable("PINYON_SHIFT_RALLY_AUDIO_PROBE").value_or("").empty()) return;
+  if (!fh1_render_test::WantsAudioCapture() &&
+      (!fh1_render_test::Enabled() ||
+       platform::EnvironmentVariable("PINYON_SHIFT_RALLY_AUDIO_PROBE").value_or("").empty())) return;
+  const auto seconds = platform::EnvironmentVariable("PINYON_SHIFT_AUDIO_PROBE_SECONDS");
+  if (seconds && !seconds->empty()) {
+    const long value = std::strtol(seconds->c_str(), nullptr, 10);
+    kMaximumSamples = size_t(std::clamp(value, 1L, 60L)) * 48000u * 6u;
+  }
   samples = std::make_unique<float[]>(kMaximumSamples);
+  submit_ns = std::make_unique<int64_t[]>(kMaximumSamples / (256 * 6));
   config.audio_factory = [](rex::runtime::FunctionDispatcher* dispatcher) {
     return std::make_unique<ProbeSystem>(dispatcher);
   };
@@ -76,6 +97,7 @@ void BeginAudioProbeCapture() {
   if (!samples) return;
   std::lock_guard lock(mutex);
   count = 0;
+  submits = 0;
   pending = true;
   capturing.store(true, std::memory_order_release);
 }
@@ -109,6 +131,12 @@ void FlushAudioProbeCapture() {
   // The supported Windows/macOS/Linux hosts are little endian.
   file.write(reinterpret_cast<const char*>(pcm.data()), std::streamsize(size));
   file.close();
+  {
+    std::ofstream times(fh1_render_test::OutputDirectory() / "rally-audio-probe-submits.csv",
+                        std::ios::trunc);
+    times << "submit_ns\n";
+    for (size_t i = 0; i < submits; ++i) times << submit_ns[i] << '\n';
+  }
   diagnostics::RecordEvent(file ? "dlc.rally.audio_capture_saved" : "dlc.rally.audio_capture_error",
       {{"path", rex::path_to_utf8(path)}, {"frequency", std::to_string(frequency)},
        {"source", "native_pre_device_pcm"},

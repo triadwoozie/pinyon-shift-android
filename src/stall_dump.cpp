@@ -21,6 +21,7 @@
 #include <rex/system/xmemory.h>
 #include <rex/system/xthread.h>
 
+#include "hitch_sampler.h"
 #include "pinyon_shift_diagnostics.h"
 
 REXCVAR_DEFINE_INT32(pinyon_shift_stall_dump_seconds, 20, "Pinyon Shift",
@@ -123,6 +124,9 @@ namespace pinyon_shift::stall {
 
 void NoteFrame() {
   g_last_frame_ns.store(NowNs(), std::memory_order_release);
+#ifdef _WIN32
+  pinyon_shift::hitch::NoteFrame();
+#endif
   static std::once_flag started;
   std::call_once(started, [] { std::thread(Watchdog).detach(); });
 }

@@ -12,8 +12,8 @@ A developer alpha. The Android build is the same recompiled game, cross-compiled
 ## Requirements
 
 - A Windows PC where the game is already built and plays.
-- About 15 GB free on the PC's install drive. The launcher downloads the pinned Android SDK, NDK and JDK 17 when the PC has none, after you accept the Android SDK license.
-- An arm64 device with Android 13 or later and a Vulkan 1.3 driver, about 8 GB free, on the same network as the PC.
+- About 15 GB free on the PC's install drive. The launcher downloads the pinned Android SDK, NDK and JDK 17 when the PC has none, after you accept the Android SDK license. With Android Studio's SDK already installed, it adds the missing packages to that SDK with its own pinned command-line tools.
+- An arm64 device with an ARMv8.2 CPU (Cortex-A55, Cortex-A75 or newer; every Snapdragon 845 and later), Android 13 or later and a Vulkan 1.3 driver, about 8 GB free, on the same network as the PC.
 - Tuned for Snapdragon 8 Gen 2 or newer (Adreno 740 and up). Supports Snapdragon 8-series (Adreno 650/660/730/740/750/830) and 7-series chips including Snapdragon 7s Gen 3 (Adreno 810).
 
 ## Standalone Setup on Device
@@ -40,11 +40,29 @@ Modern phones and handhelds feature wide aspect ratios (such as 20:9 or 19.5:9 o
 
 The **Drivers** tab in the mobile launcher manages Vulkan drivers before starting the game:
 
-- **Auto**: Recommends the optimal tested driver for your GPU (Mesa Turnip Gen8 V37 for Adreno 6xx, 7xx, and 8xx, including Snapdragon 7s Gen 3).
-- **System Default**: Uses the vendor's pre-installed Vulkan driver.
+- **Auto**: Recommends the optimal tested driver for your GPU (Mesa Turnip Gen8 V37 for Adreno 7xx and 8xx). Other GPUs use the system driver.
+- **System Default**: Uses the vendor's pre-installed Vulkan driver (recommended for Adreno 6xx).
 - **Import Driver (.zip)**: Unpacks any adrenotools or custom Turnip driver archive directly on device.
 - **GPU Turbo Clocks**: Locks Adreno GPU to peak frequency states during gameplay.
 - **No-Preamble Shaders**: Lowers draw call latency in Turnip.
+
+After the game has run once on a device, `python tools/pinyon.py android shader-pack` makes a shader pack for it: it starts the game to the title screen over adb, collects the SPIR-V of every shader the device's pipeline storage names, builds a pack and puts it in the state's shader cache.
+
+## Presets and drivers
+
+**SETTINGS > GRAPHICS > GRAPHICS PRESET** has three choices:
+
+| Preset | MSAA | Sun shadows | Rate |
+| --- | --- | --- | ---: |
+| ULTRA LOW 30 | Off | Off | 30 |
+| SMOOTH 60 | 2x | Off | 60 |
+| QUALITY 30 | 4x | On | 30 |
+
+ULTRA LOW 30 is for entry-level phones and also keeps textures at most 256 texels across (**TEXTURE SIZE**), which saves memory a phone shares with the CPU. All three draw the game's three predicated tiles in one pass and redraw the reflection map at a quarter of the game's rate.
+
+On Adreno 7xx and 8xx the bundled Mesa Turnip driver (Gen8 V37) is chosen automatically. It is much faster than the stock driver on the Adreno 740 and takes about a fifth less GPU time on the Adreno 830. Other GPUs use the system driver. **SETTINGS > GRAPHICS > GPU DRIVER** picks the driver for the next start. **IMPORT DRIVER (.ZIP)** adds an adrenotools package, including Qualcomm driver packages; the log's `Vulkan device` line shows which driver version runs.
+
+Where a phone's fastest cores form their own cluster of two or more (the Snapdragon 8 Elite's two 4.32 GHz cores), the GPU command decoder thread is pinned to them. Left to the scheduler it spent whole stretches on the slower cores: in an in-run A/B on the Astra at the 60 fps limit, 25 % of frames took over 17.5 ms and the decoder 16.2 ms of CPU a frame, against 2 % and 10.2 ms pinned, with the same GPU time. Phones with a single fastest core, such as the 8 Gen 2 and 8 Gen 3, are left alone. The `android_thread_cores` setting overrides it (`NAME=CORES` entries separated by semicolons, `off` to disable).
 
 ## Measured devices
 

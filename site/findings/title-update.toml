@@ -1,0 +1,178 @@
+# Reverse-engineering records for the "Title update v4" page.
+
+# -------------------------------------------------------- Package and images
+
+[[finding]]
+group = """Package and images"""
+base = """default.xex, SpeechFacade_default.xex, XMediaFacade_default.xex"""
+v4 = """default.xexp, SpeechFacade_default.xexp, XMediaFacade_default.xexp"""
+name = """v4 applies exactly to the USA disc"""
+what = """The surviving v4 update was built for media `4000D145`, version 0.0.0.12, while the supported USA disc is media `2DC7007B`, version 0.0.0.10. Applying its patches to the USA disc still produces the exact v4 images: 371/371, 54/54 and 61/61 pages match v4's own page hashes, and the image-key check passes for all three modules. The patched `default.xex` image has SHA-256 prefix `74B033805AB1BCAA` and its headers report media `2DC7007B`, version 0.0.4.10. The RSA signature over these hybrid headers is not valid; recompilation does not need it. An external report (xenia-canary issue 738, not checked here) shows the same update applying to media `2B7A1346`."""
+how = """Applied each header and image delta while tracking whether every output byte came from the base, a patch literal or zero fill; checked each 64 KiB page as SHA1(page plus its own descriptor) against the previous descriptor's digest, rooted in the patch's security info. Controls: base pages verify against base headers, a flipped bit fails exactly its page, and the v4 image against base headers fails 353 of 354 pages."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md Finding: v4 applies exactly to the USA disc; docs/DLC_BACKLOG.md"""
+
+[[finding]]
+group = """Package and images"""
+v4 = """title update package"""
+name = """title update package structure"""
+what = """The v4 title update is an STFS package with exactly four files: `default.xexp`, `SpeechFacade_default.xexp`, `XMediaFacade_default.xexp` and `media.zip` (918 files: the Rally game flows, an updated game database, 113 UI scenes, Rally strings in every language and Car Challenge data). Each `.xexp` holds a header delta and an LZX image delta. The facade patches' header deltas hold several records (they also replace the module key), bounded by the descriptor size minus its leading fields. No FH1 patch moves a module's load address."""
+how = """Package listing by the archive extractor; applying the patches reproduced the verified images byte for byte only once the header delta was read to the descriptor size."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds, TU-1; tools/fh1_archive_extract.cpp --title-update-files"""
+
+[[finding]]
+group = """Package and images"""
+base = """default.xex RSA signature"""
+v4 = """default.xexp digest_source"""
+name = """signature mismatch does not mean the wrong base"""
+what = """A patch's `digest_source` differs from the base's RSA signature whenever the headers differ (media ID, version), even when the code is identical, so comparing them cannot tell whether a patch fits a base. That comparison had wrongly ruled out v4 on the USA disc. An earlier extracted v4 image was in fact correct; it differed only in 41 import-table bytes that the loader rewrites."""
+how = """Compared with the page-hash verification."""
+confidence = """confirmed"""
+negative = true
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md Finding: v4 applies exactly to the USA disc"""
+
+[[finding]]
+group = """Package and images"""
+v4 = """xam.xex ordinal 0x69"""
+name = """v4 imports"""
+what = """v4 adds one import, `xam.xex` ordinal `0x69` (`NetDll_XnpGetConfigStatus`). Its `xboxkrnl.exe` imports are unchanged from the base."""
+how = """Import table comparison of the base and v4 images."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds"""
+
+[[finding]]
+group = """Package and images"""
+v4 = """default.xex"""
+name = """v4 identifier inventory"""
+what = """v4's `default.xex` contains 102 `C`-prefixed identifiers (behaviour and class names) that the base lacks and removes none; 26 apparent removals are tail-merged strings. The v4 Rally flows alone use 39 Rally behaviours that do not exist in the base. The new names cover Rally entry and hub, race and scoring, progression, audio, the 1000 Club and Car Challenge, an in-game DLC alert and Auction House data sources."""
+how = """String comparison of the base and v4 images; reading v4's Rally flow files for the behaviours they use."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds"""
+
+[[finding]]
+group = """Package and images"""
+base = """SpeechFacade_default.xex, XMediaFacade_default.xex"""
+v4 = """same modules after patch"""
+name = """facade exports in v4"""
+what = """Both facade modules keep their 14 export ordinals in v4, and every v4 export points at the mapped counterpart of its base function."""
+how = """Ported analysis files for both facades; export table comparison."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-3"""
+
+# ----------------------------------------------------------- Address mapping
+
+[[finding]]
+group = """Address mapping"""
+base = """57,127 .pdata functions"""
+v4 = """60,903 .pdata functions"""
+name = """how base code maps to v4"""
+what = """About half of the base's functions are unchanged in v4 apart from branch displacements and absolute addresses: 27,556 of 57,127 have a unique, identical normalized body in both images, and call-graph anchoring through aligned code pairs maps 5,561 more. The rest needs instruction-window context, vtable slots and `lis`/`addi` references (for code outside `.pdata`), or a shape match that tolerates field offsets, because classes grew and their field offsets and vtable slots moved. Runs of small `subi r3,r3,4; b` thunks look identical once branches are masked, so a correct pairing must also check that direct branches reach the mapped counterparts of their targets."""
+how = """A mapper over both loaded images, functions taken from each image's `.pdata`, every result shape-checked over its own range and tested on synthetic images. An earlier version shifted a thunk run by one, which the branch check now rejects."""
+confidence = """confirmed"""
+note = """All 123 hooks, 116 function entries, setjmp/longjmp and the CRT replacements map, with 4 reviewed overrides."""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-3; tools/map-fh1-v4-addresses.py; tools/port-fh1-v4-analysis.py"""
+
+[[finding]]
+group = """Address mapping"""
+base = """0x832E4A80, 0x824AFB20, 0x82DE7330, 0x8203650C, 0x82000D48"""
+v4 = """0x833D23E0, 0x82E55D58, 0x824CEAB0, 0x82033558, 0x82000D48"""
+name = """how far addresses move"""
+what = """The 85 base addresses host code uses pair with v4 counterparts as 50 code (27 exact, 10 aligned, 10 context, 2 shape-context, 1 vtable) and 35 data (27 data, 6 data-ref, 2 manual overrides). Most v4 code and data sit 0x10000-0xC0000 higher than in the base (globals near `0x832E4A80` move to about `0x833D23E0`), but some functions were relocated far away (`0x824AFB20` to `0x82E55D58`, `0x82DE7330` to `0x824CEAB0`) and a few data items moved down (`0x8203650C` to `0x82033558`) or stayed put (`0x82000D48`)."""
+how = """The generated address table, built by scanning host code for addresses and mapping each; an unmapped address fails the build."""
+confidence = """confirmed"""
+note = """The backlog quotes 83 verified pairs; the committed table now has 85."""
+source = """src/fh1_v4_addresses.inc; tools/generate-fh1-v4-addresses.py; docs/TITLE_UPDATE_V4_BACKLOG.md TU-3"""
+
+[[finding]]
+group = """Address mapping"""
+v4 = """82E55C00, 83171338, sub_827611D8"""
+name = """v4 functions the analyzer misses"""
+what = """v4 has indirect-call targets that are not in its `.pdata`, among them `82E55C00` and `83171338`; 35 functions had to be declared in all. v4 has 253 virtual-call thunks outside `.pdata`; the same rule finds 66 of the base's 70 hand-listed thunks with identical sizes, and four base thunks have no one-to-one v4 counterpart because their vtable slots moved. The new v4 function `sub_827611D8` has a jump table whose bound check is separated from its branch by an `lfd`, so its table size must be declared."""
+how = """The first v4 boots stopped on unregistered indirect-call targets; thunk discovery in the mapper; code generator warning review."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-3, TU-5"""
+
+[[finding]]
+group = """Address mapping"""
+base = """0x8223C5F4, 0x8223C6C4"""
+v4 = """0x8224F754, 0x8224F824"""
+name = """render-settings control vtables"""
+what = """Vtables of two `DynamicRenderSettings` control types: the float control (used by `EnvMapFrequencyScale`) and the bool control (used by `SkipShadowMapUnlessCockpit`). The v4 vtables hold the mapped methods in the same order and keep their 0xD0 spacing."""
+how = """Manual pairing: 5 of 7 slots equal, the other two the base's neighbours; the bool vtable's trailing "Skip" string matches."""
+confidence = """probable"""
+source = """config/rexglue/analysis-v4/overrides.toml; docs/TITLE_UPDATE_V4_BACKLOG.md TU-3"""
+
+# ------------------------------------------------------------ Layout changes
+
+[[finding]]
+group = """Layout changes"""
+base = """sub_8249E570"""
+v4 = """sub_8250B050"""
+name = """car fields moved by 16 bytes"""
+what = """The setter that hands a car to the title's AI reads `+0x3B70`/`+0x3B78` in the base and `+0x3B80`/`+0x3B88` in v4, so the car fields after about `0x3B00` moved by 16 bytes. In v4, `+0x3B88` reports whether the player controls the car."""
+how = """Aligned instructions of the matched functions (identical code apart from the moved field; every base caller maps to a v4 caller); used successfully as the v4 render-test AI driver."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-6"""
+
+[[finding]]
+group = """Layout changes"""
+base = """sub_8262B348"""
+v4 = """sub_826D3068"""
+name = """race statistics fields"""
+what = """The race-statistics function uses `+0x368`/`+0x36C` in v4 where the base uses `+0x360`/`+0x364`."""
+how = """Aligned instructions of the matched functions."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4"""
+
+[[finding]]
+group = """Layout changes"""
+base = """sub_82739D00, 0x8273A10C"""
+v4 = """sub_827EBEE0, 0x827EC3FC"""
+name = """pause object grew by 0x20"""
+what = """The pause-menu object grew by 0x20 bytes in v4: the field the `CPauseMenu` action switch's common exit stores at `+0xD48` is at `+0xD68`."""
+how = """Common exit of the action switch compared in both images; recorded as a manual override."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-3; config/rexglue/analysis-v4/overrides.toml"""
+
+[[finding]]
+group = """Layout changes"""
+base = """sub_827A1CD0, 0x827A1DC4"""
+v4 = """sub_8285BAA0, 0x8285BB94"""
+name = """front-end state fields"""
+what = """The front-end state function's fields `+0x168` and `+0x179` are `+0x16C` and `+0x17D` in v4 (moved by 4), and the function grew from 0x7C0 to 0x7F0 bytes. The stored register changed (r29 instead of r30), so register roles at that site differ."""
+how = """All 78 mapped callees match; aligned instruction run of 12 at the traced site."""
+confidence = """confirmed"""
+note = """Register roles at the trace site on v4 are still to recheck."""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-3; config/rexglue/analysis-v4/overrides.toml"""
+
+[[finding]]
+group = """Layout changes"""
+base = """content manager +124, +180"""
+v4 = """+140, +204"""
+name = """content manager grew"""
+what = """The DLC content manager's category table moved from `+124` to `+140` and its entitlement vector from `+180` to `+204` in v4."""
+how = """Manager dumps from both builds in the Rally car-database trace route."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-6"""
+
+[[finding]]
+group = """Layout changes"""
+base = """profile.add_value 824F285C"""
+v4 = """8255E5C4"""
+name = """mod offsets on v4"""
+what = """Of the 34 struct offsets the mod API uses, 33 are unchanged in v4; only the profile's loaded byte moves, from `+40` to `+44`. The collectible record's revealed byte stays at `+40` (v4 setter `82C65210`), and the game object's user (`+108`) and the discount sign's record (`+148`) are unchanged wherever the object type is proven. Earlier readings of 108 to 112 and 148 to 180 came from sites that belong to other objects."""
+how = """Field-by-field comparison of one base and one v4 site per offset, with the words confirmed in both images; the mods UI route passes on v4."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4; config/mod/fh1-offsets-v4.toml"""
+
+[[finding]]
+group = """Layout changes"""
+base = """vehicle.active_slot 1500, vehicle.slot.position 15120, vehicle.slot.forward 15184, main_loop.delta 0x1C0"""
+v4 = """same"""
+name = """unchanged pose and main-loop offsets"""
+what = """The vehicle-pose fields (active slot `+1500`, position `+15120`, forward `+15184`, slot stride 1056) and the main loop's delta field (`+0x1C0`) did not move in v4."""
+how = """The v4 functions are instruction-identical at those fields; v4 render tests used the unchanged hooks."""
+confidence = """confirmed"""
+negative = true
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-5"""

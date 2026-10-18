@@ -9,6 +9,11 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
+      # The reverse-engineering pages render the mod symbol tables and the
+      # hook comments.
+      - "config/mod/**"
+      - "config/rexglue/analysis/main-xex.toml"
+      - "src/mod/fh1_symbols*.inc"
   release:
     types: [published]
   workflow_dispatch:

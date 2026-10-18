@@ -5,6 +5,7 @@
 #endif
 #include <Windows.h>
 #include <DbgHelp.h>
+#include <rex/input/input_system.h>
 
 #include <array>
 #include <atomic>
@@ -177,6 +178,9 @@ LONG WINAPI UnhandledExceptionReporter(EXCEPTION_POINTERS* exception) {
     WriteSymbolizedStack(text, exception);
     CloseHandle(text);
   }
+  // A DualSense keeps its trigger effects after the process is gone; leave
+  // the triggers slack (bounded wait, after the report is safe on disk).
+  rex::input::InputSystem::ReleaseAllFeedback(true);
   return EXCEPTION_EXECUTE_HANDLER;
 }
 

@@ -106,14 +106,23 @@ address mapping), write it down in the same change, before moving on:
 - Name it in the repository's records, not only in a code comment or a
   commit message: semantic symbols and offsets mod code uses go in
   `config/mod/fh1-symbols.toml` (v4 offsets in
-  `config/mod/fh1-offsets-v4.toml`); everything else gets a row in
-  `docs/REVERSE_ENGINEERING.md` (create it if it does not exist yet; see
-  issue #448).
+  `config/mod/fh1-offsets-v4.toml`); everything else gets a `[[finding]]`
+  record in `site/findings/<topic>.toml`, under the group (page section)
+  it belongs to. The docs site renders these on the Reverse engineering
+  pages (`site/pages/game-*.md`) and in the address index; a new group
+  needs a `{{findings:<topic>/<group>}}` line on its page, or the build
+  fails. `docs/REVERSE_ENGINEERING.md` only points there now (issue #448).
 - Record the base address (and v4 address when known), a short name, what
   it does, how it was established (hook, trace, xref, string, experiment)
-  and a confidence: confirmed, probable or guess.
+  and a confidence: confirmed, probable or guess. Fill `source` with the
+  doc, backlog item or code that holds the detail.
 - Findings that explain a subsystem (a file format, a render pass, a save
-  layout) also go in that subsystem's doc or backlog, linked from the row.
+  layout) also get prose, a diagram or example code on that topic's page,
+  and the subsystem's doc or backlog keeps the detail, linked from the
+  record.
+- Before adding a record, search `site/findings` for the address or name:
+  extend the existing record rather than adding a second one on another
+  page.
 - Negative results count too: record what an address or option was found
   not to do, so the next investigation does not repeat it.
 - Write only our own analysis: no disassembly listings, decompiled code or

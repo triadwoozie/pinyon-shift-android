@@ -4,7 +4,7 @@ set(REXSDK_VERSION "" CACHE STRING "Override the pinned ReXGlue SDK version")
 set(REXSDK_DIR "" CACHE PATH "Path to the ReXGlue SDK source tree")
 set(PINYON_SHIFT_CPU_BASELINE "sse4.1" CACHE STRING
     "Minimum AMD64 CPU feature baseline used by the host and source-built SDK")
-set_property(CACHE PINYON_SHIFT_CPU_BASELINE PROPERTY STRINGS "sse4.1" "fma")
+set_property(CACHE PINYON_SHIFT_CPU_BASELINE PROPERTY STRINGS "sse4.1" "fma" "v3")
 
 # Tracy opens a network listener in non-Release configurations. Private M3
 # qualification uses the structured event log and lightweight counters instead,
@@ -14,8 +14,10 @@ set(REXGLUE_ENABLE_TRACY OFF CACHE BOOL
     "Disable Tracy networking in Pinyon Shift builds" FORCE)
 set(PINYON_SHIFT_CAPTURE_PERFORMANCE ON CACHE BOOL
     "Capture lightweight per-frame performance counters in preview builds")
-option(PINYON_SHIFT_TRACE_IMPORTS
-    "Record first-use guest import reachability diagnostics" ON)
+# Off by default: every hooked import paid an atomic test-and-set for it,
+# 0.35-0.42 % of the Odin process (NN-3.5).
+option(PINYON_SHIFT_TRACE_IMPORT_REACH
+    "Record first-use guest import reachability diagnostics" OFF)
 option(PINYON_SHIFT_FROZEN_CODEGEN
     "Use an existing generated snapshot without invoking the code generator" OFF)
 # CI has no game, so no generated code: configure only the SDK runtime and
@@ -63,11 +65,25 @@ if(PINYON_SHIFT_CAPTURE_PERFORMANCE)
     add_compile_definitions(REXGLUE_ENABLE_PERF_COUNTERS)
 endif()
 
+# NEXT_LEVEL_RESEARCH.md NL-1.1: the 0xE0000000 physical view starts 4 KB into
+# the physical heap. On 4 KB-page kernels the runtime maps it there and the
+# generated code adds nothing to a guest access; a build made with this option
+# assumes that and refuses to start on a 16 KB-page kernel (some Android 15+
+# devices, some ARM64 Linux distributions), which otherwise reads the offset at
+# run time on every access. x86-64 Linux kernels always use 4 KB pages.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
+    option(PINYON_SHIFT_PHYSICAL_HEAP_4K_PAGES
+        "Assume 4 KB memory pages: no run-time host offset on 0xE0000000 guest accesses" ON)
+    if(PINYON_SHIFT_PHYSICAL_HEAP_4K_PAGES)
+        add_compile_definitions(REX_PHYSICAL_HEAP_4K_PAGES=1)
+    endif()
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    if(NOT PINYON_SHIFT_CPU_BASELINE MATCHES "^(sse4\\.1|fma)$")
+    if(NOT PINYON_SHIFT_CPU_BASELINE MATCHES "^(sse4\\.1|fma|v3)$")
         message(FATAL_ERROR
-            "Pinyon Shift supports the audited SSE4.1 AMD64 baseline and its FMA3 "
-            "variant (PINYON_SHIFT_CPU_BASELINE sse4.1 or fma)")
+            "Pinyon Shift supports the audited SSE4.1 AMD64 baseline, its FMA3 "
+            "variant and the x86-64-v3 variant (PINYON_SHIFT_CPU_BASELINE sse4.1, fma or v3)")
     endif()
     if(NOT CMAKE_C_FLAGS MATCHES "(^| )-msse4\\.1($| )" OR
        NOT CMAKE_CXX_FLAGS MATCHES "(^| )-msse4\\.1($| )")
@@ -86,10 +102,29 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
                 message(FATAL_ERROR
                     "The fma baseline must compile with -msse4.1 -mfma -ffp-contract=off")
             endif()
+            if(${_flags} MATCHES "(^| )-march=")
+                message(FATAL_ERROR "-march needs PINYON_SHIFT_CPU_BASELINE=v3")
+            endif()
         endforeach()
         add_compile_definitions(PINYON_SHIFT_CPU_BASELINE_FMA=1)
+    elseif(PINYON_SHIFT_CPU_BASELINE STREQUAL "v3")
+        # NEXT_LEVEL_RESEARCH.md NL-1.8: x86-64-v3 (Haswell and Zen and later)
+        # adds AVX2, BMI1/2, LZCNT, F16C and MOVBE to the FMA3 variant. MOVBE
+        # fuses the byte swap of a guest load or store into the access; the
+        # results stay bit-identical, since contraction is still off and
+        # std::fma lowers to the same FMA3 instruction.
+        foreach(_flags IN ITEMS CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+            if(NOT ${_flags} MATCHES "(^| )-mfma($| )" OR
+               NOT ${_flags} MATCHES "(^| )-ffp-contract=off($| )" OR
+               NOT ${_flags} MATCHES "(^| )-march=x86-64-v3($| )")
+                message(FATAL_ERROR
+                    "The v3 baseline must compile with -msse4.1 -mfma -ffp-contract=off "
+                    "-march=x86-64-v3")
+            endif()
+        endforeach()
+        add_compile_definitions(PINYON_SHIFT_CPU_BASELINE_FMA=1 PINYON_SHIFT_CPU_BASELINE_V3=1)
     elseif(CMAKE_C_FLAGS MATCHES "(^| )-mfma($| )" OR CMAKE_CXX_FLAGS MATCHES "(^| )-mfma($| )")
-        message(FATAL_ERROR "-mfma needs PINYON_SHIFT_CPU_BASELINE=fma")
+        message(FATAL_ERROR "-mfma needs PINYON_SHIFT_CPU_BASELINE=fma or v3")
     endif()
     if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # LLD otherwise writes the wall clock into each PE/COFF image. Combined
@@ -106,7 +141,26 @@ if(REXSDK_DIR)
     set(REXGLUE_OUTPUT_DIRECTORY
         "${CMAKE_CURRENT_BINARY_DIR}/rexglue-artifacts"
         CACHE PATH "ReXGlue artifacts for the Pinyon Shift host build" FORCE)
+    # NN-1.11/NN-3.6: every handheld the Android build targets is ARMv8.2 or
+    # later, so atomics compile to LSE instructions instead of LL/SC loops and
+    # calls to the __aarch64_* outline helpers, in the SDK and its libraries too.
+    if(ANDROID)
+        set(PINYON_SHIFT_ANDROID_MARCH "armv8.2-a" CACHE STRING
+            "-march for every Android target, the SDK and its libraries included")
+        add_compile_options(-march=${PINYON_SHIFT_ANDROID_MARCH})
+        set(REXGLUE_ARM64_MARCH ${PINYON_SHIFT_ANDROID_MARCH})
+    endif()
     add_subdirectory("${REXSDK_DIR}" rexglue-sdk EXCLUDE_FROM_ALL)
+    # NN-3.6: calls inside the runtime libraries bind locally instead of
+    # through the PLT, as libmain's already do. Nothing interposes on their
+    # functions: the libraries share only inline and template code.
+    if(ANDROID OR (UNIX AND NOT APPLE))
+        foreach(_runtime_library IN ITEMS rexruntime rexgpu-fh1)
+            if(TARGET ${_runtime_library})
+                target_link_options(${_runtime_library} PRIVATE -Wl,-Bsymbolic-functions)
+            endif()
+        endforeach()
+    endif()
     # The generator runs on the build host, from the SDK's standalone build
     # for that host (out/<os>-<arch>/Release).
     if(CMAKE_HOST_WIN32)
@@ -136,7 +190,7 @@ if(REXSDK_DIR)
     endif()
     set(PINYON_SHIFT_REXGLUE_CODEGEN_DEPENDS
         "${PINYON_SHIFT_REXGLUE_CODEGEN}")
-    if(TARGET rexruntime AND PINYON_SHIFT_TRACE_IMPORTS)
+    if(TARGET rexruntime AND PINYON_SHIFT_TRACE_IMPORT_REACH)
         target_compile_definitions(rexruntime PRIVATE REXGLUE_TRACE_IMPORTS=1)
     endif()
     message(STATUS "Using ReXGlue SDK from source tree: ${REXSDK_DIR}")
@@ -159,6 +213,19 @@ endif()
 # Its code is generated from the patched executables in a separate tree.
 option(PINYON_SHIFT_TITLE_UPDATE_V4
     "Build the FH1 v4 title-update executable (separate generated tree)" OFF)
+# NEXT_LEVEL_RESEARCH.md NL-0.1: a checking build whose generated code wraps
+# every guest call in PowerPC ABI checks (rex/ppc/abi_poison.h). Its tree is
+# generated into .local/generated-abipoison from its own manifest.
+option(PINYON_SHIFT_RECOMP_ABI_POISON
+    "Checking build: PowerPC ABI preservation checks and register poisoning around guest calls" OFF)
+# Probe build (NEXT_LEVEL_RESEARCH.md NL-2.3): the generated code counts every
+# function entry and records every indirect call's target, and the runtime
+# writes probe.json at exit. Its own tree, .local/generated-probe.
+option(PINYON_SHIFT_RECOMP_PROBE
+    "Probe build: per-function call counts and indirect call targets (probe.json)" OFF)
+if(PINYON_SHIFT_TITLE_UPDATE_V4 AND PINYON_SHIFT_RECOMP_ABI_POISON)
+    message(FATAL_ERROR "PINYON_SHIFT_RECOMP_ABI_POISON has no v4 manifest; build it from the base game")
+endif()
 set(PINYON_SHIFT_CODEGEN_EXTRA_ARGS)
 if(PINYON_SHIFT_TITLE_UPDATE_V4)
     set(_pinyon_default_manifest "config/rexglue/pinyon_shift_v4_manifest.toml")
@@ -166,6 +233,18 @@ if(PINYON_SHIFT_TITLE_UPDATE_V4)
     add_compile_definitions(PINYON_SHIFT_TITLE_UPDATE_V4=1)
     list(APPEND PINYON_SHIFT_CODEGEN_EXTRA_ARGS --xex_apply_patches=true)
     set(_pinyon_codegen_log_suffix "-v4")
+elseif(PINYON_SHIFT_RECOMP_ABI_POISON)
+    set(_pinyon_default_manifest "config/rexglue/pinyon_shift_abipoison_manifest.toml")
+    set(_pinyon_default_generated ".local/generated-abipoison")
+    add_compile_definitions(PINYON_SHIFT_RECOMP_ABI_POISON=1)
+    list(APPEND PINYON_SHIFT_CODEGEN_EXTRA_ARGS --abi-poison)
+    set(_pinyon_codegen_log_suffix "-abipoison")
+elseif(PINYON_SHIFT_RECOMP_PROBE)
+    set(_pinyon_default_manifest "config/rexglue/pinyon_shift_probe_manifest.toml")
+    set(_pinyon_default_generated ".local/generated-probe")
+    add_compile_definitions(PINYON_SHIFT_RECOMP_PROBE=1)
+    list(APPEND PINYON_SHIFT_CODEGEN_EXTRA_ARGS --probes)
+    set(_pinyon_codegen_log_suffix "-probe")
 else()
     set(_pinyon_codegen_log_suffix "")
     set(_pinyon_default_manifest "config/rexglue/pinyon_shift_manifest.toml")
@@ -210,18 +289,43 @@ foreach(_module IN ITEMS speech xmedia)
 endforeach()
 unset(GENERATED_SOURCES)
 
-# Match the 0.10 generated integration contract. Generated guest code uses
-# Windows SEH scopes and therefore must compile with asynchronous exceptions;
-# the option must also be present while each target's PCH is built.
+# Compile options of the generated units (NEXT_LEVEL_RESEARCH.md NL-0.5).
+# The SDK compiles its own sources with -ffp-model=strict and
+# -fno-strict-aliasing; the generated units never got them. Measured on three
+# hot partitions (2026-10-12): -fno-strict-aliasing changes nothing in the
+# output, so it is on; -ffp-model=strict adds 1-2 % host instructions for a
+# risk never observed (FP operations moved across MXCSR writes), so it stays
+# an option. Asynchronous exceptions (/EHa, -fasync-exceptions) were part of
+# the 0.10 integration contract for generated SEH scopes, but
+# generate_exception_handlers is off, so no generated unit has one and the
+# flag only moved code size by under 1 % either way; it is on only with
+# PINYON_SHIFT_RECOMP_SEH.
 set(REXGLUE_RECOMP_DEBUG_INFO "line-tables-only" CACHE STRING
     "Debug info level for generated code: line-tables-only, full, or none")
+option(PINYON_SHIFT_RECOMP_FP_STRICT
+    "Compile the generated units with -ffp-model=strict (no FP motion across MXCSR writes)" OFF)
+option(PINYON_SHIFT_RECOMP_NO_STRICT_ALIASING
+    "Compile the generated units with -fno-strict-aliasing" ON)
+option(PINYON_SHIFT_RECOMP_SEH
+    "Compile the generated units for asynchronous (SEH) exceptions" OFF)
+option(PINYON_SHIFT_RECOMP_PLAIN_STACK
+    "Compile guest stack accesses as plain (non-volatile) loads and stores (NEXT_LEVEL_RESEARCH.md NL-1.6)" OFF)
 set(REXGLUE_RECOMP_OPTIONS "")
-if(WIN32)
+if(PINYON_SHIFT_RECOMP_PLAIN_STACK)
+    list(APPEND REXGLUE_RECOMP_OPTIONS -DREX_PLAIN_STACK)
+endif()
+if(WIN32 AND PINYON_SHIFT_RECOMP_SEH)
     if(MSVC)
         list(APPEND REXGLUE_RECOMP_OPTIONS /EHa)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         list(APPEND REXGLUE_RECOMP_OPTIONS -fasync-exceptions)
     endif()
+endif()
+if(PINYON_SHIFT_RECOMP_FP_STRICT AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    list(APPEND REXGLUE_RECOMP_OPTIONS -ffp-model=strict)
+endif()
+if(PINYON_SHIFT_RECOMP_NO_STRICT_ALIASING AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    list(APPEND REXGLUE_RECOMP_OPTIONS -fno-strict-aliasing)
 endif()
 if(REXGLUE_RECOMP_DEBUG_INFO STREQUAL "none")
     list(APPEND REXGLUE_RECOMP_OPTIONS
@@ -287,6 +391,12 @@ endif()  # NOT PINYON_SHIFT_HOST_TESTS_ONLY
 
 set(PINYON_SHIFT_STAGE_FILE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/PinyonStageFile.cmake")
 
+# The release version for the build label (#545); a version bump reconfigures.
+file(READ "${PROJECT_SOURCE_DIR}/config/release.json" PINYON_SHIFT_RELEASE_JSON)
+string(JSON PINYON_SHIFT_VERSION GET "${PINYON_SHIFT_RELEASE_JSON}" version)
+set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/config/release.json")
+
 function(pinyon_shift_attach_rexglue target_name)
     if(PINYON_SHIFT_RECOMP_PGO STREQUAL "GENERATE")
         target_compile_definitions(${target_name} PRIVATE PINYON_SHIFT_PGO_GENERATE=1)
@@ -322,7 +432,8 @@ function(pinyon_shift_attach_rexglue target_name)
     endif()
     target_link_libraries(${target_name} PRIVATE rex::runtime)
     target_compile_definitions(${target_name} PRIVATE
-        PINYON_SHIFT_CPU_BASELINE="${PINYON_SHIFT_CPU_BASELINE}")
+        PINYON_SHIFT_CPU_BASELINE="${PINYON_SHIFT_CPU_BASELINE}"
+        PINYON_SHIFT_VERSION="${PINYON_SHIFT_VERSION}")
     add_dependencies(${target_name} pinyon_shift_codegen)
     rexglue_configure_target(${target_name} GPU_PLUGINS fh1)
     if(REXSDK_DIR)

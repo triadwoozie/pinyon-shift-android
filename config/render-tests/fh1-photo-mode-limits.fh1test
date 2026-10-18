@@ -1,0 +1,38 @@
+pinyon-shift-fh1-render-test-v1
+# clock-hz 60
+# #488 gate: enter PHOTO MODE as fh1-photo-camera-walls does, then raise
+# the camera (RT), move it away (left stick down), and hold each bumper.
+# Run it on a seed with and without the built-in photo_mode_limits mod:
+# with the mod the camera climbs past the stock 2 m and zooms further, so
+# the raised and zoomed captures differ from the stock run's.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+capture 900 free-roam
+input 960 0010 0 0 0 0 0 0
+input 966 0000 0 0 0 0 0 0
+input 1020 0002 0 0 0 0 0 0
+input 1026 0000 0 0 0 0 0 0
+input 1050 0002 0 0 0 0 0 0
+input 1056 0000 0 0 0 0 0 0
+input 1080 1000 0 0 0 0 0 0
+input 1086 0000 0 0 0 0 0 0
+input 1260 1000 0 0 0 0 0 0
+input 1266 0000 0 0 0 0 0 0
+capture 1440 photo-camera
+input 1460 0000 0 255 0 0 0 0
+capture 2080 raised
+input 2090 0000 0 0 0 -32767 0 0
+capture 2700 far
+input 2710 0200 0 0 0 0 0 0
+capture 3020 bumper-right
+input 3030 0100 0 0 0 0 0 0
+capture 3340 bumper-left
+input 3350 0000 0 0 0 0 0 0
+stop 3400

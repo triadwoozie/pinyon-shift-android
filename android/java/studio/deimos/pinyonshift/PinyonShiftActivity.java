@@ -152,13 +152,11 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         if (title != null) { TextView tv = new TextView(this); tv.setText(title); tv.setTextColor(Color.WHITE); tv.setTypeface(Typeface.DEFAULT_BOLD); tv.setPadding(0, 0, 0, dp(8)); c.addView(tv); }
         d.setContentView(c); return d;
     }
-
     Button createDialogBtn(String text, boolean primary) {
         Button b = new Button(this); b.setText(text); b.setTextColor(primary ? 0xFF0B1F11 : Color.WHITE);
         GradientDrawable gd = new GradientDrawable(); gd.setColor(primary ? 0xFF5CE68B : 0xFF212923); gd.setCornerRadius(dp(10));
         b.setBackground(gd); b.setPadding(dp(12), dp(6), dp(12), dp(6)); return b;
     }
-
     private void confirmQuit() {
         LinearLayout c = new LinearLayout(this); final Dialog d = createCardDialog("Quit Game", c);
         TextView msg = new TextView(this); msg.setText("Exit to launcher?"); msg.setTextColor(0xFF93A597); msg.setPadding(0, dp(2), 0, dp(12)); c.addView(msg);
@@ -167,11 +165,8 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         Button quit = createDialogBtn("Quit", true);
         quit.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                d.dismiss();
-                Intent intent = new Intent(PinyonShiftActivity.this, SetupActivity.class);
-                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                startActivity(intent);
-                finish();
+                d.dismiss(); Intent i = new Intent(PinyonShiftActivity.this, SetupActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP); startActivity(i); finish();
             }
         });
         row.addView(cancel, new LinearLayout.LayoutParams(0, -2, 1.0f)); row.addView(new View(this), new LinearLayout.LayoutParams(dp(10), 1)); row.addView(quit, new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -301,9 +296,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
     }
 
     static String recommendedDriver(String adreno) {
-        if (adreno == null || adreno.isEmpty()) return null;
-        try { if (Integer.parseInt(adreno) >= 600) return "turnip-gen8-v37"; } catch (NumberFormatException ignored) {}
-        return null;
+        return (adreno != null && (adreno.startsWith("7") || adreno.startsWith("8"))) ? "turnip-gen8-v37" : null;
     }
 
     private void installBundledDrivers() { installBundledDrivers(getAssets(), driversDir); }
@@ -461,7 +454,9 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
         addHudRow(items, "Target FPS", new String[]{"30 FPS", "45 FPS", "60 FPS", "120 FPS"}, new String[]{"fps_30", "fps_45", "fps_60", "fps_120"}, currentFpsTarget == 120 ? 3 : currentFpsTarget == 60 ? 2 : currentFpsTarget == 45 ? 1 : 0);
         addHudRow(items, "Render Preset", new String[]{"Potato", "Balanced", "Ultra"}, new String[]{"preset_potato", "preset_balanced", "preset_ultra"}, -1);
         addHudRow(items, "Output Upscaler", new String[]{"FSR 1.0", "CAS", "Bilinear"}, new String[]{"up_fsr", "up_cas", "up_bilinear"}, -1);
-        addHudSectionTitle(items, "Display & Aspect");
+        addHudSectionTitle(items, "Display & Resolution");
+        int curRes = prefs.getInt("res_scale", 720);
+        addHudRow(items, "Resolution", new String[]{"720p", "540p", "360p", "Native"}, new String[]{"res_720", "res_540", "res_360", "res_1080"}, curRes == 360 ? 2 : curRes == 540 ? 1 : curRes >= 1080 ? 3 : 0);
         String curAsp = prefs.getString(PREF_ASPECT_MODE, "hor_plus");
         addHudRow(items, "Aspect Ratio", new String[]{"Hor+ Ultrawide", "16:9 Fit"}, new String[]{"asp_hor_plus", "asp_16_9"}, "hor_plus".equals(curAsp) ? 0 : 1);
         addSwitch(items, "VSync", prefs.getBoolean("vsync", true), "toggle_vsync");
@@ -528,6 +523,9 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             boolean hp = "asp_hor_plus".equals(t); prefs.edit().putString(PREF_ASPECT_MODE, hp ? "hor_plus" : "letterbox").apply();
             try { nativeAction(4, hp ? 1.0f : 0.0f); } catch (UnsatisfiedLinkError ignored) {}
             toast("Aspect: " + (hp ? "Hor+" : "16:9"));
+        } else if (t.startsWith("res_")) {
+            int r = Integer.parseInt(t.substring(4)); prefs.edit().putInt("res_scale", r).apply();
+            applySurfaceResolution(r); toast("Resolution: " + (r >= 1080 ? "Native" : r + "p"));
         } else if ("toggle_vsync".equals(t)) {
             boolean next = !prefs.getBoolean("vsync", true); prefs.edit().putBoolean("vsync", next).apply();
             try { nativeAction(7, next ? 1.0f : 0.0f); } catch (UnsatisfiedLinkError ignored) {}
@@ -763,7 +761,6 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
                 return;
             }
 
-            // Translucent Drive Mode Actions: Rewind (left) and Handbrake (right)
             float rAction = dp(20);
             pillPaint.setColor(0x99141816); strokePaint.setColor(0x33FFFFFF); strokePaint.setStrokeWidth(dp(1));
             canvas.drawCircle(dp(36), dp(60), rAction, pillPaint); canvas.drawCircle(dp(36), dp(60), rAction, strokePaint);
@@ -782,7 +779,6 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             textPaint.setColor(eBrakeActive ? 0xFF0B1F11 : Color.WHITE); textPaint.setTextSize(dp(11)); textPaint.setTypeface(Typeface.DEFAULT_BOLD);
             canvas.drawText("P", w - dp(36), dp(63.5f), textPaint);
 
-            // Subtle Material 3 Steering Arrows (left thumb comfort height)
             float arrowY = h * 0.70f, arrowR = dp(30);
             float arrowLeftX = dp(50), arrowRightX = dp(126);
             boolean lActive = steerLeftHeld, rActive = steerRightHeld;
@@ -796,11 +792,7 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
             canvas.drawText("›", arrowRightX, arrowY + dp(7), textPaint);
 
             if (touchOpacity <= 0.01f) return;
-
-            // Split pedal indicators on the right half (Brake UP, Throttle DOWN)
-            float pedalH = dp(34);
-            float brkY = h * 0.36f, thrY = h * 0.70f;
-            float pX1 = w - dp(94), pX2 = w - dp(14);
+            float pedalH = dp(34), brkY = h * 0.36f, thrY = h * 0.70f, pX1 = w - dp(94), pX2 = w - dp(14);
 
             boolean bActive = currentBrake > 0.0f || brakeAlpha > 0.01f;
             pillPaint.setColor(bActive ? Color.argb((int)(130 * touchOpacity), 255, 60, 60) : Color.argb((int)(35 * touchOpacity), 35, 20, 20));
@@ -822,12 +814,12 @@ public class PinyonShiftActivity extends SDLActivity implements View.OnClickList
 
             if (bActive) {
                 float a = Math.max(currentBrake, brakeAlpha);
-                vignettePaint.setColor(Color.argb((int) (a * 140 * touchOpacity), 255, 50, 50));
-                canvas.drawRect(w * 0.55f, 0, w, h * 0.52f, vignettePaint);
+                vignettePaint.setColor(Color.argb((int) (a * 40 * touchOpacity), 255, 60, 60));
+                canvas.drawRoundRect(w - dp(44), dp(4), w - dp(4), dp(18), dp(4), dp(4), vignettePaint);
             }
             if (tActive) {
-                vignettePaint.setColor(Color.argb((int) (currentThrottle * 140 * touchOpacity), 92, 230, 139));
-                canvas.drawRect(w * 0.55f, h * 0.52f, w, h, vignettePaint);
+                vignettePaint.setColor(Color.argb((int) (currentThrottle * 40 * touchOpacity), 92, 230, 139));
+                canvas.drawRoundRect(w - dp(44), h - dp(18), w - dp(4), h - dp(4), dp(4), dp(4), vignettePaint);
             }
 
             if (isGyroActive() && showHorizon) {

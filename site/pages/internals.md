@@ -59,7 +59,7 @@ These pages summarize. The engineering record, with every measurement and the re
 | Android | [ANDROID_PORT_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md), [ANDROID_60FPS_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_60FPS_BACKLOG.md), [ANDROID_ODIN_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_ODIN_BACKLOG.md) |
 | Linux and macOS | [LINUX_PORT_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LINUX_PORT_BACKLOG.md), [MACOS.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MACOS.md) |
 | The title update | [TITLE_UPDATE_V4_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/TITLE_UPDATE_V4_BACKLOG.md) |
-| Game internals found so far | [REVERSE_ENGINEERING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/REVERSE_ENGINEERING.md) |
+| Game internals found so far | [Reverse engineering](reverse-engineering.md), [Address index](game-addresses.md) |
 | Other recompilers' optimizations | [RECOMP_OPTIMIZATION_SURVEY.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/RECOMP_OPTIMIZATION_SURVEY.md) |
 
 Measurements on these pages name their machine. Unless stated otherwise, "desktop" is a Ryzen 7 5800X with an RTX 4080 on Windows 11, "Odin" is an AYN Odin 2 Portal (Adreno 740, Turnip), "8 Elite" is a RedMagic Astra (Adreno 830) and "Deck" is a Steam Deck LCD.

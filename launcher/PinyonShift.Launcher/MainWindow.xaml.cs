@@ -12,6 +12,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using PinyonShift.Launcher.Sharing;
 using PinyonShift.Launcher.Updates;
 
 namespace PinyonShift.Launcher;
@@ -59,6 +60,23 @@ public partial class MainWindow : Window
     private static readonly Brush CompleteBrush = new SolidColorBrush(Color.FromRgb(92, 208, 138));
     private static readonly Brush FailedBrush = new SolidColorBrush(Color.FromRgb(225, 110, 95));
 
+    // At 300 % scaling on a 4K screen the work area is about 1280 x 680 DIPs,
+    // smaller than the designed size and minimum: the window went off screen
+    // and could not be resized (#594). Keep both within the screen; the body
+    // scrolls when it no longer fits.
+    private void FitToWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        if (area.Width <= 0 || area.Height <= 0) return;
+        MinWidth = Math.Min(MinWidth, area.Width);
+        MinHeight = Math.Min(MinHeight, area.Height);
+        if (WindowState != WindowState.Normal) return;
+        Width = Math.Min(Width, area.Width);
+        Height = Math.Min(Height, area.Height);
+        Left = Math.Max(area.Left, Math.Min(Left, area.Right - Width));
+        Top = Math.Max(area.Top, Math.Min(Top, area.Bottom - Height));
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -73,6 +91,8 @@ public partial class MainWindow : Window
         }
         VersionRun.Text = $"Pinyon Shift {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "dev"}";
         Loaded += MainWindow_Loaded;
+        SourceInitialized += (_, _) => FitToWorkArea();
+        DpiChanged += (_, _) => FitToWorkArea();
         StateChanged += (_, _) =>
         {
             // A maximized borderless window reaches past the screen edge by the
@@ -718,6 +738,16 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if (string.Equals(result?.Result, "config-unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                SetFailure("The settings file could not be read",
+                    "The game could not read or write its settings file" +
+                    (string.IsNullOrWhiteSpace(result?.Config) ? "" : $" ({result.Config})") +
+                    ". Close other copies of the game, and check that the folder is not read-only " +
+                    "or held by a sync app. To start from default settings, rename the file, then retry.");
+                return;
+            }
+
             DetectPendingReport();
             if (_pendingReport is null && result is not null &&
                 !string.IsNullOrWhiteSpace(result.CrashId) &&
@@ -725,7 +755,7 @@ public partial class MainWindow : Window
                 !string.IsNullOrWhiteSpace(result.IssueUrl))
             {
                 SetPendingReport(new CrashReport(result.CrashId, result.Bundle, result.IssueUrl,
-                    $"0x{unchecked((uint)result.ExitCode):X8}"));
+                    $"0x{unchecked((uint)result.ExitCode):X8}", result.GraphicsDriver, result.GraphicsMemory));
             }
             if (_pendingReport is null)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
@@ -826,6 +856,23 @@ public partial class MainWindow : Window
             HeadlineText.Text = "The graphics driver stopped responding";
             SetSubhead("Install the newest graphics driver. On integrated or older graphics, choose " +
                 "Low-spec 60 or a lower resolution scale in Settings, then play again.");
+        }
+        // The log shows the GPU out of memory (#558, resolution scale 3x):
+        // a lower scale is the fix the player has.
+        else if (report.GraphicsMemory)
+        {
+            HeadlineText.Text = "The graphics card ran out of memory";
+            SetSubhead("Choose a lower resolution scale in Settings (1x or 2x), or the Low-spec 60 " +
+                "preset, then play again. Report the crash if it happens at 1x.");
+        }
+        // The crash was inside the GPU's Vulkan driver: most reports from
+        // Intel graphics are, and a newer driver is the fix the player has.
+        else if (!string.IsNullOrWhiteSpace(report.GraphicsDriver))
+        {
+            HeadlineText.Text = $"The {report.GraphicsDriver} graphics driver crashed";
+            SetSubhead($"The game stopped inside the {report.GraphicsDriver} Vulkan driver. Install the " +
+                "newest driver from the GPU maker's site (Windows Update's is often older). On integrated " +
+                "graphics, also choose Low-spec 60 in Settings. Report the crash if it happens again.");
         }
         CrashIdRun.Text = report.CrashId;
         ShowPanel(View.Crash);
@@ -1075,6 +1122,7 @@ public partial class MainWindow : Window
     // ---- Android (ONE_CLICK_SETUP_BACKLOG A-1 to A-5) -----------------------
 
     private AndroidShare? _androidShare;
+    private bool _androidSharePreparing;
     private string? _adbDevice;
 
     private string? AndroidApk => _repositoryRoot is null ? null
@@ -1136,7 +1184,7 @@ public partial class MainWindow : Window
         AndroidBuildButton.IsEnabled = !_busy && !unavailable;
         AndroidShowButton.IsEnabled = built;
         AndroidSaveButton.IsEnabled = built;
-        AndroidShareButton.IsEnabled = !_busy && built;
+        AndroidShareButton.IsEnabled = !_busy && built && !_androidSharePreparing;
         AndroidShareButton.Content = _androidShare is null ? "Share on Wi-Fi" : "Stop sharing";
         AndroidUsbButton.IsEnabled = !_busy && built;
     }
@@ -1178,7 +1226,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AndroidShareButton_Click(object sender, RoutedEventArgs e)
+    private async void AndroidShareButton_Click(object sender, RoutedEventArgs e)
     {
         if (_androidShare is not null)
         {
@@ -1186,6 +1234,7 @@ public partial class MainWindow : Window
             AndroidStatusText.Text = "Sharing stopped.";
             return;
         }
+        if (_androidSharePreparing) return;
         if (AndroidApk is not { } apk || !File.Exists(apk) || _repositoryRoot is null || _stateRoot is null) return;
         var addresses = AndroidShare.LocalAddresses();
         if (addresses.Count == 0)
@@ -1194,17 +1243,47 @@ public partial class MainWindow : Window
             return;
         }
         var record = ReadAndroidApkRecord();
-        IReadOnlyList<ShareGroup> groups;
-        try { groups = AndroidShareGroups(record?.TitleUpdateV4 == true); }
+        var repositoryRoot = _repositoryRoot;
+        var stateRoot = _stateRoot;
+        // The mods' generated patches, built for the PC's enabled mods as a
+        // launch builds them, so the device gets what the PC plays.
+        var includeMods = AndroidShareContent.EnabledMods(stateRoot).Count > 0;
+        if (includeMods)
+        {
+            _androidSharePreparing = true;
+            RefreshAndroidPanel();
+            AndroidStatusText.Text = "Preparing this PC's mods for the device…";
+            string? modError;
+            if (AndroidShareContent.ToolchainPython(repositoryRoot) is not { } python)
+                modError = "The local Python runtime is missing.";
+            else
+                modError = await AndroidShareContent.BuildModsAsync(python, repositoryRoot, stateRoot,
+                    Path.Combine(repositoryRoot, ".local", "game", "base"),
+                    _gameExecutable is null ? null
+                        : Path.Combine(Path.GetDirectoryName(_gameExecutable)!, "pinyon_shift_fh1_archive_extract.exe"));
+            _androidSharePreparing = false;
+            if (modError is not null)
+            {
+                AppendLog($"{modError} Sharing without the mods.");
+                includeMods = false;
+            }
+            if (_panel != View.Android || _androidShare is not null) { RefreshAndroidPanel(); return; }
+        }
+        ShareContent content;
+        try { content = AndroidShareContent.Build(repositoryRoot, stateRoot, record?.TitleUpdateV4 == true, includeMods); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             AndroidStatusText.Text = $"The game files cannot be read: {ex.Message}";
+            RefreshAndroidPanel();
             return;
         }
+        var groups = content.Groups;
         var share = new AndroidShare(apk, groups, new
         {
             title_update_v4 = record?.TitleUpdateV4 == true,
-            club = record?.TitleUpdateV4 == true && _titleUpdate?.Club == true
+            club = record?.TitleUpdateV4 == true && _titleUpdate?.Club == true,
+            // The PC's enabled mods the share carries, in load order.
+            mods_enabled = content.ModsEnabled
         });
         share.Activity += message => Dispatcher.BeginInvoke(() =>
         {
@@ -1248,51 +1327,6 @@ public partial class MainWindow : Window
         AndroidQrImage.Source = null;
         AndroidCodeText.Visibility = Visibility.Collapsed;
         RefreshAndroidPanel();
-    }
-
-    // What the device can copy: the extracted game, and from the PC's state
-    // the v4 update (for a v4 package), imported DLC, the Rally overlay and,
-    // only when chosen on the device, the save the PC plays.
-    private IReadOnlyList<ShareGroup> AndroidShareGroups(bool titleUpdateV4)
-    {
-        var groups = new List<ShareGroup>();
-        IReadOnlyList<ShareFile> Tree(string source, string destination, Func<string, bool>? include = null)
-        {
-            if (!Directory.Exists(source)) return [];
-            return Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)
-                .Select(path => (path, relative: Path.GetRelativePath(source, path).Replace('\\', '/')))
-                .Where(entry => include?.Invoke(entry.relative) ?? true)
-                .Select(entry => new ShareFile(entry.path, destination + "/" + entry.relative, new FileInfo(entry.path).Length))
-                .ToList();
-        }
-        var game = Path.Combine(_repositoryRoot!, ".local", "game", "base");
-        if (!File.Exists(Path.Combine(game, "default.xex")))
-            throw new IOException($"The extracted game is not at {game}. Build and play on this PC first.");
-        groups.Add(new ShareGroup("game", "game files", true, Tree(game, "game/base")));
-        var state = _stateRoot!;
-        if (titleUpdateV4)
-        {
-            var update = Tree(Path.Combine(state, "title-update-v4"), "state/title-update-v4",
-                name => !name.Contains('/'));
-            if (update.Count > 0) groups.Add(new ShareGroup("title_update_v4", "title update v4", true, update));
-        }
-        var dlc = Tree(Path.Combine(state, "user", "0000000000000000", "4D5309C9"), "state/user/0000000000000000/4D5309C9")
-            .Concat(Tree(Path.Combine(state, "dlc"), "state/dlc",
-                name => name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && !name.Contains('/')))
-            .ToList();
-        if (dlc.Count > 0) groups.Add(new ShareGroup("dlc", "DLC", true, dlc));
-        var rally = Tree(Path.Combine(state, "cache", "rally_adapter"), "state/cache/rally_adapter");
-        if (rally.Count > 0) groups.Add(new ShareGroup("rally", "Rally", true, rally));
-        // The PC plays from user-modded while cheats or mods are on: offer the
-        // tree written last.
-        static bool IsSave(string name) => !name.StartsWith("0000000000000000/", StringComparison.Ordinal);
-        var save = new[] { "user", "user-modded" }
-            .Select(tree => Tree(Path.Combine(state, tree), "state/user", IsSave))
-            .Where(files => files.Count > 0)
-            .OrderByDescending(files => files.Max(file => File.GetLastWriteTimeUtc(file.Source)))
-            .FirstOrDefault();
-        if (save is not null) groups.Add(new ShareGroup("save", "this PC's save", false, save));
-        return groups;
     }
 
     private static string? FindAdb(string? repositoryRoot)
@@ -2442,6 +2476,17 @@ public partial class MainWindow : Window
     private void GraphicsChoice_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateResolutionLine();
 
+    // The resolution line's verb for an output scaling tag. FSR 2 and 3 need
+    // AMD's FidelityFX runtime beside the game; without it they run as FSR 1.
+    private static string UpscalerVerb(string? scaling) => scaling switch
+    {
+        "fsr" => "FSR 1 upscales",
+        "fsr2" => "FSR 2 upscales",
+        "fsr3" => "FSR 3 upscales",
+        "dlss" => "DLSS upscales",
+        _ => "stretched",
+    };
+
     // What the game renders and what reaches the screen, as the in-game
     // display settings say it: the scaled 1280 x 720 image, fitted to the
     // display (or the window) with the chosen output scaling.
@@ -2458,11 +2503,11 @@ public partial class MainWindow : Window
             ResolutionLineText.Text = line + ".";
             return;
         }
-        var fsr = (OutputScalingComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "fsr";
+        var scaling = (OutputScalingComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
         ResolutionLineText.Text = (long)outputWidth * outputHeight == (long)renderWidth * renderHeight
             ? $"{line}, the size of your screen."
             : (long)outputWidth * outputHeight > (long)renderWidth * renderHeight
-                ? $"{line}, {(fsr ? "FSR 1 upscales" : "stretched")} to {outputWidth} × {outputHeight}."
+                ? $"{line}, {UpscalerVerb(scaling)} to {outputWidth} × {outputHeight}."
                 : $"{line}, downscaled to {outputWidth} × {outputHeight}.";
     }
 
@@ -2604,12 +2649,17 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("crash_id")] string? CrashId,
         [property: JsonPropertyName("bundle")] string? Bundle,
         [property: JsonPropertyName("issue_url")] string? IssueUrl,
-        [property: JsonPropertyName("exit_code")] long ExitCode);
+        [property: JsonPropertyName("exit_code")] long ExitCode,
+        [property: JsonPropertyName("config")] string? Config = null,
+        [property: JsonPropertyName("graphics_driver")] string? GraphicsDriver = null,
+        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false);
     private sealed record CrashReport(
         [property: JsonPropertyName("crash_id")] string CrashId,
         [property: JsonPropertyName("bundle")] string Bundle,
         [property: JsonPropertyName("issue_url")] string IssueUrl,
-        [property: JsonPropertyName("exit_code_hex")] string? ExitCodeHex);
+        [property: JsonPropertyName("exit_code_hex")] string? ExitCodeHex,
+        [property: JsonPropertyName("graphics_driver")] string? GraphicsDriver = null,
+        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false);
     private sealed record GraphicsResult(
         [property: JsonPropertyName("backup_path")] string? BackupPath,
         [property: JsonPropertyName("settings")] GraphicsSettings Settings,

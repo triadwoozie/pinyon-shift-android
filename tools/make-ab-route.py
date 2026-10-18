@@ -6,6 +6,11 @@ between two values, merged into the route's own steps in frame order, so one
 run measures both sides under the same thermal and scene conditions (the
 backlogs' in-run A/B method).
 
+With --mark, each toggle is followed one frame later by `perf_aa_toggle`
+set to the window's side (0 or 1), so the perf capture's `aa_toggle` column
+names the side of every frame (tools/summarize-inrun-ab.py). With --setting
+perf_aa_toggle alone, the route is an A/A run: nothing changes but the mark.
+
     make-ab-route.py config/render-tests/fh1-race-start-wait.fh1test \
         --setting gpu_buffer_replay --values false true --every 300 \
         --from 600 --output config/render-tests/fh1-race-start-replay-ab.fh1test
@@ -24,7 +29,8 @@ def step_frame(line: str) -> int | None:
     return None
 
 
-def make(route: str, setting: str, values: tuple[str, str], every: int, start: int) -> str:
+def make(route: str, setting: str, values: tuple[str, str], every: int, start: int,
+         mark: bool = False) -> str:
     lines = route.splitlines()
     header = lines[0]
     body = lines[1:]
@@ -33,6 +39,8 @@ def make(route: str, setting: str, values: tuple[str, str], every: int, start: i
     index = 0
     for frame in range(start, stop, every):
         toggles.append((frame, f"cvar {frame} {setting} {values[index % 2]}"))
+        if mark and setting != "perf_aa_toggle":
+            toggles.append((frame + 1, f"cvar {frame + 1} perf_aa_toggle {index % 2}"))
         index += 1
     merged = []
     pending = list(toggles)
@@ -58,9 +66,11 @@ def main() -> int:
     parser.add_argument("--every", type=int, default=300)
     parser.add_argument("--from", dest="start", type=int, default=600)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--mark", action="store_true",
+                        help="also set perf_aa_toggle to each window's side")
     arguments = parser.parse_args()
     text = make(arguments.route.read_text(encoding="utf-8"), arguments.setting,
-                tuple(arguments.values), arguments.every, arguments.start)
+                tuple(arguments.values), arguments.every, arguments.start, arguments.mark)
     arguments.output.write_text(text, encoding="utf-8")
     print(arguments.output)
     return 0

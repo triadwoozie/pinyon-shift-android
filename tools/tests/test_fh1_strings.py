@@ -26,7 +26,71 @@ def table(strings):
     return header + chunk
 
 
+def game_table(named):
+    """A table laid out as the game's are: strings, IDS_ names, no notes,
+    key order; named is [(IDS_ name, text)] in name-pool order."""
+    keyed = sorted((MODULE.string_key(name), text) for name, text in named)
+    pool = b""
+    entries = b""
+    for key, text in keyed:
+        entries += struct.pack(">HI", key, len(pool) // 2)
+        pool += text.encode("utf-16-be") + b"\x00\x00"
+    entries += struct.pack(">HI", 0xFFFF, len(pool) // 2)
+    pool += b"\x00\x00"
+    strings = struct.pack(">II", 8 + len(entries) + len(pool), len(keyed)) + entries + pool
+    name_pool = b""
+    offsets = {}
+    for name, _ in named:
+        offsets[MODULE.string_key(name)] = len(name_pool)
+        name_pool += name.encode() + b"\x00"
+    position = {MODULE.string_key(name): index + 1 for index, (name, _) in enumerate(named)}
+    records = b"".join(struct.pack(">HHI", key, position[key], offsets[key]) for key in sorted(offsets))
+    names = struct.pack(">II", 8 + len(records) + len(name_pool), len(named)) + records + name_pool
+    order = struct.pack(f">II{len(named)}H", 8 + 2 * len(named), len(named),
+                        *(MODULE.string_key(name) for name, _ in named))
+    header = b"LSB2" + struct.pack(">III", 1 << 24, 2 << 24, 36) + struct.pack(">I", 4)
+    header += struct.pack(">IIII", 36, 36 + len(strings), 0, 36 + len(strings) + len(names))
+    return header + strings + names + order
+
+
 class Fh1StringsTests(unittest.TestCase):
+    def test_string_keys_match_the_game(self):
+        # Pairs read from the game's tables and the Rally database rows.
+        self.assertEqual(MODULE.string_key("IDS_Profile_105"), 0x1477)
+        self.assertEqual(MODULE.string_key("IDS_DisplayName_16"), 0x1854)
+        self.assertEqual(MODULE.table_hash("List_CarMake.str"), 0x3323)
+        self.assertEqual(MODULE.table_hash("Upgrades"), 0x7091)
+        self.assertEqual(MODULE.table_hash("Events.str"), 0x0C15)
+        self.assertEqual(MODULE.string_reference("Upgrades.str", "IDS_Profile_105"),
+                         f"_&{0x70911477}")
+
+    def test_add_strings_round_trips_and_adds_to_every_part(self):
+        data = game_table([("IDS_Make_2", "Second"), ("IDS_Make_1", "First")])
+        self.assertEqual(MODULE.add_strings(data, {}), data)
+        result = MODULE.add_strings(data, {"IDS_Make_New": "Pinyon Motors",
+                                           "IDS_Make_1": "Renamed"})
+        key = MODULE.string_key("IDS_Make_New")
+        self.assertEqual(dict(MODULE.parse(result))[key], "Pinyon Motors")
+        self.assertEqual(dict(MODULE.parse(result))[MODULE.string_key("IDS_Make_1")], "Renamed")
+        self.assertEqual(MODULE.parse_names(result),
+                         [(MODULE.string_key("IDS_Make_2"), "IDS_Make_2"),
+                          (MODULE.string_key("IDS_Make_1"), "IDS_Make_1"),
+                          (key, "IDS_Make_New")])
+        expected = game_table([("IDS_Make_2", "Second"), ("IDS_Make_1", "Renamed"),
+                               ("IDS_Make_New", "Pinyon Motors")])
+        self.assertEqual(result, expected)
+
+    def test_add_strings_refuses_a_key_another_name_holds(self):
+        # Each character is rotated by 7 bits per later character, a full
+        # turn every 16: the same change 16 characters apart cancels.
+        held = "IDS_" + "a" * 17
+        clash = "IDS_b" + "a" * 15 + "b"
+        self.assertEqual(MODULE.string_key(held), MODULE.string_key(clash))
+        data = game_table([(held, "First")])
+        with self.assertRaisesRegex(MODULE.StringTableError, "holds"):
+            MODULE.add_strings(data, {clash: "Clash"})
+
+
     def test_replace_adds_localized_keys_and_keeps_other_text_and_lookup_tail(self):
         original = table([(1, "Keep"), (2, "Old")])
         chunk = original[24:]

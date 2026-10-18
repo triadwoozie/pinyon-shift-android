@@ -17,7 +17,9 @@ Mods live in the state folder, never in the game files. They can replace files, 
   code/<name>.dll        a native mod (optional)
   game/...               whole files that replace the game's (optional)
   members/...            single members of the game's archives
+  add/...                new members added to the game's archives
   merge/...              settings merged by key
+  strings/<lang>/*.toml  new or changed text in the string tables
   db/*.sql               database patches
   textures/<hash>.dds    texture replacements
 ```
@@ -64,9 +66,12 @@ A mod that only changes how the game looks or sounds, and never what it saves, c
 | --- | --- |
 | Whole files (`game/`) | Replace the file with the same path, case-insensitively. The earlier mod in the load order wins |
 | Archive members (`members/<archive>/<member>`) | Before each start, the affected archives are rebuilt from your own copy with only those members replaced |
+| New archive members (`add/<archive>/<member>`) | Appended to the rebuilt archive, for example a new colour grading map in `dynamicpost.zip`. A name the archive already has is refused, as is a `members/` name it lacks |
+| Strings (`strings/<language or ALL>/<Table>.toml`) | `IDS_` names with their text: existing names are changed, new ones added with their key, which the database refers to as `_&N` (`tools/fh1-strings.py`) |
 | Merged settings (`merge/`) | `.ini` keys and `.xml` elements are merged into the file, so several mods can change one settings file |
 | Database (`db/*.sql`) | SQL scripts run in load order on a copy of `media/db/gamedb.slt`, or of the database an enabled mod replaces it with |
-| Textures (`textures/<hash>.dds`) | Find a texture's hash with `--texture_dump_dir`. A replacement keeps the format and may be 2, 4 or 8 times larger. **SETTINGS > MODS > RELOAD TEXTURES** reloads them in game. Not on the default Vulkan renderer yet ([#518](https://github.com/arcanite24/pinyon-shift/issues/518)) |
+| New cars (`tools/clone-fh1-car.py`) | A spec of cars that reuse an existing model with their own name, price, power and listed class becomes a `db/` script and `strings/` names. Once bought, the game rates a car from its physics, so a listed index should be the one the owned car shows. Clones upgrade and paint like any car; bought cars stay in the modded profile, which still loads if the mod is removed |
+| Textures (`textures/<hash>.dds`) | Find a texture's hash with `--texture_dump_dir`. A replacement keeps the format and may be 2, 4 or 8 times larger. **SETTINGS > MODS > RELOAD TEXTURES** reloads them in game. On a GPU without BC formats (most Android GPUs) only 8_8_8_8 replacements apply |
 
 For example, a merge that removes free-roam traffic:
 
@@ -103,6 +108,8 @@ Pinyon Shift never downloads XE itself: ModDB doesn't allow automated downloads,
 
 The archives are checked against ModDB's sizes and MD5s, and only the files that differ from your game are kept (2.4 GB; 7 GB free is needed while installing). XE runs on the base disc build, hides Horizon Rally and plays its own new save in `<state>/user-xe`, as its readme asks. Your own save isn't touched. `xe disable` turns it off and `xe remove` deletes its files but keeps its save.
 
+The archives are extracted with [7-Zip](https://www.7-zip.org) when it is installed, otherwise with the system `tar`. Some Windows `tar.exe` builds can't read XE's LZMA archives; the install then stops before extracting and asks you to install 7-Zip and choose **Install XE** again.
+
 ## Native mods
 
 A native mod is a DLL built against [`include/pinyon_mod.h`](https://github.com/arcanite24/pinyon-shift/blob/dev/include/pinyon_mod.h). It exports two functions:
@@ -115,7 +122,7 @@ PINYON_MOD_EXPORT int rex_mod_create(const PinyonModApi* api, PinyonMod* mod);
 Through the API a mod can:
 
 - Subscribe to hook points: frame tick, the player's vehicle pose, save encrypt and decrypt, file open, pause menu buttons.
-- Read and write guest memory, and look up symbols and offsets by name. Mods never hard-code addresses.
+- Read and write guest memory, and look up functions, hook sites and offsets by name instead of hard-coding them. The table does not name data globals yet, so the [Game objects](game-objects.md) examples give the two they need for both executables.
 - Call guest functions from a guest task on the game's main thread.
 - Register settings and rebindable keys, show dialogs and write to the log.
 - Draw HUD labels, add rows to **SETTINGS > MOD ACTIONS** and replace text in the game's string tables.

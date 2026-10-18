@@ -56,11 +56,11 @@ ARCHIVES = {
     "1.0": {"file": "Forza_Horizon_1_XE_Mod_v1.0.7z", "size": 2043853238,
             "md5": "935a8562ebcc29cb3c2277c978bd687b",
             "page": "https://www.moddb.com/mods/forza-horizon-xe-mod/downloads/"
-                    "forza-horizon-1-xe-mod-v10"},
+                    "forza-horizon-1-xe-mod-v1-0"},
     "1.01": {"file": "FH1XE_v1.01_hotfix.7z", "size": 1642312261,
              "md5": "a5cbfd944c9bc748c520a35c221a56f3",
              "page": "https://www.moddb.com/mods/forza-horizon-xe-mod/downloads/"
-                     "fh1-xe-v101-hotfix"},
+                     "forza-horizon-1-xe-mod-101-hotfix"},
 }
 # Extracted files that are not game data, or are the author's leftovers.
 SKIPPED_NAMES = {"media/db/gamedb - copy.slt"}
@@ -172,8 +172,9 @@ def open_pages(quiet: bool) -> None:
 
 
 def find_extractor() -> list[str]:
-    """7-Zip, else libarchive's bsdtar (Windows 10's tar.exe, macOS's tar and
-    SteamOS's bsdtar are libarchive and read XE's LZMA2 archives)."""
+    """7-Zip, else libarchive's bsdtar (Windows' tar.exe, macOS's tar and
+    SteamOS's bsdtar are libarchive). Some Windows tar.exe builds lack the
+    LZMA codec XE's archives need, so extract() probes tar first."""
     for name in ("7zz", "7z", "7za"):
         if found := shutil.which(name):
             return [found, "x", "-y", "-bso0", "-bsp0"]
@@ -193,16 +194,44 @@ def find_extractor() -> list[str]:
                   "(p7zip, 7zip) or libarchive's bsdtar (libarchive-tools)")
 
 
+NEEDS_7ZIP = ("this computer's tar cannot read XE's LZMA archives; install 7-Zip "
+             "from https://www.7-zip.org and choose Install XE again")
+
+
+def is_7zip(extractor: list[str]) -> bool:
+    return Path(extractor[0]).stem.lower().startswith("7z")
+
+
+def tar_failure(archive: Path, output: str) -> XeError:
+    if "lzma" in output.lower() or "unsupported" in output.lower():
+        return XeError(f"could not extract {archive.name}: {NEEDS_7ZIP}")
+    return XeError(f"could not extract {archive.name}: {output.strip()[-400:]}")
+
+
+def probe(extractor: list[str], archive: Path) -> None:
+    """Fail fast when tar lacks a codec the archive needs: listing reads the
+    archive's encoded header, so it hits the same error before any file is
+    written."""
+    if is_7zip(extractor):
+        return
+    completed = subprocess.run([extractor[0], "-tf", str(archive)],
+                               capture_output=True, text=True)
+    if completed.returncode:
+        raise tar_failure(archive, completed.stderr or completed.stdout)
+
+
 def extract(extractor: list[str], archive: Path, destination: Path) -> None:
     destination.mkdir(parents=True)
-    if Path(extractor[0]).stem.lower().startswith("7z"):
+    if is_7zip(extractor):
         command = extractor + [f"-o{destination}", str(archive)]
     else:
         command = extractor + [str(archive), "-C", str(destination)]
     completed = subprocess.run(command, capture_output=True, text=True)
     if completed.returncode:
-        raise XeError(f"could not extract {archive.name}: "
-                      f"{(completed.stderr or completed.stdout).strip()[-400:]}")
+        output = completed.stderr or completed.stdout
+        if not is_7zip(extractor):
+            raise tar_failure(archive, output)
+        raise XeError(f"could not extract {archive.name}: {output.strip()[-400:]}")
 
 
 def index_tree(root: Path) -> dict[str, tuple[str, Path]]:
@@ -294,6 +323,8 @@ def install(args: argparse.Namespace) -> dict:
     if free_gb < FREE_SPACE_GB:
         raise XeError(f"{FREE_SPACE_GB} GB free is needed under {mods} ({free_gb:.1f} GB free)")
     extractor = find_extractor()
+    for version in sorted(versions):
+        probe(extractor, versions[version])
     staging = mods / f".{MOD}-staging"
     if staging.exists():
         shutil.rmtree(staging)

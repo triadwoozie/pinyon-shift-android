@@ -59,6 +59,25 @@ class PinyonXeTests(unittest.TestCase):
         values.update(extra)
         return argparse.Namespace(**values)
 
+    def test_pages_use_moddbs_current_slugs(self):
+        self.assertTrue(pinyon_xe.ARCHIVES["1.0"]["page"].endswith(
+            "/downloads/forza-horizon-1-xe-mod-v1-0"))
+        self.assertTrue(pinyon_xe.ARCHIVES["1.01"]["page"].endswith(
+            "/downloads/forza-horizon-1-xe-mod-101-hotfix"))
+
+    def test_tar_without_lzma_fails_fast_with_7zip_advice(self):
+        failed = mock.Mock(returncode=1, stdout="",
+                           stderr="tar.exe: LZMA codec is unsupported")
+        with mock.patch.object(pinyon_xe.subprocess, "run", return_value=failed) as run:
+            with self.assertRaisesRegex(pinyon_xe.XeError, "install 7-Zip"):
+                pinyon_xe.probe(["tar.exe", "-xf"], Path("xe.7z"))
+        self.assertEqual(run.call_args.args[0][1], "-tf")
+
+    def test_probe_skips_7zip(self):
+        with mock.patch.object(pinyon_xe.subprocess, "run") as run:
+            pinyon_xe.probe(["7z", "x"], Path("xe.7z"))
+        run.assert_not_called()
+
     def test_installs_the_files_that_differ_with_the_hotfix_over_1_0(self):
         with tempfile.TemporaryDirectory() as directory:
             game, state, downloads, archives, extract = self.make(Path(directory))

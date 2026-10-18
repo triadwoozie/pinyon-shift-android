@@ -20,10 +20,27 @@ jobs:
       - name: Check repository boundary
         shell: powershell
         run: .\tools\check-repository-boundary.ps1
+      - name: Provision the pinned Python
+        # The save, crash and title-update wrappers run pinyon.py on the
+        # player's pinned runtime (tools/release-common.ps1 Get-PinyonPython).
+        shell: powershell
+        run: |
+          . ./tools/release-common.ps1
+          $python = (Get-PinyonReleaseToolchain).python
+          $root = Resolve-PinyonLocalPath -RelativePath $python.install_path
+          $archive = Join-Path $env:RUNNER_TEMP 'python-embed.zip'
+          Invoke-PinyonDownload -Uri $python.url -Destination $archive -Sha256 $python.sha256
+          [void](New-Item -ItemType Directory -Force -Path $root)
+          Expand-PinyonZip -Archive $archive -Destination $root
       - name: Test release tooling
         run: python -m unittest discover -s tools/tests -p "test_*.py"
       - name: Check tracked Markdown links
         run: python tools/check-markdown-links.py
+      - name: Build the docs site
+        # Catches broken reverse-engineering records, links and diagrams.
+        run: |
+          python -m pip install -r site/requirements.txt
+          python site/build.py --out "$env:RUNNER_TEMP/site"
       - name: Build launcher
         run: dotnet build launcher/PinyonShift.Launcher/PinyonShift.Launcher.csproj -c Release
       - name: Build Linux and macOS launcher

@@ -25,6 +25,8 @@ namespace pinyon_shift::fh1_render_test {
 // with its deterministic controller stream. Invalid requests fail the process.
 void Configure(rex::RuntimeConfig& config);
 bool Enabled();
+// The route records the native mix (audiocapture), so the audio probe runs.
+bool WantsAudioCapture();
 std::filesystem::path OutputDirectory();
 
 // Called at the final guest-output boundary. Returns false because validation

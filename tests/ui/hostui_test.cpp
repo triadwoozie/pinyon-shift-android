@@ -10,6 +10,7 @@
 #include "ui/hostui/fh1_archive.h"
 #include "ui/hostui/glyph_atlas.h"
 #include "ui/hostui/menu.h"
+#include "ui/hostui/pad_glyphs.h"
 #include "ui/hostui/vector_font.h"
 #include "ui/hostui/xds_texture.h"
 
@@ -401,6 +402,33 @@ int DumpAtlas(const char* fonts_zip, const char* member, float pixels_per_em, co
   return 0;
 }
 
+void TestPadGlyphs() {
+  for (PadGlyph glyph : {PadGlyph::kCross, PadGlyph::kCircle, PadGlyph::kSquare,
+                         PadGlyph::kTriangle}) {
+    const int size = 64;
+    const auto rgba = RasterizePadGlyph(glyph, size);
+    CHECK(rgba.size() == size_t(size * size * 4));
+    const auto at = [&](int x, int y) { return &rgba[(size_t(y) * size + size_t(x)) * 4]; };
+    // Corners outside the disc are transparent; the disc is opaque.
+    CHECK(at(0, 0)[3] == 0);
+    CHECK(at(size - 1, size - 1)[3] == 0);
+    CHECK(at(size / 2, 4)[3] == 255);
+    // Some pixels are mark (light), some are disc (dark).
+    int light = 0, dark = 0;
+    for (int i = 0; i < size * size; ++i) {
+      if (rgba[size_t(i) * 4 + 3] < 255) continue;
+      (rgba[size_t(i) * 4] > 200 ? light : dark)++;
+    }
+    CHECK(light > 100);
+    CHECK(dark > light);
+  }
+  // A cross crosses at the centre; a circle's centre is empty.
+  const auto cross = RasterizePadGlyph(PadGlyph::kCross, 64);
+  const auto circle = RasterizePadGlyph(PadGlyph::kCircle, 64);
+  CHECK(cross[(32 * 64 + 32) * 4] > 200);
+  CHECK(circle[(32 * 64 + 32) * 4] < 100);
+}
+
 int main(int argc, char** argv) {
   if (argc == 7 && std::string(argv[1]) == "--dump-atlas") {
     return DumpAtlas(argv[2], argv[3], std::stof(argv[4]), argv[5], argv[6]);
@@ -409,6 +437,7 @@ int main(int argc, char** argv) {
   TestVectorFont();
   TestTextures();
   TestMenu();
+  TestPadGlyphs();
   if (failures) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

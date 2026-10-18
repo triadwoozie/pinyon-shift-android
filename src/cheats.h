@@ -25,8 +25,19 @@ double TimeScale();
 // value when it leaves the title's clock alone (cheat_time_of_day).
 double TimeOfDaySeconds();
 
+// How long a day lasts (cheat_day_length_minutes, #483): minutes per
+// 24 game hours, kLocalClock to follow this PC's clock, or 0 to leave the
+// title's own rate. A held time of day wins over it.
+constexpr double kLocalClock = -1.0;
+double DayLengthMinutes();
+
 // Whether the cameras should be the title's free camera (cheat_free_camera).
 bool FreeCamera();
+
+// Whether events ignore their car restrictions (cheat_any_car_events): each
+// event loads without its make, year and other EventRestrictions limits, and
+// without the limit its class (Events.TargetClass) adds to them.
+bool AnyCarInEvents();
 
 // The cheats currently changing the game, as "name=value" pairs separated by
 // commas ("" when none), for the modded profile's save tag.

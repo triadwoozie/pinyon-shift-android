@@ -1,0 +1,820 @@
+# Rendering: how Forza Horizon builds a frame on the Xenos GPU.
+# Rendered by site/build.py on the rendering reverse-engineering page.
+
+# ---------------------------------------------------------------------------
+# Frame structure and views
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Frame structure and views"""
+name = """race frame structure"""
+what = """A race frame issues 2,900-7,400 draws (typically about 4,500-5,100), about 20 clears and 60-95 resolves. By target, the 4x MSAA main scene takes about 61 % of the draws, a 1280-wide 1x depth-only pass 18 % and the 1040-pitch `D24S8` depth pass 11 %; the rest are small passes. A race-start frame ran, in order: about 1,080 draws into a `D24S8` depth target, 1,090 into a float-depth target, 200 into 2x MSAA color and depth targets, then 2,580 main-scene draws at 4x. The frame splits into about 265-300 runs of draws into one target, and about 4 % of race draws can write no depth, stencil or color."""
+how = """Frame census, per-target draw counts, a RenderDoc capture of a race-start frame and executor counters on desktop and Android."""
+confidence = """confirmed"""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/PERFORMANCE_BACKLOG.md PB-2.11, PB-2.6; docs/ANDROID_ODIN_BACKLOG.md Shader specialization; docs/ANDROID_PORT_BACKLOG.md AP-7.0"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """draws per frame by game mode"""
+what = """Average draws per frame: boot 50, title and menus 841, free roam 3,225, event menus and car select 2,424, race 4,508, race pause 1,885, pause after a retire 3,569, return to title 99, movies 53, map 631, photo mode 1,226. Distinct shader pairs per mode range from 5 (movies) to 260 (photo mode). Heavy race starts reach 6,000-7,400 draws, a Carson race (Hot Hatch Hustle) about 7,400."""
+how = """Metadata-only census of every draw, clear, copy and swap over 17,580 frames of scripted routes in 60-frame windows; later performance counters on race routes."""
+confidence = """confirmed"""
+note = """Mode boundaries are approximate to the 60-frame window."""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Per-mode scale; docs/DESKTOP_RENDERER_BACKLOG.md; docs/native-renderer/archive/CARSON_GEOMETRY_CACHE_FIX.md"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """race frame workload"""
+what = """Per race frame the title uploads about 20 MB of vertex data in 630 requests, 2.7 MB of index data and 2.5 MB of texture data. About 88 texture loads a frame come from earlier resolves (15.3 of 53 million fetches over a run, the 3.7 MB front buffer included). 98 % of render-target binds repeat the current one, and float constant uploads gather about 22 registers in 7 runs each."""
+how = """Per-frame counters over `fh1-race-sync` (12.2 million draws)."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-2.0, NP-2.1, NP-2.2, NP-2.8, NP-12.4"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """command stream repetition"""
+what = """A race frame executes 680-1,740 indirect buffers carrying 0.96-1.85 million PM4 dwords, about 3.6 draws a buffer. 96-98 % of the buffers are byte-identical to the previous frame's at the same address (none changes in place; the rest are new addresses). 86-91 % of draws repeat their previous execution's register state, but only 4-15 % also repeat their float constants, because the camera globals change every frame. No two consecutive draws share enough state to be batched."""
+how = """Decoder census hashing every indirect buffer and every draw's state; consecutive-run census."""
+confidence = """confirmed"""
+source = """docs/PERFORMANCE_BACKLOG.md Final pass; docs/DESKTOP_RENDERER_BACKLOG.md DR-0.3, DR-4.2; docs/native-renderer/RESEARCH.md Procedural models, visibility and batching"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """shader constant sources"""
+what = """About 700,000 constant dwords are written per race frame: about 90 % as register writes inside the command buffers (repeating with them) and about 10 % as one 16-dword `LOAD_ALU_CONSTANT` per draw (a 4x4 matrix, 3,300-6,000 a frame); inline `SET_CONSTANT` is never used. About 120 float registers (the frame globals) change at most four times a frame and about 200 carry the per-object changes. A draw carries about 17 register runs (167 float, 25 fetch and 35 other words), and the title often rewrites constants with unchanged values. `SCRATCH_REG6` is written 2-4 times a draw and never written back."""
+confidence = """confirmed"""
+note = """Resolved by NN-0.10 (Odin race, 2026-10-13): about 5,130 `LOAD_ALU_CONSTANT` packets a frame load 83,570 dwords (about 16 each) from only about 290 distinct sources (address, type and size), and no load in the race found its source data changed since its previous load. The 16-dword loads are static shader tables referenced from the repeating command buffers, as "engine side of the display lists" says, not a new matrix per draw; the census that found new contents every frame is wrong. The per-object changes travel as register writes in the calling segments."""
+how = """Decoder counts in 600-frame windows; register-elision and entry census; `LOAD_ALU_CONSTANT` source census keyed by address, type and size with a data hash (`gpu_replay_floor_probe`, NN-0.10)."""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-4.1; docs/PERFORMANCE_BACKLOG.md Final pass, PB-7.1, PB-2.6; docs/RECORDER_PER_DRAW_BACKLOG.md PD-0, PD-1.6; docs/NEAR_NATIVE_RESEARCH.md NN-0.10"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """CPU-visible packets per frame"""
+what = """Besides about 4,500 draws, a race frame's PM4 stream holds about 280 `EVENT_WRITE_EXT` (screen extents, constant), 25-30 `EVENT_WRITE_SHD` fences, 5 interrupts and one swap. With the guest vblank interrupt, guest callback code runs about 7 times per 8.33 ms frame."""
+how = """Decoder packet census; critical-region contention counters."""
+confidence = """confirmed"""
+source = """docs/PERFORMANCE_BACKLOG.md PB-2.11, PB-4.5"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """primitive types"""
+what = """Over all modes: triangle strips 16.9 million draws, triangle lists 3.5 million, quad lists 3.3 million, point lists 0.81 million and rectangle lists 0.44 million. No line, fan, polygon or tessellated draws occur. Quad lists appear only in 3D scenes (about 660 draw records in a race dump, 580 in free roam, none on the title or in photo mode), while rectangle lists appear in every frame (27-95)."""
+how = """Frame census over 17,580 frames plus 10,980 on later routes; census of the golden frame dumps."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Primitives, front buffer, side effects; docs/NATIVE_PORT_BACKLOG.md NP-2.5"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """front buffer and HUD"""
+what = """Every swap presents a 1280x720 `2_10_10_10_AS_16_16_16_16` front buffer (tiled, little-endian `2_10_10_10` words with red in the high bits); `VdSwap` accepts 8888 or `2_10_10_10_AS_16` front buffers. The tone map writes the front buffer as `2_10_10_10`, then the HUD is drawn last into it through its `2_10_10_10_AS_10_10_10_10` view, with the viewport transform on."""
+how = """Census of swaps, frame dumps and a one-frame draw log (`fh1_draw_log_frame`); dividing the HUD draws' NDC x kept the HUD in proportion at 2560x1080 and 3840x1080."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Primitives, front buffer, side effects; docs/NATIVE_PORT_BACKLOG.md NP-4.4; docs/native-renderer/FH1_RENDER_TEST_AUTOMATION.md Frame dumps; docs/DESKTOP_RENDERER_BACKLOG.md DR-5.4"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """occlusion queries only while loading"""
+what = """The game's occlusion queries use `EVENT_WRITE_ZPD`: 1,056 events over 48 report addresses, all in two windows, the title-to-free-roam load and the event menus. Race, free roam, map, pause, photo and movie frames issue none, and no draw runs inside a legacy query. The race frame has 24 indirect point draws that write nothing, possibly query probes. At startup one query is ended in a later command buffer than the one it began in."""
+how = """Frame census; an Android counter of query ends (0 in the race); a Vulkan validation message at startup."""
+confidence = """confirmed"""
+note = """That the point draws are query probes is a guess."""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Primitives, front buffer, side effects; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-06; docs/ANDROID_60FPS_BACKLOG.md A60-E10; docs/RECORDER_PER_DRAW_BACKLOG.md Validation"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """no memory export"""
+what = """No draw uses memexport in any censused mode: boot, menus, free roam, races, pause, map, photo mode, movies, rewind and the Autoshow."""
+how = """Per-draw census flag over every route, on both renderers."""
+confidence = """confirmed"""
+note = """Night, weather, the livery editor and multiplayer screens were not censused."""
+negative = true
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Primitives, front buffer, side effects"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """FMV YUV draw and composite"""
+what = """Movies play as a YUV draw (vertex shader `7156CE05`, pixel `31511D87`, three 8-bit planes) followed by a composite pass (`20A41D46`/`5F479FC4`). When `FMV_04` loops, the title skips the YUV draw for about 35 output frames (0.8 s) while the composite still draws, which shows solid green (0, 77, 0): YUV planes of zero convert to green. The title loop with its movie removed shows black."""
+how = """Per-frame census during story movies played from a linked mirror of the game files; same result at 30 fps."""
+confidence = """confirmed"""
+note = """Shader keys are our translator's hashes."""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-2.9"""
+
+[[finding]]
+group = """Frame structure and views"""
+base = """0x823E22F4, sub_823E22C8, sub_823EAED0"""
+v4 = """0x8241228C"""
+name = """viewport aspect and culling frustum"""
+what = """`sub_823E22C8` returns a viewport's width / height in f1 (width at +8, height at +12). `sub_823EAED0` builds the culling frustum from it and the camera's field of view, and the projection uses the same value. The main view is 1280x720; render-to-texture views (car thumbnails, reflections) have their own aspect. Scaling the main view's aspect at the return widens rendering and culling together (Hor+)."""
+how = """Mid-function hook at the return logging callers, then scaling the value; checked in a 2560x1080 window and on `fh1-buy-car`. Scaling the camera matrices the GPU receives was abandoned: some transforms escape them and culling disagrees."""
+confidence = """confirmed"""
+issue = """#363"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-4.4; config/rexglue/analysis/main-xex.toml midasm_hook 0x823E22F4; src/pinyon_shift_runtime_hooks.cpp PinyonShiftViewportAspect"""
+
+[[finding]]
+group = """Frame structure and views"""
+base = """0x829A48F4, 0x8263AE18, sub_829A4860, sub_8263AB90"""
+v4 = """0x82A58E34, 0x826E30A8, sub_82A58DA0, sub_826E2E20"""
+name = """gameplay and pause-map projections"""
+what = """The gameplay camera view is projected from `sub_829A4860` (its aspect call returns to `0x829A48F4`). The pause map projects through the same main view from `sub_8263AB90` (return `0x8263AE18`), and once opened in free roam the map's view keeps running. The map image, title, menus, Autoshow and loading frames are the title's own 16:9 layers."""
+how = """Return addresses seen at the viewport-aspect hook; widened frames showed clamped texture beside the map."""
+confidence = """confirmed"""
+issue = """#363"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftViewportAspect, UpdateMapView; config/rexglue/analysis/main-xex.toml midasm_hook 0x823E22F4"""
+
+[[finding]]
+group = """Frame structure and views"""
+base = """0x8284EF94, sub_8284EF90"""
+v4 = """0x828FF264"""
+name = """camera vertical field of view"""
+what = """`sub_8284EF90` returns a camera's vertical field of view in radians, read from the camera at +304, to the frustum and projection code, for every camera. The default comes from data (`CameraSettings.ini` in `camera.zip`, for example 48.5 degrees for the low chase camera)."""
+how = """Mid-function hook at the return scaling f1 live (90 to 130 %)."""
+confidence = """confirmed"""
+note = """The v4 address is the hook site at the return."""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-4.4; config/rexglue/analysis/main-xex.toml midasm_hook 0x8284EF94; src/pinyon_shift_runtime_hooks.cpp PinyonShiftCameraFieldOfView"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """scene world-view-projection constants"""
+what = """Scene vertex shaders read the object's world-view-projection matrix from vertex float constants `c128`-`c131`, one row each for clip x, y, z and w (clip = matrix times position). The static world shares one matrix: the largest group of equal matrices in a free-roam frame is 600-660 draws. Because the world matrix of static geometry does not change, the previous frame's matrix times the inverse of the current one is the camera's own reprojection; over six static groups it agreed within 6e-4 while driving. Each predicated tile replays the same draws with the same matrices. The lens follows from the matrix: the y row's length is 1 / tan(fov_y / 2), 48.5 degrees for the low chase camera (the `CameraSettings.ini` value), and the z and w rows give the near plane 0.3 and the far plane about 19,960-20,000."""
+how = """Probe build logging the constants of every depth-tested draw, group census across frames, and the UP-1.4 motion vectors built from it, which keep the static world sharp under FSR 3."""
+confidence = """confirmed"""
+source = """docs/UPSCALING_BACKLOG.md UP-1.3, UP-1.4; ShiftGlue src/graphics/vulkan/fh1_camera.cpp"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """car world-view-projection constants"""
+what = """Car draws (body, wheels, lights, interior: about 520 draws from 60-odd vertex shaders a frame on the free-roam drive) do not read the camera's `c128`-`c131`; they read their own world-view-projection from vertex float constants `c0`-`c3`, in the same row layout (clip = matrix times position) and without the projection jitter. They test and write the scene's `D24FS8` depth but draw into a colour target other than the world's, with alpha blending (`RB_BLENDCONTROL0` `0x00000706`), so a filter on the scene colour target or on opaque blending misses every car. A mesh's four wheels share one vertex shader and vertex buffer, told apart only by their order among that mesh's draws, which is the same every frame. Static props drawn with `c0`-`c3` reproject like the camera within 1/4096 of clip space."""
+how = """Probe build logging each depth-tested draw's targets, blend state and constant bitmap for one frame, then UP-1.7 object motion from these matrices: in the motion view the player's car comes out still in the chase camera and other cars move on their own, and FSR 3 keeps their edges clean."""
+confidence = """confirmed"""
+source = """docs/UPSCALING_BACKLOG.md UP-1.7; ShiftGlue src/graphics/vulkan/fh1_camera.cpp"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """camera position constants"""
+what = """Alongside the matrix, scene vertex constant `c158` holds the camera's world position, `c11` a position near the player car, and `c132.x` 20000, the far plane."""
+how = """Probe build comparing the constants with the camera motion over a drive."""
+confidence = """probable"""
+source = """docs/UPSCALING_BACKLOG.md UP-1.3"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """scene turned 180 degrees with reversed depth"""
+what = """The main scene is drawn turned 180 degrees: its clip x and y are the screen's negated, so a screen pixel's scene depth is at the opposite pixel of the 1280x720 surface, and a later pass turns the picture back. Its stored depth is reversed (1 near, 0 at the far plane), but the matrix's clip z is the usual D3D depth; the reversal is 1 minus it, so it comes from the depth range, not the projection. The scene depth is the 1280-pitch `D24FS8` area at EDRAM base `0x400`, one 256-row band per predicated tile."""
+how = """Copying each tile's depth band at its resolve and comparing it with the frame: it matches only turned 180 degrees. Motion vectors from the matrices are right only with the clip x and y negated and z = 1 - stored depth."""
+confidence = """confirmed"""
+note = """The register setting that reverses the depth range was not looked up; "comes from the depth range" is inferred from the matrix."""
+source = """docs/UPSCALING_BACKLOG.md UP-1.3; ShiftGlue src/graphics/vulkan/command_processor.cpp kSwapCameraSource"""
+
+# ---------------------------------------------------------------------------
+# Render targets and EDRAM
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """render surface configurations"""
+what = """The game uses 29 EDRAM surface configurations across its modes, 11 more in the Autoshow, showroom and thumbnail studio. A surface never has more than one color target: multiple render targets never occur. The main scene is 1280-pitch 4x MSAA `2_10_10_10_FLOAT` (7e3) or its `_AS_16_16_16_16` alias over `D24FS8` depth. Other formats are `2_10_10_10`, `8_8_8_8`, `8_8_8_8_GAMMA`, `32_FLOAT` and `16_16_16_16` (photo mode), at pitches from 80 to 1280 and 1x, 2x and 4x MSAA. The 1280 and 1040 depth-only 1x surfaces and the 1040-pitch `D24S8` surface are the shadow phases."""
+how = """Census of surface registers (pitch, MSAA, color and depth format) over all routes; executor surface counters."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Render surfaces, Routes added later; docs/LOW_SPEC_BACKLOG.md LS-0.4"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """main scene predicated tiling"""
+what = """The 720-row main scene is drawn in three D3D predicated tiles (EDRAM bands): rows 0-256, 256-512 and 512-720, with bin selects `3`, `C` and `30`, replaying the same command buffers for each tile. Objects carry bin masks (`8`, `A`, `28` and others) and their own predicated sub-buffers; packets predicated on a whole tile's mask set that tile's window offset, scissor and resolve destination. Each band reuses one 1280x512 4x color and depth area. Sky, race line, particles and a depth-tested view strip interleave between the scene lists in every band."""
+how = """Census and per-draw logs of bin mask and select, window offset and resolve registers; a host merge of the tiles reproduced drive, race, map and photo captures without seams."""
+confidence = """confirmed"""
+source = """docs/ANDROID_ODIN_BACKLOG.md Predicated tiling rendered once; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """per-band culling"""
+what = """The game culls per tile. In one census race window the three bands issued 17,401, 30,145 and 44,864 draws with 35, 36 and 54 shader pairs, only 30 in common. Running the bands once into a full surface cannot reproduce the frame, and replaying every band's list unclipped redraws objects that span bands."""
+how = """Census of the race window at frames 4801-4860; a band-merge experiment, not kept."""
+confidence = """confirmed"""
+negative = true
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-09 band merge"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """NonTiling scenario drops the static world"""
+what = """Selecting the game's own `NonTiling` value for the `TilingScenario` render setting makes the static world disappear. Only the tiled path draws the full scene."""
+how = """Hook on the tiling-scenario load selecting NonTiling; captures on Vulkan and D3D12."""
+confidence = """confirmed"""
+negative = true
+source = """docs/ANDROID_ODIN_BACKLOG.md Predicated tiling rendered once"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """EDRAM aliasing"""
+what = """Several surfaces share EDRAM. The 1280x720 1x depth-stencil at EDRAM base 0 (pitch 16 tiles) is reused as a 640x360 4x MSAA depth, the console technique for quarter-resolution transparencies against full-resolution depth, and the frame switches between the two layouts 4-5 times. Color formats 3 and 12 (`0x00030000`/`0x000C0000`) alias one base, and isolating either removes complementary content. Other pairs: 2x and 4x depth at base 128, base 128 4x with base 1024 4x, and color at tile 720 reused as depth at base 128 (2x) and base 0 (4x). The 4x pass writes depth over all 720 tiles in nearly every binding (11,400 of 11,540)."""
+how = """Frame census, executor transfer census and a one-frame operation log; isolation experiments in the race pilot."""
+confidence = """confirmed"""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-2.1 transfer census; docs/PERFORMANCE_BACKLOG.md Where the frame stands; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/ANDROID_ODIN_BACKLOG.md Shaders without preambles"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+name = """stencil use per depth surface"""
+what = """Both scene depth surfaces (`D24FS8` at tile 1024, 4x, pitch 1280, and at tile 0, 1x) enable stencil on nearly every draw and write nonzero stencil in every race window, with REPLACE and per-object references such as `0x15`, `0x18` and `0x03` under write mask `0xFF`; color-to-depth transfers make all eight bits possible. The `D24S8` surface at tile 720 (pitch 1040) and the 2x `D24FS8` at tile 128 (pitch 320) never write nonzero stencil. The car's rear overlay is stencil-rejected, and a stencil-only draw on the 4x depth runs with clipping off and the D3D9 default 8192 scissor."""
+how = """Stencil census over 10 race windows (`tools/summarize-fh1-stencil-census.py`); one-frame operation log."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_PERFORMANCE_BASELINES.md Race frame cost breakdown; docs/NATIVE_PORT_BACKLOG.md NP-2.0, NP-2.4; docs/DESKTOP_RENDERER_BACKLOG.md DR-2.1 unclipped draw extents; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts"""
+
+[[finding]]
+group = """Render targets and EDRAM"""
+base = """vertex shader 1E6883FCCDE1F688"""
+name = """depth-only rectangle clear"""
+what = """The game clears depth with a non-indexed rectangle-list draw of one vertex program and no pixel program, writing depth only. Its main target is a 4x `D24S8` view (base tile 720, pitch 13 tiles) of the 1x `D24S8` shadow-phase surface, cleared four times a frame."""
+how = """Draw hook at the GPU boundary with register and vertex inspection; a full-frame audit of the target. A shader pack missing this shader showed green glow on car reflections."""
+confidence = """confirmed"""
+note = """The CPU routine that emits these packets was not identified. The shader key is our translator's hash."""
+source = """docs/native-renderer/archive/OWNED_DEPTH_CHAIN_CONTRACT.md Boundary and identity; docs/native-renderer/SHADER_PACK_FORMAT.md Runtime gate"""
+
+# ---------------------------------------------------------------------------
+# Resolves
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Resolves"""
+name = """resolve kinds"""
+what = """The game uses 20 kinds of resolve (EDRAM copy), 10 more in the Autoshow and thumbnail routes. Scene color resolves average all four samples (sample mode 6) into `2_10_10_10` UNORM with exponent bias -2 (`RB_COPY_DEST_INFO=0x003E0382`). 1x float resolves to small sizes (128x128 down to 32x16, the bloom and luminance levels) and 2x float resolves to 256x256 use bias -4. No resolve writes a block-compressed format. A frame has about 60 to 92 resolves; a race route touches about 117 distinct resolved ranges and the car purchase 154. Some post-chain addresses are sampled under several formats, and 1280x720 resolve targets are fetched both with and without packed mips."""
+how = """Census of copy registers; frame dumps; tracing of resolved ranges; texture reload probe."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Resolves; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/DESKTOP_RENDERER_BACKLOG.md DR-0.5; docs/ANDROID_ODIN_BACKLOG.md The last reloads"""
+
+[[finding]]
+group = """Resolves"""
+base = """guest phys 0x1C4E1000, 484626432 (0x1CE2D000), 497831936 (0x1DAC5000)"""
+name = """scene color and depth resolve destinations"""
+what = """The 1280x720 `2_10_10_10` scene texture at physical `0x1C4E1000` is resolved in each of the three tile bands and sampled between them, so it changes about five times a frame. In one census frame the first full-size color resolve had 1,274 later texture bindings and the depth resolve 15. Also resolved every frame: two 1280x720 `8_8_8_8` targets and a 640x360 one, three 1024x1024 `24_8` shadow depths, the 1280x720 `24_8_FLOAT` depth, and the small bloom and luminance levels."""
+how = """Census of resolve-sourced texture reloads at 3x; census of later bindings per resolve."""
+confidence = """confirmed"""
+note = """Addresses seen on one seed; the heap layout may differ elsewhere."""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-2.2 band reloads; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts"""
+
+[[finding]]
+group = """Resolves"""
+name = """depth resolves as textures"""
+what = """Depth resolves write the packed 24-bit depth and 8-bit stencil words into an `8_8_8_8` destination, which later draws fetch as `24_8`, `24_8_FLOAT` or `8_8_8_8`; one depth resolve is sampled both as a depth texture and as 8888 texels. The per-tile updates of the main scene are depth resolves, while the final full-frame copy is color. The textures that come from resolves are the depth-as-color shadow maps, the reflection cube and the post chain."""
+how = """Census joining fetch base addresses to earlier resolve destinations; texture reload probe."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Resolves, Textures; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/ANDROID_ODIN_BACKLOG.md The last reloads"""
+
+[[finding]]
+group = """Resolves"""
+base = """guest phys `1FCA6000`, 4 KB"""
+name = """scene luminance resolve"""
+what = """A 32x32 `k_32_FLOAT` resolve from a 1x `k_32_FLOAT` color target, resolved every frame in free roam, that drives auto exposure. The game reads it at guest size. If it reads stale data, the screen is overexposed as if auto exposure sat at its daytime limit."""
+how = """Bisecting resolves at 2x on the `i444` route: writing an unscaled copy of only this resolve restored 1x brightness (mean 120.0 against 173.7). Texture-cache probes found two 32x32 format-36 keys over it, one scaled and one not. On macOS (16 KB host pages) the same overexposure came from CPU writes to data beside it in the same host page, which invalidated the resolve: free roam on the Miata seed averaged luma 171.5 against 114.7 on Windows, and 111.9 once shared memory tracked 4 KB pages."""
+confidence = """confirmed"""
+note = """Confirmed that it drives exposure; that it is a luminance average is probable. The address was seen on one seed only."""
+issue = """#444"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Rendering"""
+
+[[finding]]
+group = """Resolves"""
+name = """not behind the morning overexposure"""
+what = """Ruled out as the cause of the #444 overexposure at 2x: post effects (swap and present effects), MSAA (the target is single-sample), resolve-to-texture, EDRAM pass specialization, small copy views and texture band reloads. Guest CPU reads of resolved ranges, vertex fetches over scaled ranges and unscaled textures over scaled ranges (generic probe) were all absent."""
+how = """One cvar or probe at a time on the `i444` route."""
+confidence = """confirmed"""
+negative = true
+issue = """#444"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Rendering"""
+
+[[finding]]
+group = """Resolves"""
+name = """resolves the CPU does not read"""
+what = """No guest CPU code reads a resolved range during a race or the car purchase. The only CPU accesses are writes that reuse resolved pages around physical `0x1D822000`-`0x1D827000` (link registers `8314CC98` and, in the purchase, `82C7508C`). An earlier bounded scene saw no CPU reads or writes over 348 resolve generations of the sky and horizon family."""
+how = """Access callbacks armed on every resolved range after each resolve, on `fh1-race-sync` and `fh1-buy-car`."""
+confidence = """confirmed"""
+note = """Bounded to those routes; saved car thumbnails are the known exception."""
+negative = true
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-0.5; docs/native-renderer/GUEST_VISIBLE_RENDER_DEPENDENCIES.md Exact-family follow-up"""
+
+[[finding]]
+group = """Resolves"""
+name = """resolves the CPU reads"""
+what = """The title reads some resolves on the CPU: the car thumbnails it saves are one-off resolves read from guest memory. Handing the game the previous frame's data for every resolve never reaches free roam, so at least one other read before free roam needs the current frame."""
+how = """Thumbnail path checked against full synchronous readback; route runs in each readback mode."""
+confidence = """confirmed"""
+note = """Which read blocks free roam under previous-frame data is not traced."""
+source = """docs/DEVELOPMENT.md What the renderer actually does"""
+
+[[finding]]
+group = """Resolves"""
+name = """sky and horizon resolve consumers"""
+what = """The sky and horizon pass writes six rotating resolve destinations that 63 distinct later draw signatures across 38 shader families sample, so its output feeds the scene, not only the final image."""
+how = """Resolve-to-consumer graph in an open-world run."""
+confidence = """confirmed"""
+source = """docs/native-renderer/GUEST_VISIBLE_RENDER_DEPENDENCIES.md Exact-family follow-up; docs/native-renderer/RESEARCH.md Capture, provenance and admission"""
+
+[[finding]]
+group = """Resolves"""
+name = """HDR chain depends on resolve order"""
+what = """The HDR chain depends on exactly which resolve generation each fetch sees. Making resolve-sourced textures update right after their resolve, instead of when next sampled, broke the image from the first frames (HDR whiteout, yellow blowout) and sent the game down another path."""
+how = """Two eager-reload variants built and measured on Android."""
+confidence = """confirmed"""
+source = """docs/ANDROID_60FPS_BACKLOG.md A60-2"""
+
+[[finding]]
+group = """Resolves"""
+name = """attract sequence float resolve"""
+what = """The idle title attract sequence resolves an RGBA16 float render target into a `k_16_16_16_16` texture."""
+how = """Frame capture."""
+confidence = """confirmed"""
+source = """docs/ANDROID_PORT_BACKLOG.md"""
+
+# ---------------------------------------------------------------------------
+# Shadows
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Shadows"""
+name = """sun shadow map"""
+what = """The race's 1280-wide 1x depth-only pass at EDRAM base 0 is the sun shadow map: skipping it removes every shadow. It holds about 18 % of race draws, all cheap depth-only draws, interleaved with its own resolves. The 1040-pitch `D24S8` depth pass (EDRAM tile 720, resolved to 1024x1024) holds another 11 %. One shadow epoch of 80 draws was 64 draws of one dominant family, then four repeats of three secondary draws and one tertiary draw."""
+how = """Skipping each pass in turn; per-target draw counts; ordered-draw census of a shadow epoch."""
+confidence = """confirmed"""
+source = """docs/PERFORMANCE_BACKLOG.md Fidelity trades, PB-1.10; docs/native-renderer/RESEARCH.md Vehicles and shadow epochs"""
+
+[[finding]]
+group = """Shadows"""
+base = """pixel shader 93626E75"""
+name = """screen-space shadow mask"""
+what = """Scene lighting reads a 1280x720 screen-space shadow mask, resolved 1x `8_8_8_8` from EDRAM tile 720 twice a frame. Its first shadow draw makes four comparisons against the 1024x1024 `k_24_8` shadow map. If the shadow map reads as empty, every surface is lit and auto exposure overshoots (white sky, washed-out foliage). The game draws into the mask between its repeated copies, as it does for the 640x360 and 64x64 targets."""
+how = """A frame dump replayed on two GPUs with every resolve dumped placed the first divergence at this resolve; nulling the fetch reproduced the defect."""
+confidence = """confirmed"""
+note = """The shader key is our translator's hash."""
+source = """docs/ANDROID_ODIN_BACKLOG.md The fix: pushed pixel textures, Render scenario settings toward 60 fps, Shared memory through one texel buffer"""
+
+[[finding]]
+group = """Shadows"""
+name = """headlights need the shadow passes"""
+what = """With `SkipShadowMapUnlessCockpit` set, the player car's headlights no longer light the road at night: the light sprites and tail lights still draw, but the pool of light on the road and roadside is gone, in the chase view at 23:00. So the headlights' projected light runs through the passes that setting skips. The track's `SwitchOnLights` curve (`TimeOfDayA.xml`, minutes since midnight) is above zero before 08:02 and after 18:50, so the setting is only safe in between; shadows off now applies only then (#532)."""
+how = """`cheat_time_of_day` 23 with `pinyon_shift_fh1_shadows` true and false, parked at the Gauntlet start, chase captures; then the fix at 23:00 and 13:00 (shadows skipped by day)."""
+confidence = """confirmed"""
+issue = """#532"""
+source = """src/native_renderer/graphics_hooks.cpp CarLightsOn"""
+
+[[finding]]
+group = """Shadows"""
+name = """shadow atlases"""
+what = """Two 1024x1024 depth shadow atlases are only partly refreshed: each frame a 1280x720 8888 resolve overwrites part of their memory, then the atlas itself is resolved only 520x520."""
+how = """Texture reload probe with the sampled textures' keys."""
+confidence = """confirmed"""
+source = """docs/ANDROID_ODIN_BACKLOG.md Fewer drains between renderings, The last reloads"""
+
+[[finding]]
+group = """Shadows"""
+base = """0x834AB27C, sub_823E2650, sub_82C3AF68"""
+name = """shadow quality options"""
+what = """The `UseSmallShadowMap` option is the byte `0x834AB27C`, read by `sub_823E2650` when it sizes the shadow map (256x512 instead of 512x512). `sub_82C3AF68`'s mode picks the shadow mask's filter, and the game already uses LQ, the cheapest; the mask blur mode at renderer +8436 is 1 (one pass). Setting the small shadow map before the title starts, or removing the blur, changed GPU time only within noise."""
+how = """Writing the byte and mode before start; GPU profile on the Odin drive."""
+confidence = """confirmed"""
+negative = true
+source = """docs/ANDROID_ODIN_BACKLOG.md Toward 60 fps with shadows"""
+
+# ---------------------------------------------------------------------------
+# Post effects
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Post effects"""
+name = """post-processing chain"""
+what = """The final composite reads the 1280x720 `2_10_10_10` scene, a 320x192 reduction, a 640x360 RGBA8 intermediate with a car-shaped alpha mask, and the 16x16x16 colour-grading LUT. The chain makes 320x192, 64x32 and 32x32 reductions (bloom and luminance levels down to 2x2), with a bloom chain from 1280x720 down to 64x32 in `8_8_8_8` and `2_10_10_10`, clears a 640x360 producer, and reads back the previous frame's 320x192 output. It runs as about 43 small renderings and 21 small resolves a frame; skipping any post group changes the frame, so none is dead work."""
+how = """Race-pilot evidence; GPU profiles and knock-out experiments on the Odin; resolve reload census."""
+confidence = """confirmed"""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/ANDROID_ODIN_BACKLOG.md Turnip shader work, Shader specialization and further experiments, Fewer drains between renderings; docs/ANDROID_PORT_BACKLOG.md AP-7.0"""
+
+[[finding]]
+group = """Post effects"""
+base = """8246554C"""
+v4 = """0x82494E44"""
+name = """per-frame bloom scale"""
+what = """By `8246554C` the title has copied the weather preset's bloom scale, interpolated, into this frame's stack parameters at r1+264. The title's own debug mode writes zero there. Zeroing it removes bloom while weather data, exposure, tone mapping and the persistent settings stay intact; the bloom filter still runs."""
+how = """Mid-function hook zeroing the value, with on, off and restore captures on desktop and Android."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x8246554C; src/pinyon_shift_runtime_hooks.cpp PinyonShiftBloomScale; docs/LOW_SPEC_BACKLOG.md Requested defaults and feature trades; docs/DLC_BACKLOG.md Android bloom default and qualification"""
+
+[[finding]]
+group = """Post effects"""
+base = """0x82D7894C, 0x8245B494, 0x8245846C, 0x8245849C"""
+v4 = """0x82E3A924, 0x8248AB7C, 0x82487B54, 0x82487B84"""
+name = """motion blur and depth of field switches"""
+what = """Skipping the instruction at `0x82D7894C` disables motion blur. Loading zero into r11 instead of the original load at `0x8245B494`, `0x8245846C` and `0x8245849C` disables depth of field at each of its decision points."""
+how = """Xenia Canary game patches (hash prefix `D48ABF1704CE5C4A`) reproduced as mid-function hooks and checked in game."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/fh1-post-processing.toml; src/pinyon_shift_runtime_hooks.cpp PinyonShiftDisableDepthOfField"""
+
+[[finding]]
+group = """Post effects"""
+base = """pixel shader 614588022744BF6B"""
+name = """final post pass"""
+what = """The heaviest single post shader runs twice a frame: six bilinear taps of the 64-bit scene along the velocity (camera motion blur, visible as a horizontal smear in turns) and a 3D colour grade. It is bound by texture bandwidth. Turning motion blur and depth of field off changed GPU time by less than noise on a Snapdragon 8 Elite."""
+how = """Per-shader GPU profile; in-run A/B of the motion blur and depth-of-field switches."""
+confidence = """confirmed"""
+note = """The shader key is our translator's hash."""
+issue = """#413"""
+source = """docs/ANDROID_ODIN_BACKLOG.md Coarse shading, Render scenario settings toward 60 fps; docs/ANDROID_60FPS_BACKLOG.md A60-10"""
+
+[[finding]]
+group = """Post effects"""
+base = """guest 0x1BDB1000, 0x1C149000"""
+name = """temporal post surface"""
+what = """One post-chain destination is temporal: a padded 1280x736 surface updated 256 rows per frame, fully republished every other frame and read back the next frame, alternating between history destinations `0x1BDB1000` and `0x1C149000`, with several guest formats per address. Treating it as a plain single-frame output fails."""
+how = """Race-pilot resolve census; a rejected simple post-chain handoff (PERF-10)."""
+confidence = """confirmed"""
+note = """Addresses from one seed."""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/native-renderer/RESEARCH.md Rayman and scene-native era"""
+
+[[finding]]
+group = """Post effects"""
+base = """dynamicpost.zip Tracks/Colorado/Fog_Templates.xml, grading maps"""
+v4 = """same"""
+name = """atmosphere templates"""
+what = """Six fog templates (`NoFog` to `Mountains`), bloom, vignette and colour settings, and 21 grading maps."""
+how = """Archive listing."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+
+[[finding]]
+group = """Post effects"""
+base = """dynamicpost.zip ColourGradingMaps/*.dds, PostProcessingZones_Safe.xml"""
+v4 = """same"""
+name = """colour grading maps"""
+what = """22 maps, each a 16x16x16 volume DDS (A8R8G8B8, texel bytes B, G, R, A; red varies fastest, then green, then blue); `NormalGrading.dds` is the identity. The loose zones file in `media/tracks/colorado/Ribbon_00` names a map per zone (`GradingMap="Mountains.dds"`). A map added to the archive by a mod and named by an overridden zones file is used: a red/blue swap of the identity turned the red car blue while the HUD kept its colours, so grading applies to the scene only."""
+how = """Archive listing; free-roam route from a pinned seed with and without the mod."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Custom content"""
+# ---------------------------------------------------------------------------
+# Render scenarios
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Render scenarios"""
+base = """media/renderscenarios.zip"""
+v4 = """same"""
+name = """render scenario files"""
+what = """`renderscenarios.zip` has 35 members, each a `<DynamicRenderSettings>` list layered over `Global.xml`, with per-player-count budgets (`1-Car_Race.xml`, `12-Car_Race.xml`, `16-Car_*`). The race scenarios set `FrameRate` 30, `CarLODThresholds`, `CarMinWheelLOD` 1, crowd draw and LOD count scales, and `ParticleRateScale` and `EnvMapFrequencyScale` 1.0. `Multiplayer.xml` forces `CarForceNoLOD0`, and `PhotoMode.xml` also sets `DepthOfField` 0. Terrain, tree and grass distances are not in these files."""
+how = """Archive extraction and reading the files."""
+confidence = """confirmed"""
+note = """Which scenario free roam uses is not traced."""
+issue = """#421"""
+source = """docs/FEATURE_BACKLOG.md FB-4"""
+
+[[finding]]
+group = """Render scenarios"""
+base = """0x82D81298, 8223C5F4, 8223C6C4, 0x8321D848"""
+v4 = """0x82E43458, 8224F754, 8224F824"""
+name = """DynamicRenderSettings control load"""
+what = """At `0x82D81298` each `DynamicRenderSettings` control has just loaded (r30 the control, r26 its scenario). Controls are embedded in the scenario at offsets taken from the table at `0x8321D848`, indexed by control id; float controls use vtable `8223C5F4` and bool controls `8223C6C4`. `EnvMapFrequencyScale` (id 30, how often the car reflection cube is redrawn) keeps its value at control +4. `SkipShadowMapUnlessCockpit` (id 35) sits at scenario +0x194, with bit 35 of the bitset at +36 marking it set; none of the game's own scenarios uses it. The game reads both every frame, so rewriting them takes effect on the next frame."""
+how = """Mid-function hook overriding the controls, switched mid-drive with correct captures; v4 mapping from the analysis overrides."""
+confidence = """confirmed"""
+note = """The v4 address of the offset table is not recorded."""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x82D81298; config/rexglue/analysis-v4/overrides.toml; docs/ANDROID_ODIN_BACKLOG.md Render scenario settings toward 60 fps, In-game settings and desktop, Toward 60 fps with shadows"""
+
+[[finding]]
+group = """Render scenarios"""
+base = """renderscenarios.zip Horizon_Race.xml"""
+v4 = """same"""
+name = """render scenario settings effects"""
+what = """In free roam, `EnvMapFrequencyScale` 0.25 keeps reflections looking the same and saves GPU time, while 0 makes them dark. `SkipShadowMapUnlessCockpit` 1 drops the cascaded shadow maps, a screen depth pre-pass and the screen-space shadow mask; the mask then keeps its last contents and the world goes fully shadowed, while the cockpit view still draws shadows. `CrowdDraw` 0, halved car LOD distances, `ParticleRateScale` 0.5, `CarDrawDriver`, `CollidableShadows`, `CrowdDrawShadows`, `SoftParticles`, `CarDamageTextures` 0, `HalfRateMirror` and `HalfRateBloom` changed nothing measurable."""
+how = """Asset mods changing one setting at a time in private states; GPU timing and captures on the Odin drive."""
+confidence = """confirmed"""
+note = """Measured on one free-roam drive."""
+source = """docs/ANDROID_ODIN_BACKLOG.md Render scenario settings toward 60 fps, Player reports on SMOOTH 60"""
+
+[[finding]]
+group = """Render scenarios"""
+base = """options object (getter sub_82479E88)"""
+name = """renderer launch switches"""
+what = """The launch options `fasttrackrender`, `trackfardistance`, `renderroaddetailblur` and `notrackcommandbuffers` change track rendering, and `perfmode` changes neighbouring draw families too. The renderer copies `renderfur`, `renderroaddetailblur` and the `fast*render` switches from the options object."""
+how = """Differential research runs; writing the flags before the renderer copies them."""
+confidence = """probable"""
+note = """Setting them before the copy changed nothing measurable on the Odin drive."""
+source = """docs/native-renderer/RESEARCH.md Terrain, track and static-world leads; docs/ANDROID_ODIN_BACKLOG.md Toward 60 fps with shadows"""
+
+[[finding]]
+group = """Render scenarios"""
+name = """photo mode quality paths"""
+what = """Besides `PhotoMode.xml`, photo mode has code-side switches: `IRenderThreadInPhotoModeInternal`, `IPresentationInPhotoMode` and the `highrescubemap` option. Photo capture supersamples by accumulating frames (`MultiSampleAndAccumulate`, `AccumulateWeightedFrame`), which needs a still scene."""
+how = """Strings in the image."""
+confidence = """probable"""
+note = """The code paths are not traced."""
+issue = """#421"""
+source = """docs/FEATURE_BACKLOG.md FB-4.5"""
+
+[[finding]]
+group = """Render scenarios"""
+name = """LOD and distance key names"""
+what = """The image names more LOD and distance keys than the render scenarios set: `CarForceNoLOD0`, `LOD1_Threshold` and `LOD2_Threshold`, `LOD0_Count_Scale` to `LOD3_Count_Scale`, `CrowdLODCountScales`, `LODdist_Near` and `LODdist_Far`, the traffic `MaxHighLodDistance` and `MaxMediumLodDistance`, and `CLoadAndWaitForLOD0Cars`."""
+how = """Strings in the image."""
+confidence = """probable"""
+note = """Where each is read is not traced."""
+issue = """#421"""
+source = """docs/FEATURE_BACKLOG.md FB-4"""
+
+# ---------------------------------------------------------------------------
+# D3D inside the game
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """D3D inside the game"""
+base = """82416A00, 0x82416EFC, 82409398, 8240CF68, 8240D070, 829F5FF0, 829F6360, 8246FB98, 0x8246FC1C"""
+v4 = """824469B0, 0x82446EAC, 82439348, 8243CF18, 8243D020, 82AB2F60, 82AB32D0, 8249F310, 0x8249F394"""
+name = """D3D command buffers"""
+what = """FH1 renders from prebuilt D3D command buffers (display lists). `82416A00` is `D3DDevice_RunCommandBuffer`, the per-object list executor; `82409398` writes the ring and moves its write pointer; `8240CF68` and `8240D070` close and submit segments. A list is an `IDirect3DCommandBuffer` (resource type 9): +116 chains (size, physical address) pairs, one indirect buffer each; +24..+56 mark inherited and +64..+96 overwritten state, +108 holds flags and +112 dependent resources. Nothing patches a list when it runs: per-frame state goes into the calling segment just before the indirect-buffer packet. `829F5FF0` and `829F6360` are D3D runtime code that replays the tiling stream into the ring once per tile on D3D's worker threads. The executor stores each list's `INDIRECT_BUFFER` header at `0x82416EFC`, inside its loop over the +116 chain. The whole function is 407 instructions with 27 calls, up to four of them segment closes that can wait on a fence, so that store, not a native body, is the place to hook list execution. A second producer of `INDIRECT_BUFFER` packets, `8246FB98`, stores its header at `0x8246FC1C` (59,382 calls in a desktop race, 4.6 a presented frame, from 14 callers). The executor itself ran 542 times a presented frame."""
+how = """Reverse engineering of the generated code, matched against the decoder's indirect-buffer census; call counts from the probe build (NL-2.3, 12,992 presents)."""
+confidence = """probable"""
+note = """Corrects an earlier guess that `8240xxxx`-`8246xxxx` were engine constructors. The lists are not immutable: NN-0.10's write watch found most of them rewritten after they had run (see "display-list writers"). "Nothing patches a list when it runs" holds for the executor itself; the engine patches a list's fixup slots just before calling it (see "D3D command-buffer fixups"). `829EC928` (v4 `82AA9898`) runs resource type 10 (async command-buffer calls) and is reached only from the executor (guess)."""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-0.4; docs/NEAR_NATIVE_RESEARCH.md NN-2.3, NN-0.10"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """8247B438, 8247B4D0, 0x8247B510, 8247B3B0, 0x8247B428, 829EB0B8, 0x829EB11C, 829EB348, 82C76A90"""
+v4 = """824AAA28, 824AAAC0, 0x824AAB00, 824AA9A0, 0x824AAA18, 82AA8028, 0x82AA808C, 82AA82B8, 82D378E8"""
+name = """display-list writers"""
+what = """The game builds and rewrites its D3D command buffers at run time. Of 256 list buffers watched from their first execution in an Odin race, 190 were written again after they had run, 121 of those writes inside the bytes the list had executed. The writers, by the guest return address: `8247B438` called from `8247B4D0` (return `0x8247B510`, 98 writes, all from one render-side thread, from the menus at frame 828 through the race at frames 4500-5500); a `memcpy` in `8247B3B0` (return `0x8247B428`, 12); a `memcpy` in D3D runtime code `829EB0B8` (return `0x829EB11C`, 9); `829EB348`, which also calls `8247B438`; and a `memcpy` in `82C76A90`."""
+how = """Write watch on the first 256 indirect buffers executed at depth 2 or more and on outer buffers, armed after each execution, logging the writer's guest return address and thread (`gpu_trace_ib_writers`, NN-0.10)."""
+confidence = """probable"""
+note = """`8247B438` patches part of a list, it does not re-record it: it is the slot lookup of D3D's command-buffer fixups, and `8247B4D0` and `8247B3B0` are the texture and constant fixup setters (probable, see "D3D command-buffer fixups"). `82C76A90` is a buffered file read (`IOSys::CBufferedStream` slot 16, vtable `0x8222B49C`) loading list bytes from asset files (probable), and `829EB0B8` with its caller `829EB2B0` looks like a command-buffer clone (guess). So a list compiler keyed on the list and its fixup values, rather than on its bytes, would not churn, if no other writer exists; the census in docs/D3D_RENDERER_RESEARCH.md checks that. `8247B438`'s v4 address is from a context match; the others match exactly."""
+source = """docs/NEAR_NATIVE_RESEARCH.md NN-0.10, NN-2.3; docs/D3D_RENDERER_RESEARCH.md"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x821451EC, 0x832A3498, 824131B8, 823F5980, 82415CE0, 82412DD8, 8246EF98, 82C273B0, 82C27340, 82C27568, 823F74B0, 82C27440, 82415C88, 823FA198, 8244A450, 82415CA8, 82418F50, 82417B90, 8240BA48, 82C28070"""
+name = """engine graphics device class"""
+what = """The engine renders through its own virtual class `CD3D9GraphicsDevice` (RTTI at `0x832A3498`, primary vtable `0x821451EC`, 67 slots). The slots are thin wrappers that take the D3D device from `this+20` and call D3D. Draw slots: 38 and 39 (`824131B8`, `823F5980`) reach the indexed draw `82416380`; 40 and 41 (`82415CE0`, `82412DD8`) the auto-index draw `82415F68`; 42 and 44 (`8246EF98`, `82C273B0`) and 65 (`82C27440`) copy vertices and draw through `824610C0`; 43 (`82C27340`) the indexed user-pointer draw; 48 and 66 (`82C27568`, `823F74B0`) the title draw adapter path to `8240F4D8`. Every known D3D draw entry point is reached through these slots. Slots 22 and 24 set a texture fetch slot's dirty bit (SetTexture-like), 30 and 31 a vertex fetch slot (SetStreamSource-like), 25 and 26 a dirty mask over a shader constant range (vertex and pixel constant setters), 12 dispatches through a per-state function table at D3D device +952, and 50 (`82C28070`) is the gamma ramp builder."""
+how = """Reverse engineering of the generated code: RTTI and vtable in the image, what each wrapper computes and which D3D emitter it reaches; static only."""
+confidence = """probable"""
+note = """Slot meanings are probable where a slot lands on a known D3D emitter and a guess otherwise (13-23 look like resource creation). D3D's state setters are mostly inlined in the engine as stores into the D3D device and its 64-bit dirty masks, so there is no SetRenderState function to hook: a D3D-level renderer would hook this vtable or read the device state at each draw. No v4 addresses yet (the v4 vtable needs the v4 image)."""
+source = """docs/D3D_RENDERER_RESEARCH.md; .local/backlog-research/d3d-renderer-2026-10-14/02-guest-d3d-seam.md"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """82450440, 8245BBF0, 8245BEE8, 8245CA88, 8246ED00, 8245BE88, 82C58DA8, 82C592F0, 8247B438, 8247B2E0, 8247B5E8, 8247B4D0, 829EB688, 829EB348, 829EB5E8, 8247B3A8, 829EB7E0, 829EB868, 82C5ABA0, 82C5A7B0"""
+v4 = """8247FAF8, 8248B570, 82D19210, 82D19758"""
+name = """D3D command-buffer fixups"""
+what = """Lists keep their PM4 shape; per-object resources are patched into fixed slots before each run. The track, model and vegetation list owners each call `82450440` just before the list executor. It applies the object's dynamic fixups through `8245BBF0`, `8245BEE8`, `8245CA88` and `8246ED00`, which all tail into `8245BE88` and D3D's fixup dispatcher `82C58DA8`. The dispatcher switches on the D3D resource type (low nibble of the resource's first dword) and calls one setter per type: vertex buffer `8247B2E0`, index buffer `8247B5E8`, texture `8247B4D0`, surface `829EB688`, vertex declaration `829EB348`, vertex shader `829EB5E8`, pixel shader and constants `8247B3A8` (a copy through `8247B3B0`), command buffer `829EB7E0`, async call `829EB868`. Every setter but the copy calls `8247B438`, which finds the fixup record by handle in one of two tables in the command buffer (+144 or +148), marks it in the dependent-resource array (+112) and returns where to patch in the buffer data (+152). The texture setter rewrites the six-dword texture fetch constant in place from the texture object. Static fixups are applied at load through `82C5ABA0` and `82C5A7B0` and a second dispatcher entry `82C592F0`."""
+how = """Reverse engineering of the generated code (call graph from the list owners to the executor, the dispatcher's type switch, the fixup record lookup), matched against NN-0.10's write watch, whose two main writers are the texture and constant setters."""
+confidence = """probable"""
+note = """The resource type numbering is assumed to follow the XDK; it is checked only for texture (3, by the fetch-constant layout) and command buffer (9). This explains why lists repeat byte for byte between frames yet are written after they run: only the fixup slots change. The v4 offsets of the setters are base + `0x2F5F0` for the `8247B` functions and + `0xBCF70` for the `829EB` ones (not verified one by one)."""
+source = """docs/D3D_RENDERER_RESEARCH.md; .local/backlog-research/d3d-renderer-2026-10-14/02-guest-d3d-seam.md"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """82C59E40, 82C588B8, 82C460A8, 0x822290C4, 0x8222B49C, 82C76A90, 82D505C0, 0x822388F0, 824F8150, 829EB2B0, 829EB0B8"""
+name = """command buffers from assets and run-time recording"""
+what = """Some display lists are loaded from asset files: the image holds a serialised command-buffer description (fields `Handle`, `HeaderSize`, `PhysicalSize`, `InitializationSize`, `StaticFixups`, `DynamicFixups` and their shared variants, `FixupType_ID`) read by `82C59E40` and `82C588B8`, and model assets carry a `CommandBufferGroup` beside their mesh, effect, material and texture names (strings from `0x822290C4`, read by `82C460A8`). The list bytes are streamed in by a buffered file read (`82C76A90`, `IOSys::CBufferedStream`, vtable `0x8222B49C`). Others are recorded at run time through D3D: the track settings `CommandBufferRecording`, `PrerecordNextZone`, `NumGraphsAllowed`, `NumTextureFixupsAllowed` and `TimeAllowed` (from `0x822388F0`, read by `82D505C0`), the launch options `nomodelcommandbuffers`, `notrackcommandbuffers` and `commandbuffersize` (parsed by `824F8150`), growable command-buffer allocators, and the threads "Async Command Buffer Thread" and "Free Command Buffer Thread"."""
+how = """Strings, RTTI and their readers in the generated code; static only."""
+confidence = """probable"""
+note = """Probable reading: models ship precompiled lists with fixup tables, the track records its zone lists ahead of time within a per-frame time and texture-fixup budget, and cars keep copies per tiling mode (`CCarPresentation::FreeCommandBuffers_All(_Tiled)`); the split is a guess. `829EB2B0` and its copy `829EB0B8` look like a command-buffer clone (guess). Whether the immediate draw entry points also write into lists being recorded is not known; the census in docs/D3D_RENDERER_RESEARCH.md answers it. `BeginCommandBuffer`, `EndCommandBuffer` and `BeginTiling` were not found statically."""
+source = """docs/D3D_RENDERER_RESEARCH.md; .local/backlog-research/d3d-renderer-2026-10-14/02-guest-d3d-seam.md"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """82468C40, 8246F110, 823EA3E0, 823E984C, 823EB3D0, 8246B3E8, 82469290, 0x402C2880"""
+name = """command-buffer recording and tiling brackets"""
+what = """`82468C40` is BeginCommandBuffer: called from `8246F110`, it points the D3D device's write pointer into the buffer being recorded. `823EA3E0` (called from `823E984C`) is EndCommandBuffer and restores it; about three recordings a race frame. `823EB3D0` (called from `8246B3E8`) opens the predicated-tiling bracket and `82469290` closes it, once a frame. Recording uses its own D3D device (`0x402C2880` in the Odin run), and the indexed draw entry point `82416380` writes into the lists being recorded as well as into the ring."""
+how = """DL-0.2: the census probe's buffer-switch log for one race frame (`pinyon_shift_d3d_census_bracket_frame`), which records each change of the device write pointer with the guest return address; Odin run dl01-brk."""
+confidence = """confirmed"""
+note = """Census of the same race (DL-0.1): drawn draws come 64-78 % from display lists and 20-30 % from immediate calls on the Odin (untiled), 60-83 % and 12-29 % on the desktop (tiled); one buffer of about 72 (Odin) to 120 (desktop) draws a frame has no known owner. 83-100 % of list runs are byte-identical to their previous run, and every list that changed was recorded at run time (the track). With the write watches re-armed, 5-13 writes a 600-frame window into known lists came from neither the fixup setters nor stream loads. DL-2.1 (confirmed, Odin and desktop race): 99 % of list runs find the list's pages unwritten since the previous run, about half of a list's register writes repeat a value the same list wrote earlier, and shader microcode stays unwritten through the race. DL-2.2 (confirmed, desktop race): no race list draw is culled per tile; each tiled list runs whole once per tile, and later tiles carry about 3.8 times the first tile's draws. No v4 addresses yet."""
+source = """docs/D3D_RENDERER_RESEARCH.md DL-0.1, DL-0.2; .local/backlog-research/d3d-renderer-2026-10-14/dl01-probe.md"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """82416380, 824167EC, 82415F68, 82415EA8, 824168B0, 82415D50, 8246F7B8, 824091B8, 824679E8, 8240CF68, 82411C80, 824125F4, 82411BD0, 8240ED50, 8240D270, 8240F148"""
+name = """indexed draw call and its state flush"""
+what = """`82416380` is the indexed draw call: r3 the device, r4 the primitive, r5 the base vertex (written as `VGT_INDX_OFFSET`, `0x2102`), r6 the start index, r7 the index count; it returns through `824167EC`. Before the draw it flushes the device's dirty state in a fixed order from five 64-bit masks at device +0 to +32: vertex and pixel float constants (+0, +8, through `824168B0`; bit 63-k is 16 registers at `0x4000`/`0x4400` + 16k), the shader bind `82411C80` (+16 bits 20-17), register groups `0x2000`, `0x2100`, `0x2180`, `0x2200` (+16, through `82415EA8`), fetch constants (+24 low bits, `82415D50`, then a write to `0x5000`-`0x5002`), groups `0x2280`, `0x2300`, `0x2380`, clip planes (`8246F7B8`), bool and loop constants (+32 bit 56) and a wait (`824091B8`). Each register comes from a shadow copy in the device. The shader bind loads the pixel shader's literal constants through `82411BD0` (a table of constant index, dword count and offset entries ended by a zero count) and its microcode by IM_LOAD; it picks a vertex-shader variant by the vertex declaration (`8240ED50`) or builds one inline into the command buffer (`8240D270`). The bound index buffer is at device +12812. Counts over 65,535 are split. During the race the HUD's calls (about 163 a frame) are recorded into command buffers (device +11068 bit 0x80) that run the same frame; in menus they go straight into the ring (140-220 a frame)."""
+how = """Reading of the generated code, then DL-1.2's verify mode: a draw description built from this reading of the device state matched what the packets wrote for 4.68 million HUD draws (about 600 million registers) with no mismatch."""
+confidence = """confirmed"""
+note = """The tiled shader-load branch (device +11068 bit 0x40) and the per-tile state `8240F148` (mask +16 ANDed with +40) are read statically only (probable). Recorded lists can be patched between recording and their runs: one draw a race frame has `VGT_INDX_OFFSET` 0 when recorded and `0x1B8` when it runs; the fixup that does it is not identified. About 16 HUD draws a frame come from a D3D-internal buffer at physical `0x132C5F00`, which is DL-0.1's unattributed buffer (location confirmed, purpose a guess). `829EC400` looks like SetAsyncCommandBuffer (probable: fills slot r4 & 63 at device +24424 + 128 a slot; its only caller `82AD3B98` fills up to five slots through the global `0x83320990`), and `8246FB98`, which writes three INDIRECT_BUFFERs and the GPR split at +11048, like SetShaderGPRAllocation (guess). DL-2.1 (confirmed): the auto-index draw call `82415F68` (r3 device, r4 primitive, r5 start vertex written to `0x2102`, r6 vertex count; 130-380 calls a race frame, almost never while recording) runs the same flush and then a two-word predicated draw. Each nonzero mask is stored 0 after its flush, so a call with a plain flush can be replaced by storing 0 to all five masks and advancing the write pointer at +48; no other device field changes (replaced over whole races with bit-identical paused frames). The wait `824091B8` runs when mask +32 bits 62-63 are set and the byte at +11072 has bit 7 or 6 set. The fetch-constant flush ends with `0x5000`-`0x5002` = 0, `0x25000`, 0, with `0x5001` 0 instead when the segment was kicked first. The constant flush checks space through `824679E8`, which kicks the segment through `8240CF68` past the soft limit at +56 (probable); a kick leaves INVALIDATE_STATE and two EVENT_WRITE_SHD around the segment change (probable). In the Odin race about 160 calls a frame are made while recording and about 40 are queries. Race display lists hold predicated SET_CONSTANT, LOAD_ALU_CONSTANT, SET_BIN_MASK_HI, WAIT_REG_MEM and the odd EVENT_WRITE, and their headers and control words do not change between runs (0-20 recompiles per 600 swaps). The full mask-to-register table is in the DL-1.2 source note. No v4 addresses yet."""
+source = """docs/D3D_RENDERER_RESEARCH.md DL-1.2, DL-2.1; .local/backlog-research/d3d-renderer-2026-10-14/dl12.md, dl21.md RE findings"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """824167F8, 82417060, 82417BC0, 824365B0, 824168B0, 82411BD0"""
+v4 = """824467A8, 82447010, 82447B70, 82466560, 82446860, 82441B80"""
+name = """engine side of the display lists"""
+what = """The engine calls the list executor from `824167F8` and `82417060`, reached from `CProceduralModels` vtable slot 41 (`82417BC0`) and from `824365B0`. `824168B0` writes float constants as register writes in the calling segment (2.0 % of the render thread). It is D3D's generic dirty-constant flush, not a list-specific step: nine functions call it, each from two sites (vertex and pixel constants): `823EA3E0`, `82408B70`, `8240DC70`, `82415F68`, `82416380`, `82416A00`, `829EBD50`, `829EC928` and `829F6B18`. It ran 23.45 million times in a desktop race, 1,805 a presented frame. The only `LOAD_ALU_CONSTANT` emitter, `82411BD0`, loads static shader tables. The command stream has six `PM4_INDIRECT_BUFFER` store sites, with four owners, three producers and four context roots."""
+how = """Reverse engineering of the generated code; command-buffer lineage census; thread-sampler profile; callers and call counts from the generated code and the probe build (NL-2.3, 12,992 presents)."""
+confidence = """probable"""
+note = """The static-table reading is confirmed by NN-0.10's source census (see "shader constant sources"). For scale, `82411BD0` ran 264 times a presented frame in a desktop race, called from `82411C80` (156 a frame). `824168B0`'s arguments: r3 the device (+48 the last dword written, +52 the buffer end), r4 a 64-bit dirty mask read from bit 63 down, r5 the first register index, r6 16-byte-aligned source constants; it pads with type-2 NOP packets to 16-byte alignment, writes one type-0 header, copies 64 bytes per set bit, and calls `824679E8` (v4 `82497230`) when the buffer is full (NN-0.8 bench)."""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-0.4, Where it stands; docs/PERFORMANCE_BACKLOG.md PB-3.1; docs/NEAR_NATIVE_RESEARCH.md NN-2.3, NN-0.10"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """8246E100, 82CE5FF8, 824E3B38, 825A7CB0, 825A8348, 829F56D0, 82D06C28, 824168B0, 82409848"""
+name = """write-watch fault sites in a race"""
+what = """On the Odin at the 60 fps limit, write-watch faults cost 0.2-0.3 ms of CPU a frame from the signal handler on (half of it the `mprotect` that re-protects the page), half to two thirds of it on the render thread (`Guest 825A6320`) and about a third on the main thread (`Guest 8255AE10`). The code that faults, taken from the interrupted frame below the signal frame: a libc `memcpy` called from `8246E100` and from `82CE5FF8` (together 30-40 % of the handler samples in three of four records), and stores in `824E3B38`, `825A7CB0`, `825A8348`, `829F56D0`, `82D06C28`, `824168B0` (D3D's dirty-constant flush, see "engine side of the display lists") and `82409848`. The ranking moves between records: the fourth puts `82D06C28` and `829F56D0` first and has no `memcpy` faults in its top six."""
+how = """simpleperf dwarf call graphs of four 15-18 s race records on builds J and K (stage 1 runs j-rec1, k-rr1, k-rr2, k-rb1), samples whose stack holds the kernel signal-return frame, attributed to the frame below it; then the fault log of the `write_watch_fault_trace` probe (guest lr, physical page, upload kind) on build P (run p-cen)."""
+confidence = """probable"""
+note = """Counted with the `write_watch_fault_trace` probe on build P (a 600-frame race window): 7.4 faults a frame, 533 distinct pages and none recurrent, but the pages stay in two ranges that vertex uploads made valid, physical `0x12EC1000-0x132C0FFF` (writers by guest lr `829F56D8` on thread `829F6620`, and `82401258`, `824168B8`, `823F5854`, `824098AC` on the render thread) and `0x14B84000-0x14B95FFF` (lr `825A8494`, `825A7E68`). The other writers are lr `8246E1E8` (1.6 a frame, vertex, 4 pages at `0x11BE8000-0x11D6DFFF`), `82CE62C0` and `824E3B80` on the main thread (vertex and texture pages) and `825A84EC` (GPU-written pages). By kind: vertex 5.1, texture 1.8, GPU-written 0.55 faults a frame. These are dynamic geometry buffers the CPU refills every frame, with more than three writers. Learning these ranges and invalidating them at each ring kick instead of write-protecting them was tried (NN-3.12) and rejected: the kicks re-uploaded about 379 pages a frame and faults fell only by about 1 a frame (see Lessons). A fault in `824168B0` means a page the constant flush writes was watched; not confirmed what shares it. No v4 addresses yet."""
+source = """docs/NEAR_NATIVE_RESEARCH.md NN-3.12; .local/backlog-research/near-native-2026-10-13/stage2/NOTES.md NN-3.10/3.12 probe"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x8240F4D8, 0x82410328, 0x82410620, 0x824079B8, 0x829F7C70"""
+v4 = """0x8243F488, 0x824402D8, 0x824405D0"""
+name = """title draw wrappers"""
+what = """The title draw adapter `0x824079B8` (38 call sites in 25 functions) calls the indexed draw wrapper `0x8240F4D8`, which stores a `PM4_DRAW_INDX_2` header at `0x82410328`, returns at `0x82410620` and has six consume-then-clear dirty-mask sites. The immediate draw wrapper `0x829F7C70` stores a count-one header. Only about 42 draws a race frame (about 70 us of guest time) go through these emitters: the scene's draws arrive in prebuilt indirect buffers."""
+how = """Static inventory; pass-through hooks with exact packet-address provenance (107,455 exact matches); profiling probes at entry, header and exit; decoder census of the race."""
+confidence = """confirmed"""
+note = """Correction (DL-1.2, 2026-10-14, probable): `0x8240F4D8` is D3D's Resolve, not a draw wrapper. It writes the copy-register shadows (device +10776 to +10820), sets the render backend to copy mode, emits a three-vertex rect-list draw, handles clear flags and values, resets the copy registers and stores the device fence into the texture. Its 42 calls a frame match the executor's 44 resolves; the HUD is drawn through `82416380` (see "indexed draw call and its state flush"). `0x829F7C70` is a count-one auto-index draw helper (callers `829F9540`, `829F8D88`) never called in the race. D3D has other draw entry points that store their own draw headers, about 540 calls a presented frame (see "D3D draw entry points")."""
+source = """docs/native-renderer/archive/RENDER_PASS_CENSUS.md Verified inventory; config/rexglue/analysis/main-xex.toml PERF-11 probes; docs/native-renderer/RESEARCH.md Capture, provenance and admission; docs/PERFORMANCE_BACKLOG.md Final pass"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """sub_82416380, sub_82415F68, sub_82415CE0, sub_82460998, sub_82408B70, sub_8240DC70"""
+v4 = """sub_82446330, sub_82445F18, sub_82445C90, sub_82490230, sub_82438B20, sub_8243DC20"""
+name = """D3D draw entry points"""
+what = """Most draw calls the title makes do not go through the draw wrappers above. `sub_82416380` (3,543,451 calls in a desktop race, 272.7 a presented frame, 11 callers) and `sub_82415F68` (3,463,307, 266.6 a frame, 9 callers, among them `sub_82415CE0`, which an indirect call in `sub_82417418` reaches) store type-3 `DRAW_INDX` headers themselves. Like the list executor `82416A00` they call the dirty-constant flush `824168B0` twice, the shader and constant-load setup `82411C80` and the segment close `8240CF68`, which can wait on a fence. Together they are about 540 calls a presented frame, against 35 through the indexed draw wrapper `8240F4D8` and 542 list executions (route averages, menus included). Three smaller emitters run 17.3 (`sub_82460998`), 9.2 (`sub_82408B70`) and 8.5 (`sub_8240DC70`) times a frame. On the Odin they are sampled on the render thread and on the presentation worker `82589AE8`, where `sub_82416380` is 11.9 % of that thread's cycles, next to the segment closes `8240CF68` (4.4 %) and `8240D070` (4.8 %)."""
+how = """Packet-header constants, callees and callers in the generated code; call counts and indirect targets from the probe build (NL-2.3, 12,992 presents); the Odin call-graph profile cg2 (30 fps), split by thread."""
+confidence = """probable"""
+note = """`sub_82416380` writes into both the ring and command buffers being recorded (DL-0.2, see "command-buffer recording and tiling brackets"). A display-list compiler at `82416A00` would have to cover them, the second producer thread and the second `INDIRECT_BUFFER` producer `8246FB98` (NN-2.3)."""
+source = """docs/NEAR_NATIVE_RESEARCH.md NN-2.3"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x824587D8, 0x82458A88"""
+name = """title resolve controller"""
+what = """`0x824587D8` (three direct callers) emits one `PM4_EVENT_WRITE`, two `PM4_MEM_WRITE`, two `PM4_WAIT_REG_MEM` and one `PM4_EVENT_WRITE_EXT` around its resolve setup, and calls the setup wrapper `0x82458A88` twice. The setup writes `RB_MODECONTROL` (register `0x2208`) to copy mode 6, plus four bin mask and select writes and one `PM4_EVENT_WRITE_ZPD`."""
+how = """Static inventory and pass-through hooks."""
+confidence = """confirmed"""
+note = """Which destination each resolve feeds is not traced."""
+source = """docs/native-renderer/GUEST_VISIBLE_RENDER_DEPENDENCIES.md Title side-effect boundaries; docs/native-renderer/archive/RENDER_PASS_CENSUS.md Verified inventory"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x82413AB8, 0x824736F0"""
+name = """binning and scissor state wrappers"""
+what = """Predicated-tiling state wrappers. `0x82413AB8` stores `PM4_SET_BIN_MASK_LO/HI` headers (ten direct calls; 978,620 calls from eight callers in 6,916 festival frames). `0x824736F0` stores all bin mask and select headers and calls the scissor-state wrapper (four direct callers; 11,845 calls from three callers)."""
+how = """Static inventory; pass-through hooks counting callers."""
+confidence = """confirmed"""
+note = """Which passes own them is not known."""
+source = """docs/native-renderer/archive/RENDER_PASS_CENSUS.md Verified inventory, Side-effect-boundary qualification"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x829F21A0, 0x829F2280, 0x82D951E0"""
+name = """visibility query wrappers"""
+what = """`0x829F21A0` begins a visibility query (stores a count-one `PM4_VIZ_QUERY` header and sets the active-query bit); `0x829F2280` ends it and clears the bit. Their owner `0x82D951E0` (two direct callers) calls begin, five work calls, then end."""
+how = """Static inventory; pass-through hooks checked at run time."""
+confidence = """confirmed"""
+note = """The result consumer and the query's purpose are unknown."""
+source = """docs/native-renderer/archive/RENDER_PASS_CENSUS.md Verified inventory; docs/native-renderer/GUEST_VISIBLE_RENDER_DEPENDENCIES.md Title side-effect boundaries"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x829EFEB8, sub_829EFB30, sub_823E91F0"""
+v4 = """0x82AACE28"""
+name = """present path"""
+what = """The render thread presents through `sub_829EFB30`: it requests the system command buffer (`VdGetSystemCommandBuffer` at `0x829EFD80`), inserts a fence and kicks the ring, then calls `VdSwap` at `0x829EFEB8`, the title's only call to it and so the end of each title frame. `sub_823E91F0` then waits for the previous present's fence, so the title runs at most one frame ahead of the GPU; swaps are throttled at 15 pending. After a fence passes, the title reuses its dynamic vertex and index memory."""
+how = """Xref of `VdSwap`; reading the generated code and SDK; WPR and thread-sampler profiles."""
+confidence = """confirmed"""
+source = """docs/PERFORMANCE_BACKLOG.md PB-4, PB-2.11, PB-6.4; config/rexglue/analysis/main-xex.toml midasm_hook 0x829EFEB8; docs/native-renderer/archive/RENDER_PASS_CENSUS.md Verified inventory; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md Target architecture"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """sub_823E67A8, sub_829EE1F8, 0x829F5948, sub_829F6620, 0x82586398"""
+name = """D3D GPU-to-CPU callbacks"""
+what = """The 12 `WAIT_REG_MEM`s a frame are D3D's callback handshake (InsertCallback, `sub_823E67A8`): wait until 3D idle, set `SCRATCH_REG4` to the callback, `REG5` to the context and `REG0` to the CPU mask, wait for the write-backs, `INTERRUPT`, wait for the handler (`sub_829EE1F8`) to clear the mask, then set `REG4` to `0x0BADF00D`. Two callbacks run: `0x829F5948`, D3D's predicated-tiling step, which queues the next tile's replay for the worker `sub_829F6620` (a 4-entry queue per hardware thread), and `0x82586398`, the engine's GPU frame-end timestamp. Neither releases memory that earlier draws read."""
+how = """Static analysis; completing the handshakes at decode time cut the waits from 12 to 3 a frame with correct rendering."""
+confidence = """confirmed"""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-1.2"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """sub_82409398, sub_829EE118, sub_829EEC48, sub_829EED78, sub_829EE1F8, sub_829E9570, sub_829F6878, sub_829FCB58, sub_823E6568, sub_823F2C48, sub_831217A8, sub_831464C0, sub_829FF978"""
+name = """GPU register accesses"""
+what = """The generator marks a load or store whose base register was built from the GPU register window (`0x7FC8xxxx`) or is followed by `eieio` as a hardware access, so every site the title has is known statically: 13 D3D functions touch GPU registers, and none of the title's own code does. Decoding each displacement against the register table: `sub_82409398` stores `CP_RB_WPTR` (the ring-buffer write pointer; 510,243 calls in one race), `sub_829EE118` stores the same register on a path a race never takes; the vblank handler `sub_829EEC48` and the swap interrupt `sub_829EED78` store `D1GRPH_PRIMARY_SURFACE_ADDRESS`, which is the flip itself (27,753 and 12,992 calls); the callback handler `sub_829EE1F8` reads `D1MODE_VBLANK_VLINE_STATUS` (90,826 calls); `sub_829E9570` reads `RBBM_PERFCOUNTER0_LOW` and `CP_PROG_COUNTER` and `sub_829F6878` reads `CP_PROG_COUNTER`, both diagnostics that a race calls at most once; `sub_829FCB58` writes `PA_CL_ENHANCE` and `SQ_INST_STORE_MANAGMENT` at device setup. `sub_823E6568` (227,950 calls) and `sub_823F2C48` (21,569 calls, sixteen accesses at offsets 0 to 88 of a base passed in) take the register address from a caller, so their registers are not resolved statically; `sub_831217A8`, `sub_831464C0` and `sub_829FF978` are off the race path."""
+how = """The `REX_MM_` sites in the generated code (the generator's MMIO detection), displacements decoded with the SDK's GPU register table, call counts from the probe build on `fh1-race-sustained` (NL-2.3). The two register reads match the only GPU registers the register-read log saw a race read (NL-5)."""
+confidence = """probable"""
+note = """The two read sites and the ring write pointer are confirmed; the other register names rest on the base register holding the window's start, which is how the generator recognised them."""
+source = """docs/NEXT_LEVEL_RESEARCH.md NL-4.1, NL-2.3"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """guest phys 0x1FCA4000, 0x1FCA4004, sub_829EEC48"""
+name = """GPU scratch write-back words"""
+what = """Every `WAIT_REG_MEM` in a race is an equality wait on one of two words in the GPU's scratch register write-back area: physical `0x1FCA4000` (toggling 0 and 4) and `0x1FCA4004` (0 and 1). Guest CPU code writes only the second, from the interrupt callback `sub_829EEC48` (thread `F800001C`); the first is written by the GPU's scratch write-backs."""
+how = """Perf counters and a wait-writer tracer on `fh1-race-sync`."""
+confidence = """confirmed"""
+note = """An earlier note called `0x1FCA4000`-`0x1FCA4017` chunk-release words written only by the title's CPU; the tracer corrected it."""
+source = """docs/DESKTOP_RENDERER_BACKLOG.md DR-0.2; docs/PERFORMANCE_BACKLOG.md PB-6.4"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """0x82C280B8, 0x82C28290, 0x82C28294, 0x82C28298, 0x82C283C0, sub_82C28070, sub_82586CD8"""
+v4 = """0x82CE8990, 0x82CE8B68, 0x82CE8B6C, 0x82CE8B70, 0x82CE8C98"""
+name = """gamma ramp builder"""
+what = """`sub_82C28070` builds a gamma ramp on the stack from a display object (r3), exponent f1, offset f2, range f3, a curve (r4) and an encoding (r5): either 128 piecewise-linear entries per channel at r1+128 or 256 per channel at r1+1664, 1,536 bytes either way. The device sits at display object +20. Its caller `sub_82586CD8` runs gamma transitions; it clamps progress to 1 but clears the transition only past 1, so after a fade the same ramp is rebuilt every frame."""
+how = """Mid-function hooks at the argument and ramp-ready sites; per-frame trace."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml gamma ramp hooks; src/native_renderer/graphics_hooks.cpp"""
+
+[[finding]]
+group = """D3D inside the game"""
+base = """sub_829F1EF8, sub_829F6D78"""
+name = """D3D SetPWLGamma"""
+what = """`sub_829F1EF8` is D3D's `SetPWLGamma` (r3 device, r5 ramp). With its converter `sub_829F6D78` it turns the ramp through the fixed display gamma table (from `VdGetCurrentDisplayGamma`) into 1,536 bytes and compares them with the device's copy at +15408, storing and marking it dirty only when it differs; the ramp is applied at the swap. Because the title calls it every frame, the two take 17 % and 13 % of the render thread's cycles in a race, although the ramp does not change."""
+how = """Traced from the gamma ramp builder and confirmed with hooks; thread sampler on the render thread; skipping unchanged ramps gave matching captures."""
+confidence = """confirmed"""
+issue = """#431"""
+source = """src/native_renderer/graphics_hooks.cpp; docs/PERFORMANCE_BACKLOG.md PB-3.12"""
+
+# ---------------------------------------------------------------------------
+# Shaders, textures and models
+# ---------------------------------------------------------------------------
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """texture asset formats"""
+what = """The textures the game loads from files are DXT1, DXT3, DXT5, DXT5A (BC4), DXN (BC5) and `8_8_8_8`, mostly DXT1 and DXT5: one free-roam dump held 565 DXT1, 107 DXT5, 32 DXN, 10 DXT5A and 12 `8_8_8_8` textures. `8_8_8_8` channels are stored in the game's own order and swizzled when drawn. Road, terrain, trees, lamps and HUD are among them; the other formats seen are render targets, not assets."""
+how = """Texture dumps from the texture cache and replacement tests (634 of 664 textures replaced in captures)."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-10.3; docs/MODDING.md Textures"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """texture formats fetched"""
+what = """22 format and dimension pairs are fetched. DXT1 2D is the most fetched (22 million), then `8_8_8_8` (mostly resolve output), `DXT4_5_AS_16_16_16_16`, DXT5, `2_10_10_10_AS_16_16_16_16` cubes (the reflection cube), DXN, `24_8`, DXT5A, `24_8_FLOAT`, `32_FLOAT`, an `8_8_8_8` 3D texture (the 16x16x16 colour-grading LUT), `8` (movie planes) and two 1D lookup textures (`1_REVERSE` and `16`). Block-compressed textures read from a resolved range are memory the CPU reused after the resolve, not resolve output."""
+how = """Census of texture fetch constants joined to earlier resolve ranges in the same 60-frame window."""
+confidence = """confirmed"""
+source = """docs/native-renderer/NATIVE_FRAME_CONTRACT.md Textures; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """reflection cube"""
+what = """The car reflection map is a persistent six-face, nine-level 256x256 cube in `2_10_10_10` (R10G10B10A2), fetched as `2_10_10_10_AS_16_16_16_16`. The game renders one face and that face's mips each frame; each face's mips take 8 draws and 8 resolves (48 of each per cube) from six cached lists of 2,352 packets per cube. Car paint fetches it trilinearly (mips 0 to 8) with the coarse derivatives of the cube direction passed as explicit gradients, which the Xenos resolves as implicit LOD plus bias."""
+how = """Command-stream contract for a mip-chain replacement (since removed) checked against captures; register captures of the paint shader on two backends; layer-level reload tracking on Android."""
+confidence = """confirmed"""
+source = """docs/native-renderer/archive/REFLECTION_MIPMAP_REPLACEMENT.md Runtime behavior, Validation; docs/NATIVE_PORT_BACKLOG.md NP-12.4; docs/ANDROID_ODIN_BACKLOG.md Cube faces and vertex multiplies"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """car glass and paint shaders"""
+what = """In free roam a traffic car's glass and paint draw into the 7e3-as-16 HDR target, whose bloom resolves spread their output. The car shader jumps over a predicated cube fetch, with a texture fetch deciding the predicate. The HDR paint and glass shaders depend on the Xenos rule that 0 times infinity is 0."""
+how = """Frame dumps bisected with draw skips, null fetches and per-draw logs; audit of the translated shaders."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-12.4; docs/PERFORMANCE_BACKLOG.md PB-1.8"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """shader program statistics"""
+what = """The disc's pixel shaders average 4.1 texture fetches and 47.6 ALU instructions, half of them `mul` or `mad`. 372 of 2,028 pixel shaders have jumps (511 forward, 2 backward, 10 loops), all reducible to nested ifs; vertex shaders are 99.2 % free of labels. A depth-only vertex shader is mostly D3D9-rule multiplies. About 200 pixel shaders run in a free-roam frame, none dominant."""
+how = """Audit of the translated disc shaders; per-shader GPU profile."""
+confidence = """confirmed"""
+source = """docs/PERFORMANCE_BACKLOG.md PB-1.8; docs/ANDROID_ODIN_BACKLOG.md Where the 4x Turnip frame goes, Cube faces and vertex multiplies"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """runtime-generated shaders"""
+what = """The title generates some shaders at run time: disc shaders patched with vertex fetches for other vertex layouts, and relinked exports, seen on car selection and in the Autoshow. The 34 vertex declarations in the assets reproduce 275 of 277 runtime vertex shaders with a disc parent; the two exceptions are DriverHands skinning variants. Five car-shader pairings read fewer interpolators than their asset declaration."""
+how = """Shader pack misses recorded per session, compared with a deterministic patcher over the extracted disc shaders."""
+confidence = """confirmed"""
+source = """docs/native-renderer/SHADER_PACK_FORMAT.md Pack misses and self-repair; docs/native-renderer/CANDIDATE_SHADER_CAPTURE.md Retail-disc corpus; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-08"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """v4 shaders"""
+what = """v4 uses the same shaders as the base game where both run: the same 825 stored pipelines recreate on both builds and render the same free-roam frame. v4 adds 163 shaders for its new content (930 in common, none base-only)."""
+how = """`fh1-map` from a seed carrying stored Vulkan shaders, on both builds."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """alpha to coverage and late depth"""
+what = """Foliage, flags, cables and signs use alpha to coverage with the console's per-pixel dither offset, which needs four samples to average. Of 1.43 million depth-writing draws, 917,000 run with late depth (alpha to coverage, alpha test or pixel kills), and none uses an EQUAL depth test. The costliest per-frame pixel shader is one fetch and 8 ALU instructions over about 210 small alpha-to-mask draws a frame."""
+how = """Draw census of depth and coverage state; per-shader GPU profile."""
+confidence = """confirmed"""
+issue = """#413"""
+source = """docs/ANDROID_ODIN_BACKLOG.md Player reports on SMOOTH 60, EDRAM passes rebuilt for Turnip, Hand-edited hot shaders"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+base = """0x82417418"""
+name = """procedural models"""
+what = """`proceduralGeometry::CProceduralModels` owns procedurally placed items (vegetation, crowds and props) drawn through display lists; its per-record helper `0x82417418` is where each record can be read. One point-to-point race event produced no vegetation items, so the family is absent in some events."""
+how = """RTTI, construction and destruction traces; scene capture runs."""
+confidence = """probable"""
+note = """What a record's mesh and material are is not established."""
+source = """docs/native-renderer/RESEARCH.md Procedural models, visibility and batching, Rayman and scene-native era"""
+
+[[finding]]
+group = """Shaders, textures and models"""
+name = """vehicle draw families"""
+what = """Car draws form 30 color families: 15 geometry contributions with two variants each, all in one material and topology group, interleaved with unrelated draws. Shader and topology hashes therefore cannot tell paint, glass, wheels, lights or livery apart, and matching raw constants and world positions did not find the final vehicle transform."""
+how = """Prepared-draw census and private replay of the car families."""
+confidence = """confirmed"""
+negative = true
+source = """docs/native-renderer/RESEARCH.md Vehicles and shadow epochs"""
+
+[[finding]]
+group = """Frame structure and views"""
+name = """GPU registers the title reads"""
+what = """Through the register read path (`GraphicsSystem::ReadRegister`, which the guest reaches by MMIO loads) a full race reads exactly two registers: `CP_PROG_COUNTER` (0x044B) and `D1MODE_VBLANK_VLINE_STATUS` (0x1951, the vblank status its interrupt handler polls). It never reads `D1MODE_V_COUNTER` (0x194C), so a free-running vertical counter (xenia-edge `9d93773228`) would change nothing for FH1, and it is not the lead for #381."""
+how = """`gpu_log_register_reads=true` logs the first guest read of each register; one race route (`fh1-race-sustained`, boot to race end)."""
+confidence = """confirmed"""
+negative = true
+source = """docs/NEXT_LEVEL_RESEARCH.md NL-5"""

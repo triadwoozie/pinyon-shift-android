@@ -42,6 +42,15 @@ class GraphicsSettingsTests(unittest.TestCase):
             self.assertEqual(result["settings"]["fh1_render_fps_limit"], 40)
             result = self.run_tool(state, "-Action", "Apply", "-RenderFps", "30")
             self.assertEqual(result["settings"]["game_preset"], "custom")
+            # ULTRA LOW 30 turns shadows off; the other presets turn them back on.
+            result = self.run_tool(state, "-Action", "Apply", "-GamePreset", "ultra_low_30")
+            self.assertEqual(result["settings"]["game_preset"], "ultra_low_30")
+            text = (state / "config/pinyon_shift.toml").read_text(encoding="utf-8")
+            self.assertIn("pinyon_shift_fh1_shadows = false", text)
+            result = self.run_tool(state, "-Action", "Apply", "-GamePreset", "low_spec_60")
+            self.assertEqual(result["settings"]["game_preset"], "low_spec_60")
+            text = (state / "config/pinyon_shift.toml").read_text(encoding="utf-8")
+            self.assertIn("pinyon_shift_fh1_shadows = true", text)
 
     def test_apply_migrates_schema_and_restore_recovers_previous_file(self):
         with tempfile.TemporaryDirectory(prefix="pinyon-settings-") as temporary:

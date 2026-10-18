@@ -1,4 +1,5 @@
 """Xenia save import: XUID detection, no overwrite, and setting selection."""
+import json
 import os
 from pathlib import Path
 import shutil
@@ -57,6 +58,18 @@ class ImportXeniaSaveTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('user_xuid = "B13EBABEBABEBABE"', (state / "config/pinyon_shift.toml").read_text())
             self.assertTrue(copied.is_dir())
+
+    def test_a_v4_save_says_to_use_the_v4_build(self):
+        # A save from Xenia running title update v4 (#555).
+        with tempfile.TemporaryDirectory() as directory:
+            title, state = self.fixture(Path(directory))
+            (title / "00000001" / "ForzaProfile" / "VersionFlags").write_bytes(
+                b"cmss" + bytes.fromhex("0000000400000002") + bytes(124))
+            result = run("-StateRoot", str(state), "-Source", str(title))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertEqual(record["title_update"], "v4")
+            self.assertIn("turn on Use v4 to play it", record["note"])
 
     def test_requires_a_usable_xuid(self):
         with tempfile.TemporaryDirectory() as directory:

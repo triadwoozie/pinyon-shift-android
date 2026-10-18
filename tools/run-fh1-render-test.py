@@ -428,8 +428,12 @@ def parse_scenario(
             if int(fields[1]) <= previous_hostkey:
                 raise ValueError(f"line {number}: host keys must be in increasing frame order")
             previous_hostkey = int(fields[1])
-        elif fields[0] == "cvar" and len(fields) == 4:
-            # cvar <frame> <name> <value>: a settings change at run time.
+        elif (fields[0] == "cvar" and len(fields) == 4) or (
+            fields[0] == "audiocapture" and len(fields) == 2
+        ):
+            # cvar <frame> <name> <value>: a settings change at run time;
+            # audiocapture <frame>: eight seconds of the native mix to
+            # rally-audio-probe.wav.
             if int(fields[1]) <= previous_hostkey:
                 raise ValueError(f"line {number}: host keys must be in increasing frame order")
             previous_hostkey = int(fields[1])
@@ -2033,7 +2037,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     performance = json.loads(perf.stdout)
     # The null GPU backend presents nothing and paces differently; its runs are
     # judged by the simulation-time ratio, as on Android (AP-0.5).
-    if performance_limits and not args.null_gpu:
+    if performance_limits and not args.null_gpu and not args.no_performance_gate:
         median_max, present_min, simulation_min, simulation_max = performance_limits
         median = performance["frames"]["frame_time_us"]["median"]
         cadence = performance["presentation"]["cadence_hz"]
@@ -2266,6 +2270,10 @@ def main() -> int:
     # Low-end hardware sensitivity runs (LOW_SPEC_BACKLOG LS-0.5). They keep
     # this machine's caches, memory and driver: label results as sensitivity
     # data, not another machine's numbers.
+    parser.add_argument(
+        "--no-performance-gate", action="store_true",
+        help="do not fail the run on the frame-time or simulation-time limits "
+             "(instrumented builds, such as the probe build, run slower by design)")
     parser.add_argument(
         "--host-cpus", metavar="LIST",
         help="run the game on these logical processors only (host_cpu_simulation), "

@@ -167,6 +167,74 @@ class ToolchainPinTests(unittest.TestCase):
             pinyon_setup.discard_unfinished_configure(build)
             self.assertTrue((build / "CMakeCache.txt").exists())
 
+    def test_a_build_whose_translation_rewrote_the_lists_runs_again(self):
+        with tempfile.TemporaryDirectory() as temp:
+            build = Path(temp) / "build"
+            generated = Path(temp) / "generated"
+            build.mkdir()
+            (build / "build.ninja").write_text("")
+            for tree in ("default", "speech", "xmedia"):
+                (generated / tree).mkdir(parents=True)
+                (generated / tree / "sources.cmake").write_text("")
+            old = (build / "build.ninja").stat().st_mtime - 60
+            for tree in ("default", "speech", "xmedia"):
+                pinyon_setup.os.utime(generated / tree / "sources.cmake", (old, old))
+            logs = []
+
+            def fake_run(command, log, *rest):
+                logs.append(log.name)
+                if len(logs) == 1:
+                    if rewrite:
+                        # The translation step rewrote one list mid-build.
+                        newer = (build / "build.ninja").stat().st_mtime + 60
+                        pinyon_setup.os.utime(generated / "xmedia" / "sources.cmake",
+                                              (newer, newer))
+                    raise pinyon_setup.SetupError("Building the game failed", "build")
+
+            saved = pinyon_setup.run_logged
+            pinyon_setup.run_logged = fake_run
+            try:
+                rewrite = True
+                pinyon_setup.run_game_build(["cmake"], Path(temp) / "preview-build.log",
+                                            None, 30, "Building the game", {}, build, generated)
+                self.assertEqual(logs, ["preview-build.log", "preview-build-retry.log"])
+                # Lists older than the graph: the failure is real and is not retried.
+                for tree in ("default", "speech", "xmedia"):
+                    pinyon_setup.os.utime(generated / tree / "sources.cmake", (old, old))
+                logs.clear()
+                rewrite = False
+                with self.assertRaises(pinyon_setup.SetupError):
+                    pinyon_setup.run_game_build(["cmake"], Path(temp) / "preview-build.log",
+                                                None, 30, "Building the game", {}, build,
+                                                generated)
+                self.assertEqual(logs, ["preview-build.log"])
+            finally:
+                pinyon_setup.run_logged = saved
+
+    def test_the_cpu_baseline_follows_the_build_cpu(self):
+        deck = ("fpu sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand abm fma bmi1 "
+                "avx2 bmi2")
+        cases = {deck: "v3", "sse4_1 fma avx avx2": "fma", "sse4_1 sse4_2": "sse4.1"}
+        with tempfile.TemporaryDirectory() as temp:
+            cpuinfo = Path(temp) / "cpuinfo"
+            saved = pinyon_setup.os.environ.pop("PINYON_SHIFT_CPU_BASELINE", None)
+            try:
+                for flags, expected in cases.items():
+                    cpuinfo.write_text(f"processor\t: 0\nflags\t\t: {flags}\n")
+                    self.assertEqual(pinyon_setup.cpu_baseline("linux-x86_64", cpuinfo),
+                                     expected)
+                pinyon_setup.os.environ["PINYON_SHIFT_CPU_BASELINE"] = "sse4.1"
+                cpuinfo.write_text(f"flags\t\t: {deck}\n")
+                self.assertEqual(pinyon_setup.cpu_baseline("linux-x86_64", cpuinfo), "sse4.1")
+                pinyon_setup.os.environ["PINYON_SHIFT_CPU_BASELINE"] = "avx512"
+                with self.assertRaises(pinyon_setup.SetupError):
+                    pinyon_setup.cpu_baseline("linux-x86_64", cpuinfo)
+            finally:
+                pinyon_setup.os.environ.pop("PINYON_SHIFT_CPU_BASELINE", None)
+                if saved is not None:
+                    pinyon_setup.os.environ["PINYON_SHIFT_CPU_BASELINE"] = saved
+        self.assertEqual(pinyon_setup.cpu_baseline("macos-arm64"), "native")
+
     def test_the_payload_ships_the_posix_setup(self):
         script = (ROOT / "tools/package-launcher.ps1").read_text(encoding="utf-8")
         include = script.split("$include = @(", 1)[1].split("\n)", 1)[0]

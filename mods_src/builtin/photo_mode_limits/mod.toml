@@ -1,0 +1,6 @@
+name = "photo_mode_limits"
+version = "1.0.0"
+abi = 1
+# Widens the photo mode camera's limits (#488): only camera settings, never
+# saved data, so the player keeps their own save.
+shares_save = true

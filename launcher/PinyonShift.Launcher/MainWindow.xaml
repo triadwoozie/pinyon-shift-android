@@ -76,7 +76,12 @@
 
             <!-- Body: the state in one headline, one line of detail, the action,
                  and a panel when there is something to do here. -->
-            <StackPanel Grid.Row="1" VerticalAlignment="Center" Margin="56,0,56,36">
+            <!-- Scrolls when the window is shorter than the body, as at 300 % scaling
+                 on a 4K TV (#594); centred otherwise. -->
+            <ScrollViewer x:Name="BodyScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <Grid MinHeight="{Binding ViewportHeight, ElementName=BodyScroll}">
+            <StackPanel VerticalAlignment="Center" Margin="56,0,56,36">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -469,6 +474,9 @@
                             <ComboBoxItem Tag="bilinear">Bilinear</ComboBoxItem>
                             <ComboBoxItem Tag="cas">CAS sharpening</ComboBoxItem>
                             <ComboBoxItem Tag="fsr">FSR 1</ComboBoxItem>
+                            <ComboBoxItem Tag="fsr2">FSR 2 (temporal)</ComboBoxItem>
+                            <ComboBoxItem Tag="fsr3">FSR 3 (temporal)</ComboBoxItem>
+                            <ComboBoxItem Tag="dlss">DLSS (temporal, NVIDIA)</ComboBoxItem>
                         </ComboBox>
                         <TextBlock Grid.Row="2" Grid.ColumnSpan="5" x:Name="ResolutionLineText" Margin="0,14,0,0"
                                    FontSize="13.5" Foreground="{StaticResource FogBrush}" TextWrapping="Wrap"
@@ -514,6 +522,8 @@
                 </Border>
             </Grid>
             </StackPanel>
+            </Grid>
+            </ScrollViewer>
 
             <!-- Footer. -->
             <DockPanel Grid.Row="2" Margin="46,0,46,0" LastChildFill="False">

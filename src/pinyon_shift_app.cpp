@@ -1,7 +1,10 @@
 #include "pinyon_shift_app.h"
+#include "auto_start.h"
 #include "pinyon_shift_init.h"
 #include "fh1_render_test.h"
+#include "audio_mix.h"
 #include "dlc/rally_audio_probe.h"
+#include "guest_native/retire_code.h"
 #include "dlc/rally_pace_notes.h"
 
 #include <cmath>
@@ -29,6 +32,7 @@
 #include <rex/input/sdl/joystick_mapping.h>
 #include <rex/ui/flags.h>
 #include <rex/ui/keybinds.h>
+#include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/presenter.h>
 #if REX_HAS_VULKAN
 #include <rex/ui/vulkan/provider.h>
@@ -51,6 +55,7 @@
 #include "ui/host_style.h"
 #include "ui/hostui/host_ui.h"
 #include "cheats.h"
+#include "hud_toggle.h"
 #include "mod/mod_host.h"
 #include "mod/overlay_device.h"
 #include "save/car_cards.h"
@@ -136,6 +141,9 @@ std::filesystem::path LongHostPath(std::filesystem::path path) {
 // driving-first keys (#432), older ones the keys they already had.
 constexpr uint32_t kConfigSchema = 29;
 
+// For START IN SINGLE PLAYER, armed once the settings are loaded.
+std::filesystem::path g_user_data_root;
+
 bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
                            bool& migrated) {
   created = false;
@@ -191,7 +199,28 @@ bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
   if (!config_contents) {
     return false;
   }
-  const std::string& config_text = *config_contents;
+  std::string config_text = *config_contents;
+  // The DualSense page on dev for a few hours of 2026-10-13 wrote its two
+  // string settings unquoted, which makes the whole file invalid TOML and
+  // drops every setting at startup; quote them.
+  {
+    const std::regex bare_dualsense(
+        R"((^|\n)(\s*pad_ds_(?:triggers|lightbar)\s*=\s*)([A-Za-z]+)(?=\s*(?:#[^\n]*)?(?:\r?\n|$)))");
+    if (std::regex_search(config_text, bare_dualsense)) {
+      std::filesystem::path backup = path;
+      backup += ".dualsense.bak";
+      std::error_code backup_error;
+      std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing,
+                                 backup_error);
+      const std::string repaired =
+          std::regex_replace(config_text, bare_dualsense, "$1$2\"$3\"");
+      if (backup_error || !pinyon_shift::config::WriteAtomically(path, repaired)) {
+        return false;
+      }
+      config_text = repaired;
+      migrated = true;
+    }
+  }
   const std::regex schema_pattern(
       R"((?:^|\n)\s*pinyon_shift_config_schema\s*=\s*([0-9]+)\s*(?:#.*)?(?:\r?\n|$))");
   std::smatch match;
@@ -222,6 +251,12 @@ bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
   try {
     const uint32_t schema = std::stoul(match[1].str());
     if (schema == kConfigSchema) {
+      return true;
+    }
+    if (schema > kConfigSchema) {
+      // A newer launcher or game wrote it: an update whose build did not
+      // finish, or a downgrade (#536). Its settings are a superset of this
+      // build's, so keep the file unchanged; unknown settings are ignored.
       return true;
     }
     if (schema < 1 || schema >= kConfigSchema) {
@@ -594,6 +629,7 @@ void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
   }
 
   config_created_ = config_created;
+  g_user_data_root = paths.user_data_root;
   if (REXCVAR_GET(log_file).empty()) {
     REXCVAR_SET(log_file, rex::path_to_utf8(state_root / "logs" / "runtime.log"));
   }
@@ -711,10 +747,21 @@ void PinyonShiftApp::OnPostInitLogging() {
 
 void PinyonShiftApp::OnPreSetup(rex::RuntimeConfig& config) {
   rex::system::SetHostGpuLossHandler(&OnHostGpuLoss);
+  // The window title and the F3 overlay name this release and its commits.
+  rex::ui::SetBuildLabel(pinyon_shift::diagnostics::BuildLabel());
   config.gpu_plugin =
       pinyon_shift::platform::EnvironmentVariable("PINYON_SHIFT_FH1_DISC_SHADER_CORPUS_DIR")
           ? "fh1-producer"
           : "fh1";
+  // A config without a gpu_backend line (rewritten by something that keeps
+  // only the settings it knows) leaves the SDK default "any", which is
+  // Direct3D 12 on Windows. Players have no Direct3D 12 shader catalog, so
+  // every draw failed and the window stayed white (#613, #627, #382).
+  if (config.gpu_plugin == "fh1" && rex::cvar::GetFlagByName("gpu_backend") == "any") {
+    rex::cvar::SetFlagByName("gpu_backend", "vulkan");
+    pinyon_shift::diagnostics::RecordEvent("config.gpu_backend_defaulted",
+                                           {{"from", "any"}, {"to", "vulkan"}});
+  }
   pinyon_shift::fh1_render_test::Configure(config);
   pinyon_shift::rally::ConfigureAudioProbe(config);
   // The on-screen controls feed user 0 beside any controller (AP-4.2);
@@ -727,6 +774,31 @@ void PinyonShiftApp::OnPreSetup(rex::RuntimeConfig& config) {
         if (auto* system = dynamic_cast<rex::input::InputSystem*>(input.get())) {
           system->AddDriver(pinyon_shift::ui::TouchPad::Get().CreateDriver());
         }
+      }
+      return input;
+    };
+  }
+  // START IN SINGLE PLAYER (#617) presses A through its own synthetic pad.
+  if (pinyon_shift::auto_start::Configure(g_user_data_root) && config.input_factory) {
+    config.input_factory = [base = config.input_factory](bool tool_mode) {
+      auto input = base(tool_mode);
+      if (!tool_mode) {
+        if (auto* system = dynamic_cast<rex::input::InputSystem*>(input.get())) {
+          system->AddDriver(pinyon_shift::auto_start::CreateDriver());
+        }
+      }
+      return input;
+    };
+  }
+  // FH1 has no split screen and only user 0 is signed in, so every pad plays
+  // as user 0. With slot assignment a pad in XInput slot 2+ (behind a virtual
+  // Steam Input or ViGEm pad, or a wheel) pressed Start as user 1 and hit NO
+  // GAMER PROFILES (#553). Routes keep their own slot assignment.
+  if (!pinyon_shift::fh1_render_test::Enabled() && config.input_factory) {
+    config.input_factory = [base = config.input_factory](bool tool_mode) {
+      auto input = base(tool_mode);
+      if (auto* system = dynamic_cast<rex::input::InputSystem*>(input.get())) {
+        system->SetDeviceAssignment(std::make_unique<rex::input::SharedAssignment>());
       }
       return input;
     };
@@ -912,6 +984,11 @@ void PinyonShiftApp::OpenSettingsMenu() {
                ? std::pair{height * 16 / 9, height}
                : std::pair{width, width * 9 / 16};
   };
+  services.upscalers = [this]() -> std::vector<rex::ui::UpscalerInfo> {
+    auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
+    auto* presenter = graphics ? graphics->presenter() : nullptr;
+    return presenter ? presenter->GetUpscalers() : rex::ui::GetSpatialUpscalerInfos();
+  };
   services.save_photo = [this] {
     pinyon_shift::ui::SavePhoto(runtime() && runtime()->graphics_system()
                                     ? runtime()->graphics_system()->presenter()
@@ -939,7 +1016,9 @@ void PinyonShiftApp::UpdateHorPlus() {
 }
 
 void PinyonShiftApp::ApplyMapView(bool open) {
-  map_view_open_ = open;
+  // The HUD scale (#520) is for the gameplay HUD; the map's and the menus'
+  // screens are drawn through the same HUD view and keep their size.
+  rex::cvar::SetFlagByName("fh1_hud_scale_suspended", open ? "true" : "false");
 #if defined(__ANDROID__)
   if (REXCVAR_GET(pinyon_shift_hor_plus)) {
     rex::cvar::SetFlagByName("present_letterbox", "false");
@@ -974,6 +1053,13 @@ void PinyonShiftApp::OnPostSetup() {
     rex::cvar::SetFlagByName("present_letterbox", "false");
   }
   UpdateHorPlus();
+  // Until the player has a car, DualSense trigger effects stay slack.
+  if (auto* input = runtime() ? dynamic_cast<rex::input::InputSystem*>(runtime()->input_system())
+                              : nullptr) {
+    input->SetFeedbackDriving(false);
+  }
+  // The title-frame hook then sets it each frame from the player's car and
+  // this same gameplay-view switch.
   PinyonShiftSetMapViewCallback([this](bool open) {
     if (window()) {
       window()->app_context().CallInUIThreadDeferred([this, open] { ApplyMapView(open); });
@@ -1029,6 +1115,8 @@ void PinyonShiftApp::OnPostSetup() {
                                     ? runtime()->graphics_system()->presenter()
                                     : nullptr);
   });
+  rex::ui::RegisterBind("bind_hud", pinyon_shift::config::kHudKeys,
+                        "Hide or show the HUD (for screenshots)", [] { pinyon_shift::hud::Toggle(); });
   rex::ui::RegisterBind("bind_music_next", pinyon_shift::config::kMusicNextKeys,
                         "Your music: next track", [] { pinyon_shift::music::Next(); });
   rex::ui::RegisterBind("bind_music_previous", pinyon_shift::config::kMusicPreviousKeys,
@@ -1116,6 +1204,15 @@ void PinyonShiftApp::OnPostSetup() {
   auto overlays = pinyon_shift::mod::OverlayRoots();
   const bool builtin_rally = PinyonShiftUseBuiltinRallyAdapter();
   if (builtin_rally) overlays.push_back(PinyonShiftRallyAdapterRoot() / "game");
+  // The audio mixer's copy of the levels, made from the mods' or the disc's.
+  {
+    auto sources = overlays;
+    sources.push_back(game_data_root());
+    if (auto mix = pinyon_shift::audio_mix::Prepare(pinyon_shift::diagnostics::StateRoot(),
+                                                    sources)) {
+      overlays.insert(overlays.begin(), std::move(*mix));
+    }
+  }
   if (!overlays.empty()) {
     for (auto& root : overlays) root = LongHostPath(root);
     constexpr const char* kGameMount = "\\Device\\Harddisk0\\Partition1";
@@ -1178,6 +1275,7 @@ void PinyonShiftApp::OnPostSetup() {
     }
   }
 #endif
+  pinyon_shift::guest_native::RetireGuestCode(runtime() ? runtime()->memory() : nullptr);
   pinyon_shift::diagnostics::RecordEvent(
       "runtime.setup.complete",
       {{"memory", runtime() && runtime()->memory() ? "1" : "0"},
@@ -1321,6 +1419,7 @@ void PinyonShiftApp::OnShutdown() {
   rex::ui::UnregisterBind("bind_fullscreen");
   rex::ui::UnregisterBind("bind_quit");
   rex::ui::UnregisterBind("bind_photo");
+  rex::ui::UnregisterBind("bind_hud");
   rex::ui::UnregisterBind("bind_trainer");
   rex::ui::UnregisterBind("bind_music_next");
   rex::ui::UnregisterBind("bind_music_previous");

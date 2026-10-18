@@ -17,6 +17,20 @@ longjmp_address = 0x82B3F300
 # hooks, the setjmp copy, longjmp and exceptions keep a full sync.
 cr_as_local = true
 
+# CTR and XER are volatile across calls and dead at every return address, so a
+# function keeps them in zero-initialized locals that never touch ctx
+# (NEXT_LEVEL_RESEARCH.md NL-1.3). FH1 has no overflow-enabled integer
+# instruction and its one mtxer restores a saved context, so XER.SO is never
+# set: with the local, the SO copy in every compare folds to zero.
+ctr_as_local = true
+xer_as_local = true
+
+# The title's fibers run on host fibers ([rexcrt] below), so the host call
+# chain is never abandoned at a guest stack switch and no function needs an
+# entry at a return address: no resume switch, no resume aliases
+# (NEXT_LEVEL_RESEARCH.md NL-1.2).
+interior_resume = false
+
 # Scripted, default-off companion experiment: match the complete original
 # decoded member at the borrowed-buffer stream constructor. This avoids ZIP
 # repacking and does not enable the older scene_insert pointer repairs.
@@ -723,6 +737,16 @@ registers = ["r10"]
 # storing it at +448 on the main-loop owner and dispatching update systems.
 # Accumulate that title-authored delta for wall-time validation without
 # changing the register, store, or update cadence.
+# The guest vblank callback sub_824ABBD8 has decided whether to raise the
+# simulation's step event (r11, low byte non-zero to raise; it then resets its
+# vblank count). The step gate (#381, pinyon_shift_step_backpressure) holds
+# the raise while the render thread is two steps behind; the render thread's
+# next swap raises it.
+[[midasm_hook]]
+address = 0x824ABC50
+name = "PinyonShiftGateSimulationStep"
+registers = ["r11"]
+
 [[midasm_hook]]
 address = 0x8241DC44
 name = "PinyonShiftObserveSimulationDelta"
@@ -749,6 +773,24 @@ address = 0x8247184C
 name = "PinyonShiftTraceRetainVtable"
 registers = ["r4", "r11", "r30", "r31"]
 jump_address_on_true = 0x82471858
+
+# sub_82E180E0 is the other intrusive-pointer assignment: AddRef the new object
+# (vtable+8), store it, Release the old one (vtable+12). #584 reached its
+# Release with the freed object the guard above had just refused (vtable
+# 0x07E0487C, heap data) and faulted at vtable+12. Skip either call when
+# the vtable is not in the title image: a dangling new object is stored
+# as null, and a dangling old one is not released.
+[[midasm_hook]]
+address = 0x82E1810C
+name = "PinyonShiftGuardAssignAddRef"
+registers = ["r11", "r30", "r31"]
+jump_address_on_true = 0x82E18118
+
+[[midasm_hook]]
+address = 0x82E1812C
+name = "PinyonShiftGuardAssignRelease"
+registers = ["r3", "r11", "r30"]
+jump_address_on_true = 0x82E18138
 
 # Default-off read-only #359/#368/#373 ownership comparison. Pair the live
 # child slot/vtable around the parent virtual call, before the wrapper clears
@@ -899,9 +941,9 @@ address = 0x828FF264
 name = "PinyonShiftCameraFieldOfView"
 registers = ["f1"]
 
-# #443: sub_82857B00 (v4 sub_82907F88) updates one camera physics layer
-# (r31) each frame: it stores the layer's input through its curve and noise
-# at [r1+96], then multiplies the layer's Param by it. The immersive camera
+# #443: sub_82857B00 updates one camera physics layer (r31) each
+# frame: it stores the layer's input through its curve and noise at
+# [r1+96], then multiplies the layer's Param by it. The immersive camera
 # setting scales that factor for the built-in mod's tagged layers, so a
 # sprung layer eases to its new strength and 0 switches the effect off.
 [[midasm_hook]]
@@ -1335,6 +1377,19 @@ size = 0x28
 memcpy = 0x82B3A7E0
 memmove = 0x82B3AD50
 memset = 0x82B3C1F0
+# XAPI's fiber functions, served by the SDK's host fibers
+# (kernel/crt/threading.cpp). Found from the only callers of
+# KeSetCurrentStackPointers: SwitchToFiber tail-calls the context switch;
+# CreateFiber allocates a 2,640-byte context (the SDK's X_FIBER_CONTEXT size)
+# and a kernel stack with the entry thunk 0x831ADD20; ConvertThreadToFiber
+# fails with ERROR_ALREADY_FIBER (1280) when KTHREAD+0x164 is set;
+# DeleteFiber frees the kernel stack. GetCurrentFiber (0x831ADAE0) stays
+# guest code: it reads the KTHREAD field the SDK maintains.
+ConvertThreadToFiber = 0x831ADAF0
+ConvertFiberToThread = 0x831ADB80
+CreateFiber = 0x831ADBD0
+DeleteFiber = 0x831ADCB0
+SwitchToFiber = 0x831ADD10
 
 # Scale the render scenario's EnvMapFrequencyScale and record the scenarios
 # for pinyon_shift_fh1_shadows after the title loads a DynamicRenderSettings
@@ -1344,6 +1399,84 @@ memset = 0x82B3C1F0
 address = 0x82E43458
 name = "PinyonShiftRenderSettingLoaded"
 registers = ["r26", "r30"]
+
+# Skip the empty element walk of the title's array release (sub_8282EA80)
+# and go straight to its free (src/pinyon_shift_runtime_hooks.cpp).
+[[midasm_hook]]
+address = 0x82D19DE8
+name = "PinyonShiftArrayReleaseWalk"
+context = true
+jump_address_on_true = 0x82D19DF8
+
+# The trainer's any car in any event (FB-12.3): in sub_826087A0, which reads
+# an event's EventRestrictions rows (r25 the event id), skip the decode of a
+# row's Value (sub_825FE8B0) into the record at r1+176, which sub_825F3138
+# has just set up with no limits; the record is still added
+# (src/pinyon_shift_runtime_hooks.cpp).
+[[midasm_hook]]
+address = 0x826AF10C
+name = "PinyonShiftAnyCarEventRestriction"
+registers = ["r25"]
+jump_address_on_true = 0x826AF118
+
+# The same cheat for the event's class: sub_825F6ED8 stamps a limit derived
+# from Events.TargetClass (r4) into every bucket-0 restriction record; skip
+# from after its frame is set up to its epilogue
+# (src/pinyon_shift_runtime_hooks.cpp).
+[[midasm_hook]]
+address = 0x8269B3C4
+name = "PinyonShiftAnyCarEventClass"
+registers = ["r4"]
+jump_address_on_true = 0x8269B488
+
+# #482 AI OPPONENTS (pinyon_shift_ai_opponents, src/pinyon_shift_runtime_hooks.cpp):
+# the event's opponent difficulty before sub_8249BCB8 picks the database
+# column suffix (r3); the car spawn's call to the AI config fill
+# (sub_829ADAC0: skill r5, temperament r6, difficulty r8) and the filled
+# config at r1+464 right after it; and the post-race SkillAdjustment (f1)
+# that sub_8261C3B8 adds to the profile's Main/AISkill.
+[[midasm_hook]]
+address = 0x826B01C8
+name = "PinyonShiftAiEventDifficulty"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x82521224
+name = "PinyonShiftAiSpawnSkill"
+registers = ["r5", "r6", "r8"]
+
+[[midasm_hook]]
+address = 0x82521228
+name = "PinyonShiftAiSpawnConfig"
+registers = ["r1"]
+
+[[midasm_hook]]
+address = 0x826C39E8
+name = "PinyonShiftAiSkillAdjustment"
+registers = ["f1"]
+
+# Its default-off trace (pinyon_shift_ai_trace): entry of the per-AI torque
+# application, r3 the AI controller, and the entries of the two AI skill
+# assignment paths and the post-race dynamic difficulty update. Read-only.
+[[midasm_hook]]
+address = 0x82C40080
+name = "PinyonShiftAiTraceDrive"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x826B0170
+name = "PinyonShiftAiTraceEventSkills"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x826C7598
+name = "PinyonShiftAiTraceDynamicSkills"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x826C3800
+name = "PinyonShiftAiTraceDynamicUpdate"
+registers = ["r3"]
 
 # Virtual-call thunks discovered in the v4 image (vcall_thunks in
 # tools/map-fh1-v4-addresses.py). Entries marked THUNK above are covered here.
@@ -2106,11 +2239,3 @@ size = 0x10
 
 [functions."82FEF0E8"]
 size = 0x14
-
-# Skip the empty element walk of the title's array release (sub_8282EA80)
-# and go straight to its free (src/pinyon_shift_runtime_hooks.cpp).
-[[midasm_hook]]
-address = 0x82D19DE8
-name = "PinyonShiftArrayReleaseWalk"
-context = true
-jump_address_on_true = 0x82D19DF8

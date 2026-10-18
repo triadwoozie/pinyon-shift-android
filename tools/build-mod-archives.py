@@ -9,6 +9,22 @@ members:
   mods/<name>/members/<archive path>/<member path>
   e.g. mods/my_mod/members/media/StringTables/EN.zip/PauseMenu.str
 
+or add members the archive does not have (new textures, decals, string
+tables; #503), stored after the existing ones:
+
+  mods/<name>/add/<archive path>/<member path>
+  e.g. mods/my_mod/add/media/ui/Textures.zip/A_Map/MyLogo.xds
+
+A name under members/ or merge/ must exist and one under add/ must not, so a
+misspelt replacement fails instead of adding a member nothing reads.
+
+String tables take new and changed strings by IDS_ name, in every part of the
+table (the key is a hash of the name; fh1-strings.py string_reference gives
+the "_&N" a database row uses), for one language or ALL of them:
+
+  mods/<name>/strings/<language or ALL>/<Table>.toml
+  e.g. mods/my_mod/strings/ALL/List_CarMake.toml: IDS_Make_Pinyon = "Pinyon"
+
 or edit single settings by key, so that several mods can change the same
 member (NP-10.2):
 
@@ -49,6 +65,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 import zlib
 from pathlib import Path
 from xml.etree import ElementTree
@@ -77,6 +94,16 @@ def _patches_module():
         "build_mod_patches", Path(__file__).with_name("build-mod-patches.py"))
     module = importlib.util.module_from_spec(spec)
     assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def _strings_module():
+    spec = importlib.util.spec_from_file_location(
+        "fh1_strings", Path(__file__).with_name("fh1-strings.py"))
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    sys.modules.setdefault(spec.name, module)
     spec.loader.exec_module(module)
     return module
 
@@ -123,10 +150,12 @@ def _set_data_offset(record: bytearray, offset: int) -> None:
         at += 4 + size
 
 
-def rebuild(data: bytes, replacements: dict[str, bytes]) -> tuple[bytes, int, int, int]:
+def rebuild(data: bytes, replacements: dict[str, bytes],
+            additions: dict[str, bytes] | None = None) -> tuple[bytes, int, int, int]:
     """The archive with `replacements` (lower-case member name with
-    backslashes -> bytes) stored uncompressed; returns (archive, dirstart,
-    dirsize, direntries).
+    backslashes -> bytes) stored uncompressed, and `additions` (new member
+    name as stored, with forward slashes -> bytes) stored after the existing
+    members; returns (archive, dirstart, dirsize, direntries).
     As in the title's zipmanifest.xml, dirsize covers the central directory
     and the end record after it."""
     records, _ = read_central(data)
@@ -160,10 +189,31 @@ def rebuild(data: bytes, replacements: dict[str, bytes]) -> tuple[bytes, int, in
         struct.pack_into("<I", record, CENTRAL_OFFSET_FIELD, new_offset)
         _set_data_offset(record, new_offset + (body_at - info["offset"]))
         central += record
+    # New members are appended: the title's archives are not all sorted
+    # (ui/Textures.zip, gamemodes.zip), so it does not search them by order.
+    # Their headers copy the first member's version and time, as the title's
+    # writer made them, with the data-offset extra field.
+    count = len(records)
+    if additions:
+        first = CENTRAL.unpack_from(records[0][0]) if records else None
+        version, time, date = (first[2], first[5], first[6]) if first else (10, 0, 0x21)
+        for name, body in additions.items():
+            encoded = name.encode("cp437")
+            crc = zlib.crc32(body) & 0xFFFFFFFF
+            offset = len(out)
+            out += LOCAL.pack(LOCAL_SIGNATURE, version, 0, 0, time, date, crc, len(body), len(body),
+                              len(encoded), 0)
+            out += encoded + body
+            extra = struct.pack("<HHI", DATA_OFFSET_EXTRA, 4, offset + LOCAL.size + len(encoded))
+            central += CENTRAL.pack(CENTRAL_SIGNATURE, version, version, 0, 0, time, date, crc,
+                                    len(body), len(body), len(encoded), len(extra), 0, 0, 0, 0,
+                                    offset)
+            central += encoded + extra
+            count += 1
     dirstart = len(out)
     out += central
-    out += END.pack(END_SIGNATURE, 0, 0, len(records), len(records), len(central), dirstart, 0)
-    return bytes(out), dirstart, len(central) + END.size, len(records)
+    out += END.pack(END_SIGNATURE, 0, 0, count, count, len(central), dirstart, 0)
+    return bytes(out), dirstart, len(central) + END.size, count
 
 
 def _manifest_line(text: str, archive: str) -> re.Match:
@@ -218,6 +268,58 @@ def collect(state: Path, mods: list[str]) -> dict[str, dict[str, tuple[str, Path
             archive = "/".join(parts[:split + 1]).lower()
             member = "\\".join(parts[split + 1:]).lower()
             archives.setdefault(archive, {}).setdefault(member, (mod, file))
+    return archives
+
+
+def collect_additions(state: Path, mods: list[str]) -> dict[str, dict[str, tuple[str, str, Path]]]:
+    """archive -> lower-case member -> (mod, member name as stored, file)
+    from add/ folders; the earliest mod wins, as for replacements."""
+    archives: dict[str, dict[str, tuple[str, str, Path]]] = {}
+    for mod in mods:
+        root = state / "mods" / mod / "add"
+        if not root.is_dir():
+            continue
+        for file in sorted(p for p in root.rglob("*") if p.is_file()):
+            parts = file.relative_to(root).parts
+            split = next((i for i, part in enumerate(parts) if part.lower().endswith(".zip")), None)
+            if split is None or split == len(parts) - 1:
+                continue
+            archive = "/".join(parts[:split + 1]).lower()
+            stored = "/".join(parts[split + 1:])
+            member = stored.replace("/", "\\").lower()
+            archives.setdefault(archive, {}).setdefault(member, (mod, stored, file))
+    return archives
+
+
+STRING_TABLES = "media/stringtables"
+
+
+def collect_strings(state: Path, mods: list[str],
+                    game_root: Path) -> dict[str, dict[str, list[tuple[str, dict[str, str]]]]]:
+    """archive -> lower-case table member -> [(mod, {IDS_ name: text})] in
+    load order, from mods/<mod>/strings/<language or ALL>/<Table>.toml."""
+    tables_dir = find_case_insensitive(game_root, STRING_TABLES)
+    languages = sorted(p.stem for p in tables_dir.iterdir()
+                       if p.suffix.lower() == ".zip") if tables_dir else []
+    archives: dict[str, dict[str, list[tuple[str, dict[str, str]]]]] = {}
+    for mod in mods:
+        root = state / "mods" / mod / "strings"
+        if not root.is_dir():
+            continue
+        for file in sorted(root.glob("*/*.toml")):
+            language = file.parent.name
+            targets = languages if language.upper() == "ALL" else [
+                next((name for name in languages if name.lower() == language.lower()), None)]
+            if targets == [None]:
+                raise ArchiveError(f"{mod}: no string tables for language {language}")
+            with file.open("rb") as handle:
+                strings = tomllib.load(handle)
+            if not all(isinstance(text, str) for text in strings.values()):
+                raise ArchiveError(f"{file}: every value must be a string")
+            for target in targets:
+                archive = f"{STRING_TABLES}/{target}.zip".lower()
+                member = (file.stem + ".str").lower()
+                archives.setdefault(archive, {}).setdefault(member, []).append((mod, strings))
     return archives
 
 
@@ -384,12 +486,14 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
     mods = [m for m in patches.enabled_mods(config) if m != GENERATED]
     archives = collect(state, mods)
     merges = collect_merges(state, mods)
-    for archive in merges:
+    additions = collect_additions(state, mods)
+    string_edits = collect_strings(state, mods, game_root)
+    for archive in list(merges) + list(additions) + list(string_edits):
         archives.setdefault(archive, {})
     target = state / "mods" / GENERATED
     if not archives:
         if target.exists():
-            shutil.rmtree(target)
+            patches.remove_written_directory(target)
         patches.set_enabled_mods(config, mods)
         return {"patched": False, "mods": mods}
     # A mod that replaces whole archives or the manifest (a total conversion
@@ -397,7 +501,7 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
     manifest = patches.effective_game_file(state, mods, game_root, MANIFEST.as_posix())         .read_bytes().decode("utf-8-sig")
     staging = state / "mods" / (GENERATED + ".building")
     if staging.exists():
-        shutil.rmtree(staging)
+        patches.remove_written_directory(staging)
     results = []
     for archive, members in sorted(archives.items()):
         disc = find_case_insensitive(game_root, archive)
@@ -411,9 +515,16 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
         check_supported(data, manifest, relative.as_posix())
         names ={info["name"].replace("/", "\\").lower() for _, info in read_central(data)[0]}
         archive_merges = merges.get(archive, {})
-        missing = sorted((set(members) | set(archive_merges)) - names)
+        archive_strings = string_edits.get(archive, {})
+        missing = sorted((set(members) | set(archive_merges) | set(archive_strings)) - names)
         if missing:
-            raise ArchiveError(f"{archive} has no member {missing[0]} (only replacing is supported)")
+            raise ArchiveError(f"{archive} has no member {missing[0]}: put new members under "
+                               "add/ instead of members/ or merge/")
+        archive_additions = additions.get(archive, {})
+        present = sorted(set(archive_additions) & names)
+        if present:
+            raise ArchiveError(f"{archive} already has {present[0]}: put replacements under "
+                               "members/ instead of add/")
         replacements = {member: file.read_bytes() for member, (_, file) in members.items()}
         for member, edits in sorted(archive_merges.items()):
             merged = replacements.get(member)
@@ -422,7 +533,21 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
             for _, file in reversed(edits):
                 merged = merge_member(member, merged, file.read_bytes())
             replacements[member] = merged
-        rebuilt, dirstart, dirsize, direntries = rebuild(data, replacements)
+        # New and changed strings (#503) on top of the winning table.
+        strings_module = _strings_module() if archive_strings else None
+        for member, edits in sorted(archive_strings.items()):
+            table = replacements.get(member)
+            if table is None:
+                table = read_member(base, data, member, extractor)
+            for mod, strings in reversed(edits):
+                try:
+                    table = strings_module.add_strings(table, strings)
+                except strings_module.StringTableError as error:
+                    raise ArchiveError(f"{mod}: {archive}/{member}: {error}") from error
+            replacements[member] = table
+        rebuilt, dirstart, dirsize, direntries = rebuild(
+            data, replacements,
+            {stored: file.read_bytes() for _, stored, file in archive_additions.values()})
         output = staging / "game" / relative
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(rebuilt)
@@ -431,6 +556,11 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
                         "members": {m: mod for m, (mod, _) in sorted(members.items())},
                         "merged": {m: [mod for mod, _ in edits]
                                    for m, edits in sorted(archive_merges.items())},
+                        "strings": {m: [mod for mod, _ in edits]
+                                    for m, edits in sorted(archive_strings.items())},
+                        "added": {stored: mod
+                                  for mod, stored, _ in sorted(archive_additions.values(),
+                                                               key=lambda item: item[1])},
                         "base_sha256": hashlib.sha256(data).hexdigest().upper(),
                         "sha256": hashlib.sha256(rebuilt).hexdigest().upper()})
     (staging / "game" / MANIFEST).parent.mkdir(parents=True, exist_ok=True)
@@ -442,9 +572,7 @@ def build(state: Path, game_root: Path, extractor: Path | None = None) -> dict:
         f'name = "{GENERATED}"\nversion = "1"\nabi = 1\n'
         + ("shares_save = true\n" if shares else ""), encoding="utf-8", newline="\n")
     (staging / "archives.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
-    if target.exists():
-        shutil.rmtree(target)
-    patches.rename_written_directory(staging, target)
+    patches.replace_written_directory(staging, target)
     patches.set_enabled_mods(config, [GENERATED] + mods)
     return {"patched": True, "archives": results}
 

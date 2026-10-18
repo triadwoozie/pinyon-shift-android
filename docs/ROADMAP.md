@@ -1,6 +1,6 @@
 # Roadmap
 
-Public priorities, updated 2026-10-10 from community feedback and the current
+Public priorities, updated 2026-10-13 from community feedback and the current
 development work. Gameplay-blocking bugs and save safety take priority within
 each phase. These are priorities, not release dates; ports need validation on
 their target hardware before they are ready for players.
@@ -60,6 +60,11 @@ Done since 0.1:
 
 In progress:
 
+- [ ] Main focus: bring the CPU and memory cost close to a native build of
+  FH1, measured on the Odin 2 Portal and the Steam Deck, by replacing
+  emulated layers (the GPU command front end, the audio path, kernel
+  objects) and translation overhead
+  ([near-native research](NEAR_NATIVE_RESEARCH.md))
 - [ ] Fix remaining crashes, loading failures, rendering regressions and
   recurring stutter: hills seen through (#424), hitching (#381), frame drops
   in free roam (#416), resuming after quitting before the first festival
@@ -69,7 +74,7 @@ In progress:
   savings measured on desktop, the Steam Deck and macOS (#427)
 - [ ] Hand-optimize the hottest recompiled guest functions (#431)
 - [ ] Document FH1's guest code in a symbol database
-  ([reverse-engineering records](REVERSE_ENGINEERING.md), #448)
+  ([reverse-engineering records](https://arcanite24.github.io/pinyon-shift/reverse-engineering/), #448)
 
 Next, in priority order:
 
@@ -80,6 +85,10 @@ Next, in priority order:
   effects pack: clouds, fog, particles and backfire (#422)
 - [ ] Expose FSR 1 quality presets and sharpening controls in settings,
   with the rendered and output resolutions shown clearly
+- [ ] Temporal upscalers and frame generation, opt-in: FSR 3.1 from source,
+  DLSS and XeSS fetched at setup or dropped in by the player, mobile and
+  macOS options, and Lossless Scaling from the player's own `Lossless.dll`
+  (#523-#526, [upscaling backlog](UPSCALING_BACKLOG.md))
 - [ ] Validate Steam Deck and SteamOS: controls, Steam Input, suspend and
   resume, and performance presets
 - [ ] Improve sustained Android frame pacing and thermals on supported

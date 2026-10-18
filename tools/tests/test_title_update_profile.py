@@ -32,6 +32,28 @@ class TitleUpdateProfileTests(unittest.TestCase):
             make_profile(state, V4_FLAGS)
             self.assertEqual(TOOL.status(state)["profiles"], {"B13EBABEBABEBABE": "v4"})
 
+    def test_base_build_refuses_a_v4_save_with_what_to_do(self):
+        # A finished Xenia v4 playthrough made the base game ask for an Xbox
+        # Live update (#555).
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            make_profile(state, BASE_FLAGS)
+            self.assertIsNone(TOOL.base_build_refusal(state))
+            make_profile(state, V4_FLAGS)
+            self.assertIn("Use v4", TOOL.base_build_refusal(state))
+            # Another selected profile is what the base build loads.
+            (state / "config").mkdir()
+            config = state / "config" / "pinyon_shift.toml"
+            config.write_text('user_xuid = "E030000012345678"\n', encoding="utf-8")
+            self.assertIsNone(TOOL.base_build_refusal(state))
+            # XE plays its own profile.
+            config.write_text('enabled_mods = "zz-archive-patches,xe"\n', encoding="utf-8")
+            self.assertIn("Use v4", TOOL.base_build_refusal(state))
+            (state / "mods" / "xe").mkdir(parents=True)
+            (state / "mods" / "xe" / "mod.toml").write_text('name = "xe"\nprofile = "xe"\n',
+                                                          encoding="utf-8")
+            self.assertIsNone(TOOL.base_build_refusal(state))
+
     def test_backup_once_then_restore_keeps_v4_saves(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)

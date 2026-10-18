@@ -62,6 +62,9 @@ ADRENOTOOLS_HOOKS = (
     "libfile_redirect_hook.so",
     "libgsl_alloc_hook.so",
 )
+# AMD's FidelityFX library for FSR 2 and 3, built from source by ShiftGlue's
+# thirdparty/fidelityfx-vk (UP-2.1); the game loads it by name when present.
+FIDELITYFX_LIBRARY = "libamd_fidelityfx_vk.so"
 
 
 class AndroidError(RuntimeError):
@@ -117,13 +120,16 @@ def rexsdk_dir() -> Path:
 
 
 def _pinned_tool(name: str) -> Path | None:
-    """CMake or Ninja from the Windows build's pinned toolchain
-    (config/release-toolchain.json, provisioned with the PC build)."""
-    if not WINDOWS:
-        return None
+    """CMake or Ninja from the PC build's pinned toolchain
+    (config/release-toolchain.json, provisioned with the PC build; the
+    "posix" entries on Linux and macOS, which keep them off PATH)."""
     try:
-        entry = json.loads((ROOT / "config" / "release-toolchain.json").read_text(
-            encoding="utf-8"))[name]
+        config = json.loads((ROOT / "config" / "release-toolchain.json").read_text(encoding="utf-8"))
+        if WINDOWS:
+            entry = config[name]
+        else:
+            host = "macos-arm64" if platform.system() == "Darwin" else "linux-x86_64"
+            entry = config["posix"][host][name]
     except (OSError, KeyError, json.JSONDecodeError):
         return None
     path = ROOT / entry["install_path"] / entry["executable"]
@@ -142,7 +148,12 @@ class Tools:
         self.d8 = self.build_tools / _script("d8")
         self.zipalign = self.build_tools / _exe("zipalign")
         self.apksigner = self.build_tools / _script("apksigner")
-        self.sdkmanager = self.sdk / "cmdline-tools" / "latest" / "bin" / _script("sdkmanager")
+        # The pinned command-line tools when build-android.ps1 unpacked them:
+        # newer ones replace sdkmanager with a shim that split "ndk;<version>"
+        # into two unknown packages (#567).
+        pinned = LOCAL_SDK / "cmdline-tools" / "latest" / "bin" / _script("sdkmanager")
+        self.sdkmanager = pinned if pinned.is_file() else \
+            self.sdk / "cmdline-tools" / "latest" / "bin" / _script("sdkmanager")
         self.java_home = java_home()
         java_bin = self.java_home / "bin" if self.java_home else None
         self.javac = self._find(java_bin, "javac")
@@ -287,7 +298,27 @@ def build(args: argparse.Namespace) -> int:
     if args.jobs:
         command += ["-j", str(args.jobs)]
     run(command, cwd=ROOT, env=environment)
+    build_fidelityfx(tools, args, environment)
     return package(args, tools)
+
+
+def build_fidelityfx(tools: Tools, args: argparse.Namespace, environment: dict) -> None:
+    """The FidelityFX library, a separate CMake project (its SDK's own
+    build would rebuild the shader permutations with a Windows tool)."""
+    source = rexsdk_dir() / "thirdparty" / "fidelityfx-vk"
+    if not (source / "CMakeLists.txt").is_file():
+        return
+    directory = build_directory(args) / "fidelityfx-vk"
+    if not (directory / "CMakeCache.txt").is_file():
+        run([tools.cmake, "-S", source, "-B", directory, "-G", "Ninja",
+             f"-DCMAKE_MAKE_PROGRAM={tools.ninja}", "-DCMAKE_BUILD_TYPE=Release",
+             f"-DCMAKE_TOOLCHAIN_FILE={(tools.ndk / 'build' / 'cmake' / 'android.toolchain.cmake').as_posix()}",
+             f"-DANDROID_ABI={CONFIG['abi']}", f"-DANDROID_PLATFORM={CONFIG['min_sdk']}",
+             "-DANDROID_STL=c++_static"], cwd=ROOT, env=environment)
+    command = [tools.cmake, "--build", directory, "--target", "amd_fidelityfx_vk"]
+    if args.jobs:
+        command += ["-j", str(args.jobs)]
+    run(command, cwd=ROOT, env=environment)
 
 
 def _keystore(tools: Tools) -> Path:
@@ -345,7 +376,7 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "configuration": "Release",
         "platform": "android-arm64",
         "version": version_name,
-        "cpu_baseline": "armv8-a",
+        "cpu_baseline": "armv8.2-a",
         "ndk": CONFIG["android_sdk"]["ndk"],
         "min_sdk": CONFIG["min_sdk"],
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -392,6 +423,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         if not found:
             raise AndroidError(f"{name} is not built in {directory}")
         libraries.append(max(found, key=lambda path: path.stat().st_mtime))
+    fidelityfx = directory / "fidelityfx-vk" / "ffx-api" / FIDELITYFX_LIBRARY
+    if fidelityfx.is_file():
+        libraries.append(fidelityfx)
     libraries.append(tools.libcxx)
 
     staging = WORK / "package"
@@ -470,6 +504,12 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     run([tools.apksigner, "sign", "--ks", keystore, "--ks-pass", "pass:pinyon-local",
          "--key-pass", "pass:pinyon-local", "--out", output, aligned])
     size = output.stat().st_size
+    # What the package holds, for the launchers' Android panels (the same
+    # record tools/build-android.ps1 writes after the build).
+    (WORK / "pinyon-shift.json").write_text(json.dumps({
+        "schema_version": 1, "title_update_v4": bool(getattr(args, "title_update_v4", False)),
+        "built_utc": datetime.now(timezone.utc).isoformat(), "bytes": size}, indent=2) + "\n",
+        encoding="utf-8")
     print(json.dumps({"apk": str(output), "bytes": size, "version": version_name,
                       "libraries": [path.name for path in stripped]}))
     return 0
@@ -660,6 +700,69 @@ def run_game(args: argparse.Namespace) -> int:
     return 0 if result["result"] == "pass" else 1
 
 
+def shader_pack(args: argparse.Namespace) -> int:
+    """The device's own SPIR-V shader pack (NN-2.5). SPIR-V packs cannot be
+    shipped: they hold translations of the player's game shaders, for one
+    device's feature set. So one launch boots to the title with the shader
+    capture on, which records every shader the start translates (all that the
+    device's pipeline storage names), the PC builds the pack from it with
+    tools/native-shader-pack.py, and it goes into the state's shader cache.
+    The next start loads translations from it instead of translating them
+    (Odin 2: 0.35 to 0.05 s of translation, title 0.24 s sooner)."""
+    tools = Tools()
+    if _pid(tools, args):
+        raise AndroidError("the game is running; stop it first (pinyon.py android stop)")
+    state = args.state_root or f"{DEVICE_FILES}/state"
+    capture = f"{state}/.local/shader-capture"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    route = ROOT / "config" / "render-tests" / "fh1-shader-capture.fh1test"
+    remote_route = f"{state}/render-tests/{route.name}"
+    output = f"{state}/render-test-output/shader-capture-{stamp}"
+    adb(tools, args, "shell", "rm", "-rf", capture)
+    adb(tools, args, "shell", "mkdir", "-p", f"{state}/render-tests")
+    adb(tools, args, "push", route, remote_route, stdout=subprocess.DEVNULL)
+    share_with_app(tools, args, state)
+    # A locked device stops the activity and the route never reaches its stop
+    # frame, so show the capture over the lock as `run` does for routes.
+    adb(tools, args, "shell", "am", "start", "-S", "-W", "-n", f"{PACKAGE}/{ACTIVITY}",
+        "--ez", "show_when_locked", "true",
+        "--es", "env.PINYON_SHIFT_STATE_ROOT", state,
+        "--es", "env.PINYON_SHIFT_FH1_RENDER_TEST_SCRIPT", remote_route,
+        "--es", "env.PINYON_SHIFT_FH1_RENDER_TEST_OUTPUT", output,
+        "--es", "env.PINYON_SHIFT_NATIVE_SHADER_CAPTURE_DIR", capture,
+        "--esa", "args", "--pinyon_shift_skip_opening_movies=true",
+        stdout=subprocess.DEVNULL)
+    deadline = time.monotonic() + 300
+    time.sleep(3)
+    while _pid(tools, args):
+        if time.monotonic() > deadline:
+            adb(tools, args, "shell", "am", "force-stop", PACKAGE)
+            raise AndroidError("the capture launch did not quit within 300 seconds "
+                              f"(its route log is in {output})")
+        time.sleep(2)
+    local = WORK / "shader-captures" / stamp
+    local.mkdir(parents=True, exist_ok=True)
+    adb(tools, args, "pull", f"{capture}/.", str(local), stdout=subprocess.DEVNULL)
+    manifest = local / "shader-manifest.json"
+    if not manifest.is_file():
+        raise AndroidError("the start translated no shaders: play once so the device has "
+                           "pipelines in its storage, then run this again")
+    pack_tool = [sys.executable, str(ROOT / "tools" / "native-shader-pack.py")]
+    pack = local / "shaders.pnsp"
+    subprocess.run(pack_tool + ["build", str(manifest), "--output", str(pack)], check=True,
+                   stdout=subprocess.DEVNULL)
+    staged = subprocess.run(pack_tool + ["stage", str(pack), "--state-root", str(local / "state")],
+                            check=True, capture_output=True, text=True)
+    destination = Path(json.loads(staged.stdout)["destination"])
+    adb(tools, args, "shell", "mkdir", "-p", f"{state}/cache/shaders/shareable")
+    adb(tools, args, "push", destination, f"{state}/cache/shaders/shareable/{destination.name}",
+        stdout=subprocess.DEVNULL)
+    adb(tools, args, "shell", "rm", "-rf", capture)
+    share_with_app(tools, args, f"{state}/cache")
+    print(f"shader pack: {destination.name} ({destination.stat().st_size} bytes)")
+    return 0
+
+
 def route_result(tools: Tools, args: argparse.Namespace) -> dict:
     """The newest session's events, judged as tools/run-fh1-render-test.py
     judges a Windows run's (AP-8.1): completed once, every capture taken, no
@@ -782,6 +885,10 @@ def add_parser(commands) -> None:
     parser.add_argument("--timeout", type=float, default=1800)
     parser.add_argument("game_arguments", nargs="*", help="after --, passed to the game")
     command("stop", stop, "stop the game on the device")
+    parser = command("shader-pack", shader_pack,
+                     "build the device's SPIR-V shader pack from one capture launch (faster starts)")
+    parser.add_argument("--state-root",
+                        help="a state folder on the device (default: the app's own)")
     parser = command("pull-logs", pull_logs, "copy logs, crashes and route output to the PC")
     parser.add_argument("--output", type=Path)
 

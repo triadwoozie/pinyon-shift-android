@@ -1,0 +1,186 @@
+# Saves and profile: the save files, how they are encrypted and loaded,
+# and what the career profile holds. Rendered by site/build.py.
+
+# --- Save files -----------------------------------------------------------
+
+[[finding]]
+group = """Save files"""
+base = """ForzaProfile, PlayerDatabase, VersionFlags"""
+v4 = """same"""
+name = """profile directory files"""
+what = """A profile directory holds `ForzaProfile` plus companion `PlayerDatabase`, `VersionFlags`, livery and thumbnail files (12 files in the reference save). `PlayerDatabase` is an encrypted, deflated SQLite database: each car is a `Career_Garage` row naming its livery file and holding its tune in 36 `Tuning_*` columns, and purchased parts are separate rows (122 in the reference save). Without the companions the title loads a fallback Corrado instead of the saved car and does not offer the expected Gauntlet activity."""
+how = """Experiment: a profile-only fixture against a complete profile copy; save audits; reading a seed save."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Complete saved garage fixture; Selected Rally car disable, save and restoration; docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Save files"""
+base = """sub_82555C88, sub_82546460, sub_82546168"""
+name = """car card thumbnails"""
+what = """Each car-select card is the profile's `Thumbnails/Thumbnail_N.xdc`: a big-endian `cxds` header (version 2, uncompressed size 884,788, compressed size) over a deflated 768x288 tiled 8888 Xenos texture. When a car is bought, a car-save task (`sub_82555C88`: car at +76, render flag +84, save flag +85) calls `sub_82546460(&job, car, 1, 0)`, which loads the `uithumbig` and `uithumbnail` studio tracks, renders the car, resolves it and compresses the result on the CPU (to 3-4 %); `sub_82546168` builds the file name from the car ID at +652. The screen opens only cards that exist and shows an empty card for a missing one."""
+how = """Reading the code path and saves; the buy-car route decoding the saved card; file-open logging; captures of car select with and without cards."""
+confidence = """confirmed"""
+note = """A purchase re-saves a card (confirmed); paint and upgrades probably do. How the CPU reads the resolved image is not settled: a later trace saw no guest read of the resolved ranges."""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-0.6; src/save/car_cards.h; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-04, XR-00"""
+
+[[finding]]
+group = """Save files"""
+base = """VersionFlags"""
+v4 = """VersionFlags 00000004 00000002"""
+name = """a v4 save is one-way"""
+what = """v4 loads base 0.0.0.10 saves unchanged. When v4 saves it upgrades the profile: `VersionFlags` goes from zeros to `00000004 00000002` after the `cmss` tag, and it writes `ForzaProfile`, `PlayerDatabase`, `VersionFlags` and a new empty `NeedsAA`. The base build then re-reads the file in a loop and stays on PRESS START."""
+how = """Save, reload and cross-build runs on private seed copies."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-5"""
+
+[[finding]]
+group = """Save files"""
+name = """missing DLC car falls back to Corrado"""
+what = """When the selected saved car belongs to a disabled DLC (the stock Rally Escort), the base game falls back to the original Corrado and keeps every garage record, purchased part and the credit balance. Re-enabling the DLC restores the car without a repurchase."""
+how = """Experiment: disable Rally with the Escort selected, play and save, re-enable and reload; save audit."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Selected Rally car disable, save and restoration"""
+
+[[finding]]
+group = """Save files"""
+base = """0x82BEFC50"""
+v4 = """0x82CAF1A0"""
+name = """missing DLC tyre crashes at startup"""
+what = """If a saved base car has a purchased Rally tyre and Rally is disabled, the game dereferences the absent tyre-physics record in the car's tyre constructor at startup and takes an access violation. It does not fall back to stock parts."""
+how = """Experiment: disable Rally after a Mustang Rally tyre purchase; crash reproduced, then guarded."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Missing saved Rally tyre recovery"""
+
+# --- Encryption and loading -----------------------------------------------
+
+[[finding]]
+group = """Encryption and loading"""
+base = """sub_82C665F8, 0x82C666D0, 0x82C79D2C, 0x82C78240, 0x82C79D28"""
+v4 = """0x82D272B0, 0x82D3AFF4, 0x82D390A8"""
+name = """save encryption on write"""
+what = """Saves go through a secure stream wrapper. `sub_82C665F8` accumulates the body and encrypts it in place with `XeKeysAesCbcUsingKey`; at `0x82C666D0` the plaintext is still visible (r4 body, r5 size). The encrypted writer `0x82C79D2C` and the stream transform `0x82C78240`, which forwards encrypted bytes to `0x82C79D28`, handle secure payloads of 19,472 bytes (the profile in older saves) and 2,928 bytes; the plaintext body grows with the profile (cars, events). Other secure files use the same path."""
+how = """Save trace hooks and payload snapshots (`save.before_encrypt`)."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md Where the code stands, NP-8.3; src/pinyon_shift_runtime_hooks.cpp SnapshotSavePayload; config/rexglue/analysis/main-xex.toml save write hooks"""
+
+[[finding]]
+group = """Encryption and loading"""
+base = """sub_82C66308, 0x82C66594"""
+v4 = """0x82D27174"""
+name = """save decryption on load"""
+what = """`sub_82C66308` decrypts a save in place with `XeKeysAesCbcUsingKey` (r8 = 0 selects decrypt) and clears the padding. At `0x82C66594` the plaintext body is ready before any parsing: r30 points at the body pointer and r24 is the size. Edits made here persist into the title's later saves."""
+how = """Midasm hook `PinyonShiftObserveSaveDecrypted` (`save.after_decrypt`); edit-and-save experiments."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.3; config/rexglue/analysis/main-xex.toml midasm_hook 0x82C66594"""
+
+[[finding]]
+group = """Encryption and loading"""
+base = """0x825195F4, 0x82568490, 0x824ED444, sub_827A1CD0, 0x827A1DC4"""
+v4 = """0x8258369C, 0x825DE690, 0x8255994C, sub_8285BAA0, 0x8285BB94"""
+name = """profile load result sites"""
+what = """These are the first title-owned decisions after the secure `ForzaProfile` and `PlayerDatabase` reads: at `0x825195F4` the persisted profile owner (r26 success, r28 refresh requested, r30 content owner, r31 profile owner), at `0x82568490` the persisted profile result, at `0x824ED444` the front-end profile result and at `0x827A1DC4` (in `sub_827A1CD0`) the front-end state result. In v4 the front-end state fields moved by 4 (0x168 to 0x16C, 0x179 to 0x17D)."""
+how = """Trace hooks logging the results while investigating failed and deferred saves."""
+confidence = """probable"""
+note = """The sites are confirmed hooks; their roles are named from register use."""
+source = """config/rexglue/analysis/main-xex.toml M5 save hooks; src/pinyon_shift_runtime_hooks.cpp PinyonShiftTracePersistedProfile*, PinyonShiftTraceFrontEnd*; config/rexglue/analysis-v4/overrides.toml"""
+
+# --- Profile values -------------------------------------------------------
+
+[[finding]]
+group = """Profile values"""
+v4 = """same"""
+name = """ForzaProfile body layout"""
+what = """The decrypted `ForzaProfile` body opens with a self-describing section: a big-endian field count, then per field `[u32 name length][name][u32 0x20][u32 0][u8 type][value]`. Types are 0x00 bool, 0x01 u8, 0x03 u32, 0x04 u64, 0x07 i32, 0x09 float and 0x0F struct (its own count and fields). Player values are under `Main`: `Main/Credits` (u32), `Main/XP`, `Main/Level`, `Main/WristbandLevel` and `Main/TotalWinnings`. Class-serialised states and 0xBB padding follow."""
+how = """Decoding decrypted bodies at the save hooks; `tools/fh1-profile.py` decodes, edits and round-trips every captured profile byte for byte, and field edits survive the title's later saves."""
+confidence = """confirmed"""
+source = """src/save/profile_body.h; docs/NATIVE_PORT_BACKLOG.md NP-8.3; docs/MODDING.md The profile body"""
+
+[[finding]]
+group = """Profile values"""
+v4 = """same"""
+name = """the title keeps its own profile values"""
+what = """The running title keeps its own in-memory copy of the profile values, so a value written into an outgoing save lasts only until the next save. A lasting edit must be made after decryption, before the title reads the body, or through the title's accessors at run time."""
+how = """Experiment with the before-encrypt and after-decrypt hooks."""
+confidence = """confirmed"""
+negative = true
+source = """docs/MODDING.md The profile body"""
+
+[[finding]]
+group = """Profile values"""
+base = """0x82142440"""
+name = """live credits value"""
+what = """In the running title the profile's value tree keeps Credits as a plain u32 in a typed value (vtable `0x82142440`, value at +8, type 3 at +16), in a heap below `0x40000000`. Scans of the `0x40000000`-`0x7FFFFFFF` virtual and physical heaps find only transient copies, which is why an earlier scan concluded the money was kept encoded."""
+how = """Profile-save scan for Credits next to XP and TotalWinnings; reading the value tree."""
+confidence = """probable"""
+note = """Corrects NP-8.3's "kept encoded" reading; the scan did not cover the heap that holds the value."""
+source = """src/pinyon_shift_runtime_hooks.cpp ScanLiveProfile; docs/NATIVE_PORT_BACKLOG.md NP-8.3"""
+
+[[finding]]
+group = """Profile values"""
+v4 = """0x833F4A80, sub_82915BE0, sub_82CC7248, sub_8255E4D0, sub_82CC6A30"""
+name = """v4 profile value-tree store"""
+what = """In v4 the career profile is `sub_82915BE0([0x833F4A80])`, and profile vtable slot 88 returns its value tree. `sub_82CC7248(&value, 1)` builds a bool value, `sub_8255E4D0(tree, path, &value)` stores it at a slash path such as `Main/FastTravelAnywhere` (string at `0x8201949C`) and `sub_82CC6A30` destroys the value. The next save keeps the stored value."""
+how = """Reading v4's purchase completion; host calls to the same functions, with the value surviving save and reload."""
+confidence = """confirmed"""
+source = """src/dlc_token_unlocks.cpp"""
+
+[[finding]]
+group = """Profile values"""
+base = """0x83305CC4, sub_828653D8"""
+v4 = """0x833F4A80, sub_82915BE0"""
+name = """profile resume data"""
+what = """The free-roam return point lives in the profile: from the users global `0x83305CC4`, `sub_828653D8` gives the user, its vtable +88 getter a handle, handle +36 the profile and profile +56 the resume data, with a valid byte at +44, the position at +48 and the forward vector at +64."""
+how = """Read-only trace following `CStoreRestorePlayerCarPosition`."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace"""
+
+[[finding]]
+group = """Profile values"""
+name = """wristband and XP fields gate events"""
+what = """Setting `Main/WristbandLevel` to 8 and `Main/XP` to 450000 at load is kept in the title's own later saves, and the event card's goal changes from COLLECT BLUE WRISTBAND to GET TO THE HORIZON FINAL, opening the events the wristbands gate."""
+how = """Load-time field edit on the buy-car route."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.5"""
+
+[[finding]]
+group = """Profile values"""
+v4 = """sub_825D5C00, sub_826E94B8"""
+name = """Fast Travel Anywhere unlock"""
+what = """v4 only: the token-store Fast Travel Anywhere unlock is a `CVIPFastTravelConsumeAssetTransaction`. Its completion `sub_825D5C00` (r4 result, 0 is success) stores `Main/FastTravelAnywhere = true` in the profile and notifies the UI; `sub_826E94B8` reads that path, and the map's Y button offers the purchase while it is absent and fast travels to any road once it is set. A profile v4 has saved carries the bool field; a base save does not, and the base disc has none of this code."""
+how = """Reading v4's generated code; the host performs the same store and a fresh launch keeps it."""
+confidence = """confirmed"""
+note = """Listed as v4's VIP perk in DLC-5."""
+source = """docs/DLC_BACKLOG.md DLC-7, DLC-5; src/dlc_token_unlocks.cpp"""
+
+[[finding]]
+group = """Profile values"""
+name = """upgrade discount on the reference save"""
+what = """Upgrade prices on the reference save show an 85% discount: a 10,000-credit Rally tyre costs 1,500, and the Rally suspension and transmission cost 930 each. Race winnings are recorded per car as well as added to credits."""
+how = """Purchases and save audits on the reference save."""
+confidence = """confirmed"""
+note = """Confirmed for the observed prices; attributing the 85% to the save's discount-sign progress is a guess, not traced in code."""
+source = """docs/DLC_BACKLOG.md Rally upgrade definitions and tyre purchase; Base-disc Rally tyre conversions; Rally audio update ownership"""
+
+# --- Career progress ------------------------------------------------------
+
+[[finding]]
+group = """Career progress"""
+base = """0x833067E0"""
+v4 = """0x833F5600"""
+name = """CFirstTimeCareerState"""
+what = """The first-time career's state is a `CFirstTimeCareerState` in the profile's class-serialised tail under the key `first_time_career_activity` (type byte 0x15 at key +29, class name at +30), stored as its active byte (object +40) then a big-endian u32 stage (object +44) at key +59. Stage 1 is the opening Viper race, 2 the Corrado drive to the festival, 7 and 10 later checkpoints. While onboarding runs the title mirrors the state in the global at `0x833067E0`. A new player has no profile until the title's first save."""
+how = """Decrypted save inspection and payload snapshots; seeding checkpoints into the outgoing save and restoring stages 2, 7 and 10."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.1; src/pinyon_shift_runtime_hooks.cpp SeedCareerCheckpointInSavePayload"""
+
+[[finding]]
+group = """Career progress"""
+base = """sub_828E2898, sub_8252AA48, sub_828D7EB0, 0x828E292C, 0x828E2930, 0x828D7ED4"""
+v4 = """0x829946B4, 0x829946B8, 0x82989BF4"""
+name = """career eligibility and checkpoint restore"""
+what = """`sub_828E2898` reads the per-profile career eligibility byte through `sub_8252AA48` (at r3 + r4 + 80); the owning activity is in r31 with its state at +196. `sub_828D7EB0` advances the live first-time-career controller from stage 1 (Viper) to stage 2 (Corrado). Only stages 2, 7 and 10 restore cleanly: a saved stage 1 lacks the transient route and arrival trigger, so it loads as route-less free roam."""
+how = """Hooks at `0x828E292C`/`0x828E2930` and `0x828D7ED4`; save restore experiments."""
+confidence = """confirmed"""
+note = """The v4 addresses are the hook sites."""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftRestoreCareerEligibility, PinyonShiftPersistPostViperCheckpoint; config/rexglue/analysis/main-xex.toml career hooks"""

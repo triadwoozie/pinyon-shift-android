@@ -14,6 +14,92 @@ longjmp_address = 0x82A81950
 # hooks, the setjmp copy, longjmp and exceptions keep a full sync.
 cr_as_local = true
 
+# CTR and XER are volatile across calls and dead at every return address, so a
+# function keeps them in zero-initialized locals that never touch ctx
+# (NEXT_LEVEL_RESEARCH.md NL-1.3). FH1 has no overflow-enabled integer
+# instruction and its one mtxer restores a saved context, so XER.SO is never
+# set: with the local, the SO copy in every compare folds to zero.
+ctr_as_local = true
+xer_as_local = true
+
+# The title's fibers run on host fibers ([rexcrt] below), so the host call
+# chain is never abandoned at a guest stack switch and no function needs an
+# entry at a return address: no resume switch, no resume aliases
+# (NEXT_LEVEL_RESEARCH.md NL-1.2).
+interior_resume = false
+
+# Direct calls name the strong `__imp__sub_` definitions so Clang can inline
+# guest functions; the functions src/guest_native replaces with a strong
+# `sub_` of its own keep going through the weak thunk (NL-1.5).
+direct_calls_bypass_thunk = true
+host_overridden_functions = [0x82438EA8, 0x830F2210, 0x82A6D7D8, 0x8245DBE0, 0x82F86498]
+
+# Loads from a constant .rdata address (lis/addi then lfs, lfd, lwz, ...) become
+# literals; the runtime refuses an image whose folded bytes differ (NL-1.10).
+fold_rodata_loads = true
+
+# A function whose prologue calls __savegprlr_N keeps rN-r31 in host locals
+# instead of the guest stack slots (NEAR_NATIVE_RESEARCH.md NN-1.2): ctx is
+# write-through, so the copy back at each __restgprlr_N gives the caller the
+# same registers. The LR slot and back chain are still written. Functions the
+# generator's save-area scan cannot clear (slot loads, dynamic frames, tail
+# branches, exception info, mid-asm hooks such as the UI trace hooks that read
+# r1+160/168) keep the helpers; host_local_register_saves_keep lists more.
+host_local_register_saves = true
+
+# The LR save slot (entry r1 - 8) moves into a host local as well
+# (NEAR_NATIVE_RESEARCH.md NN-1.3): the prologue's slot store, from the inlined
+# __savegprlr_N or an explicit stw, and its reloads become copies through
+# `rex_saved_lr`, so r12 and ctx.lr keep their values and only the guest stack
+# word is gone. The generator's LR-slot scan keeps the slot in memory for any
+# other slot access, a dynamic frame, exception info, a mid-asm hook, or a tail
+# branch to code that may read it first. The back chain is still written, so
+# stall_dump still walks the stack, but its "returns to" column and the M5
+# reentry trace read stale words for changed frames. The keep list holds the
+# functions whose slot a host reader needs: sub_82BC5870 (TraceVehiclePose
+# reads its caller_lr at r1+392; the mid-asm hook keeps it anyway).
+host_local_lr = true
+host_local_lr_keep = [0x82BC5870]
+
+# Physics specialised at build time (NEAR_NATIVE_RESEARCH.md NN-5.1). The
+# generator, not the repository, produces the native form from the player's
+# executable (docs/LEGAL.md). register_locals_functions keeps every guest
+# register of the listed functions in C++ locals, writing ctx back at calls
+# and returns and reading the volatile registers back after calls; such a
+# function with flush-mode toggles runs only in fixed FP mode (the default
+# on arm64) and tail calls an unspecialised ieee_ copy otherwise.
+# fixed_fp_mode_functions reads the fixed FP mode switch once per call instead
+# of at every toggle; single_precision_functions computes fmadds-family
+# operations on single-precision operands as one single fma (the guest's
+# rounding) instead of a double fma rounded to single. The list is the 19 of
+# the 131-function physics family whose arm64 code got at least 3 % shorter
+# with no more memory accesses (NDK clang, release flags); the tyre model
+# sub_82D2F348 and the others got longer and stay as they were.
+register_locals_functions = [0x82CB6308, 0x82CB7A88, 0x82CB9F98, 0x82CBA9F8,
+    0x82D0FA28, 0x82D123D0, 0x82D1D4E8, 0x82D20A40, 0x82D210F8, 0x82D21DB0,
+    0x82D230B8, 0x82D2EC70, 0x82D2F070, 0x82D303D0, 0x82D37C70, 0x82D39140,
+    0x82D3A350, 0x82D48518, 0x82E2D5A8]
+fixed_fp_mode_functions = [0x82CB6308, 0x82CB7A88, 0x82CB9F98, 0x82CBA9F8,
+    0x82D0FA28, 0x82D123D0, 0x82D1D4E8, 0x82D20A40, 0x82D210F8, 0x82D21DB0,
+    0x82D230B8, 0x82D2EC70, 0x82D2F070, 0x82D303D0, 0x82D37C70, 0x82D39140,
+    0x82D3A350, 0x82D48518, 0x82E2D5A8]
+single_precision_functions = [0x82CB6308, 0x82CB7A88, 0x82CB9F98, 0x82CBA9F8,
+    0x82D0FA28, 0x82D123D0, 0x82D1D4E8, 0x82D20A40, 0x82D210F8, 0x82D21DB0,
+    0x82D230B8, 0x82D2EC70, 0x82D2F070, 0x82D303D0, 0x82D37C70, 0x82D39140,
+    0x82D3A350, 0x82D48518, 0x82E2D5A8]
+# Reference copies of the specialised call-free functions for the lockstep
+# verifier (pinyon_shift_reference_verify, src/guest_native/reference_verify.cpp).
+reference_functions = [0x82CB6308, 0x82CB7A88, 0x82CB9F98, 0x82CBA9F8,
+    0x82D0FA28, 0x82D123D0, 0x82D1D4E8, 0x82D20A40, 0x82D21DB0, 0x82D230B8,
+    0x82D2F070, 0x82D303D0, 0x82D37C70, 0x82D39140, 0x82D3A350, 0x82D48518,
+    0x82E2D5A8]
+
+# Lockstep verify (NL-0.2): every 40th leaf function is also emitted as a
+# reference copy with every register in ctx and no folding; with
+# pinyon_shift_reference_verify=N the host runs both every Nth call and
+# compares (src/guest_native/reference_verify.cpp).
+reference_sample_every = 40
+
 # Scripted, default-off companion experiment: match the complete original
 # decoded member at the borrowed-buffer stream constructor. This avoids ZIP
 # repacking and does not enable the older scene_insert pointer repairs.
@@ -164,10 +250,12 @@ context = true
 
 # PERF-11 read-only critical-path probes around the indexed title draw emitter
 # and its exact PM4 header publication. All return immediately unless the SDK
-# perf_critical_path_trace flag is enabled.
+# perf_critical_path_trace flag is enabled. The begin hook also carries the
+# registers of the D3D census (DL-0.1, below), whose draw entry 5 it is.
 [[midasm_hook]]
 address = 0x8240F4D8
 name = "PinyonShiftObserveTitleDrawEmitterBegin"
+registers = ["r1", "r3", "lr"]
 
 [[midasm_hook]]
 address = 0x82410328
@@ -720,6 +808,16 @@ registers = ["r10"]
 # storing it at +448 on the main-loop owner and dispatching update systems.
 # Accumulate that title-authored delta for wall-time validation without
 # changing the register, store, or update cadence.
+# The guest vblank callback sub_8247C678 has decided whether to raise the
+# simulation's step event (r11, low byte non-zero to raise; it then resets its
+# vblank count). The step gate (#381, pinyon_shift_step_backpressure) holds
+# the raise while the render thread is two steps behind; the render thread's
+# next swap raises it.
+[[midasm_hook]]
+address = 0x8247C6F0
+name = "PinyonShiftGateSimulationStep"
+registers = ["r11"]
+
 [[midasm_hook]]
 address = 0x823EDB84
 name = "PinyonShiftObserveSimulationDelta"
@@ -746,6 +844,24 @@ address = 0x826E1B3C
 name = "PinyonShiftTraceRetainVtable"
 registers = ["r4", "r11", "r30", "r31"]
 jump_address_on_true = 0x826E1B48
+
+# sub_824E81A8 is the other intrusive-pointer assignment: AddRef the new object
+# (vtable+8), store it, Release the old one (vtable+12). #584 reached its
+# Release with the freed object the guard above had just refused (vtable
+# 0x07E0487C, heap data) and faulted at vtable+12. Skip either call when
+# the vtable is not in the title image: a dangling new object is stored
+# as null, and a dangling old one is not released.
+[[midasm_hook]]
+address = 0x824E81D4
+name = "PinyonShiftGuardAssignAddRef"
+registers = ["r11", "r30", "r31"]
+jump_address_on_true = 0x824E81E0
+
+[[midasm_hook]]
+address = 0x824E81F4
+name = "PinyonShiftGuardAssignRelease"
+registers = ["r3", "r11", "r30"]
+jump_address_on_true = 0x824E8200
 
 # Default-off read-only #359/#368/#373 ownership comparison. Pair the live
 # child slot/vtable around the parent virtual call, before the wrapper clears
@@ -1332,6 +1448,19 @@ size = 0x28
 memcpy = 0x82A7D730
 memmove = 0x82A7DCA0
 memset = 0x82A7F140
+# XAPI's fiber functions, served by the SDK's host fibers
+# (kernel/crt/threading.cpp). Found from the only callers of
+# KeSetCurrentStackPointers: SwitchToFiber tail-calls the context switch;
+# CreateFiber allocates a 2,640-byte context (the SDK's X_FIBER_CONTEXT size)
+# and a kernel stack with the entry thunk 0x830EBEA0; ConvertThreadToFiber
+# fails with ERROR_ALREADY_FIBER (1280) when KTHREAD+0x164 is set;
+# DeleteFiber frees the kernel stack. GetCurrentFiber (0x830EBC60) stays
+# guest code: it reads the KTHREAD field the SDK maintains.
+ConvertThreadToFiber = 0x830EBC70
+ConvertFiberToThread = 0x830EBD00
+CreateFiber = 0x830EBD50
+DeleteFiber = 0x830EBE30
+SwitchToFiber = 0x830EBE90
 
 # Scale the render scenario's EnvMapFrequencyScale and record the scenarios
 # for pinyon_shift_fh1_shadows after the title loads a DynamicRenderSettings
@@ -1349,3 +1478,347 @@ address = 0x8282EAB0
 name = "PinyonShiftArrayReleaseWalk"
 context = true
 jump_address_on_true = 0x8282EAC0
+
+# The trainer's any car in any event (FB-12.3): in sub_826087A0, which reads
+# an event's EventRestrictions rows (r25 the event id), skip the decode of a
+# row's Value (sub_825FE8B0) into the record at r1+176, which sub_825F3138
+# has just set up with no limits; the record is still added
+# (src/pinyon_shift_runtime_hooks.cpp).
+[[midasm_hook]]
+address = 0x826088B4
+name = "PinyonShiftAnyCarEventRestriction"
+registers = ["r25"]
+jump_address_on_true = 0x826088C0
+
+# The same cheat for the event's class: sub_825F6ED8 stamps a limit derived
+# from Events.TargetClass (r4) into every bucket-0 restriction record; skip
+# from after its frame is set up to its epilogue
+# (src/pinyon_shift_runtime_hooks.cpp).
+[[midasm_hook]]
+address = 0x825F6EE4
+name = "PinyonShiftAnyCarEventClass"
+registers = ["r4"]
+jump_address_on_true = 0x825F6FA8
+
+# #482 AI OPPONENTS (pinyon_shift_ai_opponents, src/pinyon_shift_runtime_hooks.cpp):
+# the event's opponent difficulty before sub_8249BCB8 picks the database
+# column suffix (r3); the car spawn's call to the AI config fill
+# (sub_829ADAC0: skill r5, temperament r6, difficulty r8) and the filled
+# config at r1+464 right after it; and the post-race SkillAdjustment (f1)
+# that sub_8261C3B8 adds to the profile's Main/AISkill.
+[[midasm_hook]]
+address = 0x82609910
+name = "PinyonShiftAiEventDifficulty"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x824B3E6C
+name = "PinyonShiftAiSpawnSkill"
+registers = ["r5", "r6", "r8"]
+
+[[midasm_hook]]
+address = 0x824B3E70
+name = "PinyonShiftAiSpawnConfig"
+registers = ["r1"]
+
+[[midasm_hook]]
+address = 0x8261C5A0
+name = "PinyonShiftAiSkillAdjustment"
+registers = ["f1"]
+
+# Its default-off trace (pinyon_shift_ai_trace): entry of the per-AI torque
+# application, r3 the AI controller, and the entries of the two AI skill
+# assignment paths and the post-race dynamic difficulty update. Read-only.
+[[midasm_hook]]
+address = 0x82B81A30
+name = "PinyonShiftAiTraceDrive"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x826098B8
+name = "PinyonShiftAiTraceEventSkills"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x8261FB48
+name = "PinyonShiftAiTraceDynamicSkills"
+registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x8261C3B8
+name = "PinyonShiftAiTraceDynamicUpdate"
+registers = ["r3"]
+
+# DL-0.1 / DL-0.2 D3D source census (docs/D3D_RENDERER_RESEARCH.md,
+# src/native_renderer/d3d_census.cpp). Read-only observers at function
+# entries: each returns at once unless pinyon_shift_d3d_census is on. Base
+# disc only: not ported to analysis-v4 (the census stays off on v4).
+#
+# Draw entry points (entry 5, 0x8240F4D8, shares the PERF-11 begin hook).
+# Entry 0 also carries the DL-1.2 D3D-level draw marker (d3d_draw.cpp).
+# Entries 0 and 1 also carry the DL-2.1 slice: with pinyon_shift_d3d_slice
+# 2 a call the slice replaces returns at its entry (return_on_true).
+[[midasm_hook]]
+address = 0x82416380
+name = "PinyonShiftD3dCensusDraw0"
+registers = ["r1", "r3", "r4", "r5", "r6", "r7", "lr"]
+return_on_true = true
+
+[[midasm_hook]]
+address = 0x82415F68
+name = "PinyonShiftD3dCensusDraw1"
+registers = ["r1", "r3", "r4", "r5", "r6", "lr"]
+return_on_true = true
+
+[[midasm_hook]]
+address = 0x8240DC70
+name = "PinyonShiftD3dCensusDraw2"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x82408B70
+name = "PinyonShiftD3dCensusDraw3"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x82460998
+name = "PinyonShiftD3dCensusDraw4"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x829F7C70
+name = "PinyonShiftD3dCensusDraw6"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x824610C0
+name = "PinyonShiftD3dCensusDraw7"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x823FA0A8
+name = "PinyonShiftD3dCensusDraw8"
+registers = ["r1", "r3", "lr"]
+
+# D3D-internal draws (built-in shaders).
+[[midasm_hook]]
+address = 0x8240E130
+name = "PinyonShiftD3dCensusInternal0"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x829E82D0
+name = "PinyonShiftD3dCensusInternal1"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x829E8428
+name = "PinyonShiftD3dCensusInternal2"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x829F0928
+name = "PinyonShiftD3dCensusInternal3"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x829FEFB0
+name = "PinyonShiftD3dCensusInternal4"
+registers = ["r1", "r3", "lr"]
+
+# Engine device class slots (vtable 0x821451EC), by slot number.
+[[midasm_hook]]
+address = 0x8240BA48
+name = "PinyonShiftD3dCensusSlot12"
+
+[[midasm_hook]]
+address = 0x82415C88
+name = "PinyonShiftD3dCensusSlot22"
+
+[[midasm_hook]]
+address = 0x82444B18
+name = "PinyonShiftD3dCensusSlot23"
+
+[[midasm_hook]]
+address = 0x823FA198
+name = "PinyonShiftD3dCensusSlot24"
+
+[[midasm_hook]]
+address = 0x82418F50
+name = "PinyonShiftD3dCensusSlot25"
+
+[[midasm_hook]]
+address = 0x82417B90
+name = "PinyonShiftD3dCensusSlot26"
+
+[[midasm_hook]]
+address = 0x8244A450
+name = "PinyonShiftD3dCensusSlot30"
+
+[[midasm_hook]]
+address = 0x82415CA8
+name = "PinyonShiftD3dCensusSlot31"
+
+[[midasm_hook]]
+address = 0x824131B8
+name = "PinyonShiftD3dCensusSlot38"
+
+[[midasm_hook]]
+address = 0x823F5980
+name = "PinyonShiftD3dCensusSlot39"
+
+[[midasm_hook]]
+address = 0x82415CE0
+name = "PinyonShiftD3dCensusSlot40"
+
+[[midasm_hook]]
+address = 0x82412DD8
+name = "PinyonShiftD3dCensusSlot41"
+
+[[midasm_hook]]
+address = 0x8246EF98
+name = "PinyonShiftD3dCensusSlot42"
+
+[[midasm_hook]]
+address = 0x82C27340
+name = "PinyonShiftD3dCensusSlot43"
+
+[[midasm_hook]]
+address = 0x82C273B0
+name = "PinyonShiftD3dCensusSlot44"
+
+[[midasm_hook]]
+address = 0x82C27568
+name = "PinyonShiftD3dCensusSlot48"
+
+[[midasm_hook]]
+address = 0x82C27440
+name = "PinyonShiftD3dCensusSlot65"
+
+[[midasm_hook]]
+address = 0x823F74B0
+name = "PinyonShiftD3dCensusSlot66"
+
+# Display list lifecycle: run, asynchronous run, D3D's own buffer, fixups,
+# load, buffered read, clone, segment submit and close.
+[[midasm_hook]]
+address = 0x82416A00
+name = "PinyonShiftD3dCensusRunCommandBuffer"
+registers = ["r1", "r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x829EC928
+name = "PinyonShiftD3dCensusRunAsync"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x8246FB98
+name = "PinyonShiftD3dCensusD3dIb"
+registers = ["r3", "lr"]
+
+[[midasm_hook]]
+address = 0x82C58DA8
+name = "PinyonShiftD3dCensusFixup"
+registers = ["r1", "r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x82C592F0
+name = "PinyonShiftD3dCensusStaticFixup"
+registers = ["r1", "r3", "lr"]
+
+[[midasm_hook]]
+address = 0x82C59E40
+name = "PinyonShiftD3dCensusListLoad"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x82C76A90
+name = "PinyonShiftD3dCensusStreamRead"
+registers = ["r4", "r5", "lr"]
+
+[[midasm_hook]]
+address = 0x829EB2B0
+name = "PinyonShiftD3dCensusCloneCall"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x829EB0B8
+name = "PinyonShiftD3dCensusCloneCopy"
+registers = ["r3", "r5", "r7", "lr"]
+
+[[midasm_hook]]
+address = 0x8240D070
+name = "PinyonShiftD3dCensusSegmentSubmit"
+registers = ["r3", "lr"]
+
+[[midasm_hook]]
+address = 0x8240CF68
+name = "PinyonShiftD3dCensusSegmentClose"
+registers = ["r3", "lr"]
+
+# DL-0.2 bracket candidates (begin/end command buffer, begin/end tiling),
+# the callback queue and the tiling step callback.
+[[midasm_hook]]
+address = 0x82468C40
+name = "PinyonShiftD3dCensusBracket0"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x823EA3E0
+name = "PinyonShiftD3dCensusBracket1"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x823EB3D0
+name = "PinyonShiftD3dCensusBracket2"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x82469290
+name = "PinyonShiftD3dCensusBracket3"
+registers = ["r3", "r4", "lr"]
+
+[[midasm_hook]]
+address = 0x823E67A8
+name = "PinyonShiftD3dCensusInsertCallback"
+registers = ["r3", "r4", "r5", "r6", "r7", "lr"]
+
+[[midasm_hook]]
+address = 0x829F5948
+name = "PinyonShiftD3dCensusTilingCallback"
+registers = ["r3", "lr"]
+
+# DL-1.2 D3D-level draws (docs/D3D_RENDERER_RESEARCH.md,
+# src/native_renderer/d3d_draw.cpp): inside the indexed draw call
+# (0x82416380) and its shader bind (0x82411C80). Each returns at once unless
+# pinyon_shift_d3d_draw is on and the thread is inside a described call.
+# Base disc only.
+[[midasm_hook]]
+address = 0x82416438
+name = "PinyonShiftD3dDrawStateMask"
+registers = ["r30", "r31"]
+
+[[midasm_hook]]
+address = 0x82411BD0
+name = "PinyonShiftD3dDrawLiterals"
+registers = ["r3", "r4", "r5"]
+
+[[midasm_hook]]
+address = 0x82411EBC
+name = "PinyonShiftD3dDrawPixelShaderLoad"
+registers = ["r29", "r31"]
+
+[[midasm_hook]]
+address = 0x824125F0
+name = "PinyonShiftD3dDrawVertexShaderLoad"
+registers = ["r15", "r30", "r31"]
+
+[[midasm_hook]]
+address = 0x8240D348
+name = "PinyonShiftD3dDrawVertexShaderInline"
+registers = ["r26", "r27", "r30"]
+
+[[midasm_hook]]
+address = 0x824167EC
+name = "PinyonShiftD3dDrawExit"
+registers = ["r31"]

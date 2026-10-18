@@ -27,7 +27,7 @@ The race and free roam hold 60 fps at 1x within the Deck's default 15 W limit. L
 
 ## Linux PCs
 
-- x86-64 with SSE4.1, and a Vulkan 1.3 driver (RADV from Mesa 23 or newer, or NVIDIA's).
+- x86-64 with SSE4.1 (the build uses x86-64-v3 when the CPU has it), and a Vulkan 1.3 driver (RADV from Mesa 23 or newer, or NVIDIA's).
 - glibc 2.31 or newer, `python3` 3.9 or newer, `git` and GLib.
 - About 45 GB free for the first build.
 
@@ -40,5 +40,9 @@ python3 tools/pinyon.py setup --iso ~/Downloads/forza-horizon.iso
 python3 tools/pinyon.py launch
 python3 tools/pinyon.py shortcuts add
 ```
+
+## DLC, title update and saves
+
+The launcher's **DLC** panel imports your own DLC packages and the title update, as on Windows ([DLC and title update](dlc.md)); **Import a save** brings a save from another install or from Xenia. On a Steam Deck the 21 packages give the same 84 DLC cars as on Windows, and the v4 build runs the offline 1000 Club and reaches the Rally stage intro. The launcher also builds the Android app and shares it over Wi-Fi when the Android SDK command-line tools and a JDK 17 are installed.
 
 More detail, including uninstalling and troubleshooting, is in [docs/LINUX.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LINUX.md).

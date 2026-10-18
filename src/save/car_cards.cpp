@@ -10,6 +10,7 @@
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
+#include <rex/filesystem.h>
 
 namespace pinyon_shift::save {
 namespace fs = std::filesystem;
@@ -21,7 +22,7 @@ uint32_t LoadBe32(const uint8_t* bytes) {
 }
 
 bool IsCarCardName(const fs::path& path) {
-  const std::string name = path.filename().string();
+  const std::string name = rex::path_to_utf8(path.filename());
   return path.parent_path().filename() == "Thumbnails" && name.rfind("Thumbnail_", 0) == 0 &&
          path.extension() == ".xdc";
 }

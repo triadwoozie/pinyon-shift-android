@@ -78,12 +78,14 @@ inline constexpr KeyDefault kSchema28Keys[] = {
 #if defined(__APPLE__)
 inline constexpr std::string_view kGameMenuKeys = "F6,Cmd+Comma";
 inline constexpr std::string_view kPhotoKeys = "F8,Cmd+Shift+P";
+inline constexpr std::string_view kHudKeys = "F2,Cmd+Shift+H";
 inline constexpr std::string_view kTrainerKeys = "F10,Cmd+T";
 inline constexpr std::string_view kFullscreenKeys = "F11,Ctrl+Cmd+F";
 inline constexpr std::string_view kQuitKeys = "Cmd+Q";
 #else
 inline constexpr std::string_view kGameMenuKeys = "F6";
 inline constexpr std::string_view kPhotoKeys = "F8";
+inline constexpr std::string_view kHudKeys = "F2";
 inline constexpr std::string_view kTrainerKeys = "F10";
 inline constexpr std::string_view kFullscreenKeys = "F11,Alt+Return";
 inline constexpr std::string_view kQuitKeys = "";

@@ -46,7 +46,9 @@ sha256 = "DB40DF605ADE49A6"  # prefix of the supported default.xex SHA-256
 "activities.all_revealed" = 0x828AF780   # r3 activity manager -> r3 1 when every revealable activity with a saved record is revealed (the Treasure Map is owned); the pause map offers BUY TREASURE MAP while it is 0
 "activity.reveal" = 0x828A52F0           # r3 activity: sets activity.revealed and its saved record's collectible_state.revealed once (the shared start of each activity's vtable +72 reveal)
 "treasure_map.consumed" = 0x82560B80     # r3 CTreasureMapConsumeAssetTransaction (vtable 0x8201D920, slot +28), r4 result: 0 (Tokens consumed by the Forza token service) shows the TREASURE MAP notification and runs activities.reveal_all
+"launch_options.get" = 0x82479E88       # -> r3 the launch-options singleton (built on first call); its developer flags are bytes
 "content.mount_marketplace" = 0x82516630 # r3 content manager, r4 user index, r5 enumerate flags: enumerates marketplace content (type 2), mounts each package as DLCRoot<n>, takes the offer ID from its media\<hex>.puboffer and ORs the package licence mask into that offer; r3 1 when the enumeration started
+"world.player_car_slot" = 0x8248BAE8     # r3 world -> r3 the player's car slot (a pointer to the car) from the world's car vector
 
 # Byte offsets inside title objects, as the hooks above read them.
 [offsets]
@@ -83,4 +85,23 @@ sha256 = "DB40DF605ADE49A6"  # prefix of the supported default.xex SHA-256
 "barn_find_state.status" = 56            # u32: 3 before it spawns, 4 spawn pending, 5 spawned with its rumour running (only then can it be discovered), 1 discovered, 0 collected
 "game.user" = 108                        # the user in the game object at [0x832DF024], as profile.from_user takes it
 "profile.values" = 32                    # the profile's value tree (Main/Credits and the other fields)
+"launch_options.nohud" = 3213            # u8 in launch_options.get's object: 1 keeps each HUD element from showing, read only when it first shows (setting it later changes nothing)
+"launch_options.allowskipvoiceover" = 4924  # u8: 1 lets A close a dialog while its voice-over plays (sub_8269BF60)
+"launch_options.noattractvideo" = 4222  # u8: 1 stops the intro replay after ~53 s idle on the title screen (sub_827A27E0)
+"launch_options.nohandofgodreset" = 4937  # u8: 1 skips the automatic off-track reset (sub_824BA660)
+"launch_options.disablephotomodecollisiondetection" = 4921  # u8: 1 lets the photo camera pass through terrain and walls (sub_8285BFE0, sub_8266F8A0)
 "profile.loaded" = 40                    # u8, set once the values are loaded; the generic accessors skip a profile without it
+"car.dynamics" = 11664                   # the car's ICarDynamics (vtable 0x8223759C); the dynamics.* offsets are from it
+"dynamics.engine_angvel" = 324           # f32 engine speed in rad/s (x 9.5493 = RPM)
+"dynamics.redline_angvel" = 452          # f32 rad/s; the dashboard shift light comes on at 0.9 x this
+"dynamics.max_angvel" = 456              # f32 rad/s, the limiter the engine speed is clamped to
+"dynamics.idle_angvel" = 1228            # f32 rad/s
+"dynamics.gear" = 2240                   # u8: 0 reverse, 1-8 forward, 9 neutral
+"dynamics.abs_active" = 3020             # s32, set on the physics steps where ABS releases a wheel, cleared on the others
+"dynamics.speed" = 3128                  # f32 m/s
+"dynamics.abs_assist" = 3436             # s32, the ABS assist setting; the ABS model runs while it is set
+"dynamics.wheels" = 3936                 # four wheel blocks, 0 and 1 front, 2 and 3 rear
+"dynamics.wheel_stride" = 1024
+"wheel.surface_index" = 337              # u8 index into the physics surface table
+"wheel.norm_slip_ratio" = 496            # f32 smoothed slip ratio over the tyre's peak: past +1 spinning, past -1 locking (along the car's forward axis)
+"wheel.contact" = 796                    # u8, nonzero while the wheel touches the ground

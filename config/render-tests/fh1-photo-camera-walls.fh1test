@@ -1,0 +1,41 @@
+pinyon-shift-fh1-render-test-v1
+# clock-hz 60
+# #488 gate: enter PHOTO MODE as fh1-photo-mode does, then drive the photo
+# camera down and in with the sticks and triggers. Run it twice, with and
+# without --pinyon_shift_photo_camera_through_walls=true: with the flag the
+# camera ends inside or under the terrain, without it the camera stops at
+# the ground and the captures differ.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+capture 900 free-roam
+input 960 0010 0 0 0 0 0 0
+input 966 0000 0 0 0 0 0 0
+input 1020 0002 0 0 0 0 0 0
+input 1026 0000 0 0 0 0 0 0
+input 1050 0002 0 0 0 0 0 0
+input 1056 0000 0 0 0 0 0 0
+input 1080 1000 0 0 0 0 0 0
+input 1086 0000 0 0 0 0 0 0
+input 1260 1000 0 0 0 0 0 0
+input 1266 0000 0 0 0 0 0 0
+capture 1440 photo-camera
+input 1460 0000 0 0 0 0 0 -32767
+input 1700 0000 0 0 0 0 0 0
+capture 1720 right-down
+input 1740 0000 0 0 0 -32767 0 0
+input 1980 0000 0 0 0 0 0 0
+capture 2000 left-down
+input 2020 0000 255 0 0 0 0 0
+input 2260 0000 0 0 0 0 0 0
+capture 2280 left-trigger
+input 2300 0000 0 255 0 0 0 0
+input 2540 0000 0 0 0 0 0 0
+capture 2560 right-trigger
+stop 2600

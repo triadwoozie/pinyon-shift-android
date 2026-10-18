@@ -39,6 +39,35 @@
     block.append(button);
   }
 
+  // One filter for every reverse-engineering table on the page: text matches
+  // addresses, names and descriptions; the select narrows by confidence.
+  const tables = [...document.querySelectorAll(".prose table.findings")];
+  if (tables.length) {
+    const bar = document.createElement("div");
+    bar.className = "findings-filter";
+    bar.innerHTML = '<input type="search" placeholder="Filter by address, name or text" aria-label="Filter records">' +
+      '<select aria-label="Confidence"><option value="">Any confidence</option><option value="confirmed">Confirmed</option>' +
+      '<option value="probable">Probable</option><option value="guess">Guess</option></select><output></output>';
+    tables[0].closest(".table-wrap").before(bar);
+    const [input, select, count] = bar.children;
+    const rows = tables.flatMap((table) => [...table.tBodies[0].rows]);
+    const text = new Map(rows.map((row) => [row, row.textContent.toLowerCase()]));
+    const apply = () => {
+      const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const row of rows) {
+        const match = words.every((word) => text.get(row).includes(word)) &&
+          (!select.value || row.dataset.confidence === select.value);
+        row.classList.toggle("findings-hidden", !match);
+        shown += match;
+      }
+      count.value = `${shown} of ${rows.length}`;
+    };
+    input.addEventListener("input", apply);
+    select.addEventListener("change", apply);
+    apply();
+  }
+
   const links = [...document.querySelectorAll(".toc a")];
   const headings = links.map((link) => document.getElementById(link.hash.slice(1))).filter(Boolean);
   if (headings.length && "IntersectionObserver" in window) {

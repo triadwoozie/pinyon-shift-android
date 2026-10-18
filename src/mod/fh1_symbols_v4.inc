@@ -21,6 +21,16 @@ PINYON_SYMBOL("graphics.frame", 0x82AACE28)
 PINYON_SYMBOL("hook.PinyonShiftAcceptModdedBlock", 0x82CC4C00)
 PINYON_SYMBOL("hook.PinyonShiftAcceptModdedFileSize", 0x82CC359C)
 PINYON_SYMBOL("hook.PinyonShiftAcceptModdedLastBlock", 0x82CC4C3C)
+PINYON_SYMBOL("hook.PinyonShiftAiEventDifficulty", 0x826B01C8)
+PINYON_SYMBOL("hook.PinyonShiftAiSkillAdjustment", 0x826C39E8)
+PINYON_SYMBOL("hook.PinyonShiftAiSpawnConfig", 0x82521228)
+PINYON_SYMBOL("hook.PinyonShiftAiSpawnSkill", 0x82521224)
+PINYON_SYMBOL("hook.PinyonShiftAiTraceDrive", 0x82C40080)
+PINYON_SYMBOL("hook.PinyonShiftAiTraceDynamicSkills", 0x826C7598)
+PINYON_SYMBOL("hook.PinyonShiftAiTraceDynamicUpdate", 0x826C3800)
+PINYON_SYMBOL("hook.PinyonShiftAiTraceEventSkills", 0x826B0170)
+PINYON_SYMBOL("hook.PinyonShiftAnyCarEventClass", 0x8269B3C4)
+PINYON_SYMBOL("hook.PinyonShiftAnyCarEventRestriction", 0x826AF10C)
 PINYON_SYMBOL("hook.PinyonShiftArrayReleaseWalk", 0x82D19DE8)
 PINYON_SYMBOL("hook.PinyonShiftBloomScale", 0x82494E44)
 PINYON_SYMBOL("hook.PinyonShiftCameraFieldOfView", 0x828FF264)
@@ -33,7 +43,10 @@ PINYON_SYMBOL("hook.PinyonShiftGammaRampLinearBuilt", 0x82CE8C98)
 PINYON_SYMBOL("hook.PinyonShiftGammaRampPwlBegin", 0x82CE8990)
 PINYON_SYMBOL("hook.PinyonShiftGammaRampPwlBuilt", 0x82CE8B68)
 PINYON_SYMBOL("hook.PinyonShiftGammaRampPwlDeviceSet", 0x82CE8B6C)
+PINYON_SYMBOL("hook.PinyonShiftGateSimulationStep", 0x824ABC50)
 PINYON_SYMBOL("hook.PinyonShiftGpuFenceWait", 0x82AAD418)
+PINYON_SYMBOL("hook.PinyonShiftGuardAssignAddRef", 0x82E1810C)
+PINYON_SYMBOL("hook.PinyonShiftGuardAssignRelease", 0x82E1812C)
 PINYON_SYMBOL("hook.PinyonShiftGuardChildDispatch", 0x82CE2A78)
 PINYON_SYMBOL("hook.PinyonShiftGuardNullOutputHandle", 0x830605E0)
 PINYON_SYMBOL("hook.PinyonShiftGuardQueueAppend", 0x82F0A3B0)
@@ -149,6 +162,7 @@ PINYON_SYMBOL("hook.PinyonShiftValidateGeometryOutput", 0x82DFEE38)
 PINYON_SYMBOL("hook.PinyonShiftValidateGeometrySecondaryIndexList", 0x82DFFD3C)
 PINYON_SYMBOL("hook.PinyonShiftViewportAspect", 0x8241228C)
 PINYON_SYMBOL("kernel.get_av_pack", 0x832B881C)
+PINYON_SYMBOL("launch_options.get", 0x824A94B8)
 PINYON_SYMBOL("map_marker.create", 0x8299BDC8)
 PINYON_SYMBOL("map_marker.remove", 0x82996D18)
 PINYON_SYMBOL("map_marker.show", 0x82995330)
@@ -167,6 +181,7 @@ PINYON_SYMBOL("ui.pause_button_constructed", 0x826F9300)
 PINYON_SYMBOL("ui.pause_menu_action", 0x827EBEE0)
 PINYON_SYMBOL("vehicle.pose_written", 0x82C84424)
 PINYON_SYMBOL("world.game_mode", 0x824B75E8)
+PINYON_SYMBOL("world.player_car_slot", 0x824BB8F8)
 PINYON_OFFSET("activity.name", 16)  // verified on v4
 PINYON_OFFSET("activity.revealed", 8)  // verified on v4
 PINYON_OFFSET("activity_manager.begin", 4)  // verified on v4
@@ -178,8 +193,19 @@ PINYON_OFFSET("barn_find.marker", 320)  // verified on v4
 PINYON_OFFSET("barn_find.position", 112)  // verified on v4
 PINYON_OFFSET("barn_find.state", 424)  // verified on v4
 PINYON_OFFSET("barn_find_state.status", 56)  // verified on v4
+PINYON_OFFSET("car.dynamics", 11664)  // verified on v4
 PINYON_OFFSET("collectible_state.found", 44)  // verified on v4
 PINYON_OFFSET("collectible_state.revealed", 40)  // verified on v4
+PINYON_OFFSET("dynamics.abs_active", 3020)  // verified on v4
+PINYON_OFFSET("dynamics.abs_assist", 3436)  // verified on v4
+PINYON_OFFSET("dynamics.engine_angvel", 324)  // verified on v4
+PINYON_OFFSET("dynamics.gear", 2240)  // verified on v4
+PINYON_OFFSET("dynamics.idle_angvel", 1228)  // verified on v4
+PINYON_OFFSET("dynamics.max_angvel", 456)  // verified on v4
+PINYON_OFFSET("dynamics.redline_angvel", 452)  // verified on v4
+PINYON_OFFSET("dynamics.speed", 3128)  // verified on v4
+PINYON_OFFSET("dynamics.wheel_stride", 1024)  // verified on v4
+PINYON_OFFSET("dynamics.wheels", 3936)  // verified on v4
 PINYON_OFFSET("flyer.collected_marker", 96)  // verified on v4
 PINYON_OFFSET("flyer.marker", 56)  // verified on v4
 PINYON_OFFSET("flyer.object", 136)  // verified on v4
@@ -187,6 +213,11 @@ PINYON_OFFSET("flyer.smashed", 140)  // verified on v4
 PINYON_OFFSET("flyer.state", 148)  // verified on v4
 PINYON_OFFSET("game.components", 76)  // verified on v4
 PINYON_OFFSET("game.user", 108)  // verified on v4
+PINYON_OFFSET("launch_options.allowskipvoiceover", 4952)  // verified on v4; base 4924
+PINYON_OFFSET("launch_options.disablephotomodecollisiondetection", 4949)  // verified on v4; base 4921
+PINYON_OFFSET("launch_options.noattractvideo", 4238)  // verified on v4; base 4222
+PINYON_OFFSET("launch_options.nohandofgodreset", 4965)  // verified on v4; base 4937
+PINYON_OFFSET("launch_options.nohud", 3217)  // verified on v4; base 3213
 PINYON_OFFSET("main_loop.delta", 448)  // verified on v4
 PINYON_OFFSET("map_entity.on_map", 52)  // verified on v4
 PINYON_OFFSET("map_marker.entity", 4)  // verified on v4
@@ -199,5 +230,8 @@ PINYON_OFFSET("vehicle.active_slot", 1500)  // verified on v4
 PINYON_OFFSET("vehicle.slot.forward", 15184)  // verified on v4
 PINYON_OFFSET("vehicle.slot.position", 15120)  // verified on v4
 PINYON_OFFSET("vehicle.slot_stride", 1056)  // verified on v4
+PINYON_OFFSET("wheel.contact", 796)  // verified on v4
+PINYON_OFFSET("wheel.norm_slip_ratio", 496)  // verified on v4
+PINYON_OFFSET("wheel.surface_index", 337)  // verified on v4
 PINYON_OFFSET("world.session", 124)  // verified on v4
 PINYON_OFFSET("world.time_of_day", 232)  // verified on v4

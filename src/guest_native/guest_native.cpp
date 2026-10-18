@@ -30,6 +30,11 @@ constexpr uint64_t kMaxLoggedMismatches = 16;
 std::mutex registry_mutex;
 std::vector<Replacement*> registry;
 
+std::vector<Replacement*>& DeclaredReplacements() {
+  static std::vector<Replacement*> declared;
+  return declared;
+}
+
 void Register(Replacement& replacement) {
   std::lock_guard lock(registry_mutex);
   registry.push_back(&replacement);
@@ -119,6 +124,10 @@ std::string CompareRegisters(const Replacement& replacement, const PPCContext& n
 }
 
 void Verify(Replacement& replacement, PPCFunc* original, PPCContext& ctx, uint8_t* base) {
+  if (replacement.verify) {
+    replacement.verify(replacement, original, ctx, base);
+    return;
+  }
   SavedRanges before;
   if (replacement.written) {
     before.count = replacement.written(ctx, base, before.ranges.data());
@@ -189,6 +198,14 @@ void Verify(Replacement& replacement, PPCFunc* original, PPCContext& ctx, uint8_
 
 }  // namespace
 
+std::string CompareReferenceRegisters(const PPCContext& reference, const PPCContext& optimized) {
+  // Everything a caller may read after a return: the three return registers and
+  // the non-volatile set the ABI preserves.
+  Replacement all{};
+  all.returns = kReturnR3 | kReturnF1 | kReturnV3;
+  return CompareRegisters(all, reference, optimized);
+}
+
 uint64_t HashGuestCode(const uint8_t* code, uint32_t size) {
   uint64_t hash = 0xCBF29CE484222325ull;
   for (uint32_t i = 0; i < size; ++i) {
@@ -196,6 +213,16 @@ uint64_t HashGuestCode(const uint8_t* code, uint32_t size) {
     hash *= 0x100000001B3ull;
   }
   return hash;
+}
+
+Declared::Declared(Replacement& replacement) { DeclaredReplacements().push_back(&replacement); }
+
+size_t CheckAllGuestCode(uint8_t* base) {
+  size_t matched = 0;
+  for (Replacement* replacement : DeclaredReplacements()) {
+    matched += CheckGuestCode(*replacement, base) ? 1 : 0;
+  }
+  return matched;
 }
 
 void Dispatch(Replacement& replacement, PPCFunc* original, PPCContext& ctx, uint8_t* base) {

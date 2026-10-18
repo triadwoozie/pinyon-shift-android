@@ -86,7 +86,7 @@ try {
             $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path $bootstrap.jdk.url -Leaf)"
             Invoke-PinyonDownload -Uri $bootstrap.jdk.url -Destination $archive -Sha256 $bootstrap.jdk.sha256
             $toolchain = Split-Path $localJdk -Parent
-            Expand-Archive -LiteralPath $archive -DestinationPath $toolchain -Force
+            Expand-PinyonZip -Archive $archive -Destination $toolchain
             if (-not (Test-Path -LiteralPath (Join-Path $localJdk 'bin\javac.exe'))) {
                 throw "The JDK archive did not unpack to $localJdk."
             }
@@ -95,25 +95,26 @@ try {
             if (-not $env:JAVA_HOME) { $env:JAVA_HOME = $localJdk }
         }
 
-        # sdkmanager, which installs the pinned NDK, build tools and platform.
+        # The pinned sdkmanager installs the pinned NDK, build tools and
+        # platform, into the PC's existing SDK when it has one. Android
+        # Studio's newer command-line tools replace sdkmanager with a shim that
+        # split "ndk;29.0.14206865" into two unknown packages (#567).
         $localSdk = Resolve-PinyonLocalPath -RelativePath $bootstrap.android_sdk_path
         $sdk = Find-PinyonAndroidSdk -LocalSdk $localSdk
-        if (-not $sdk -or -not (Test-Path -LiteralPath (Join-Path $sdk 'cmdline-tools\latest\bin\sdkmanager.bat'))) {
-            $sdk = $localSdk
-            $sdkmanager = Join-Path $sdk 'cmdline-tools\latest\bin\sdkmanager.bat'
-            if (-not (Test-Path -LiteralPath $sdkmanager)) {
-                Write-PinyonEvent android 12 'Downloading the Android SDK command-line tools (about 150 MB).' -JsonEvents:$JsonEvents
-                $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path $bootstrap.cmdline_tools.url -Leaf)"
-                Invoke-PinyonDownload -Uri $bootstrap.cmdline_tools.url -Destination $archive `
-                    -Sha256 $bootstrap.cmdline_tools.sha256
-                $unpack = Join-Path $sdk 'cmdline-tools\unpack'
-                if (Test-Path -LiteralPath $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
-                Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
-                $latest = Join-Path $sdk 'cmdline-tools\latest'
-                if (Test-Path -LiteralPath $latest) { Remove-Item -LiteralPath $latest -Recurse -Force }
-                Move-Item -LiteralPath (Join-Path $unpack 'cmdline-tools') -Destination $latest
-                Remove-Item -LiteralPath $unpack -Recurse -Force
-            }
+        if (-not $sdk) { $sdk = $localSdk }
+        $sdkmanager = Join-Path $localSdk 'cmdline-tools\latest\bin\sdkmanager.bat'
+        if (-not (Test-Path -LiteralPath $sdkmanager)) {
+            Write-PinyonEvent android 12 'Downloading the Android SDK command-line tools (about 150 MB).' -JsonEvents:$JsonEvents
+            $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path $bootstrap.cmdline_tools.url -Leaf)"
+            Invoke-PinyonDownload -Uri $bootstrap.cmdline_tools.url -Destination $archive `
+                -Sha256 $bootstrap.cmdline_tools.sha256
+            $unpack = Join-Path $localSdk 'cmdline-tools\unpack'
+            if (Test-Path -LiteralPath $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
+            Expand-PinyonZip -Archive $archive -Destination $unpack
+            $latest = Join-Path $localSdk 'cmdline-tools\latest'
+            if (Test-Path -LiteralPath $latest) { Remove-Item -LiteralPath $latest -Recurse -Force }
+            Move-Item -LiteralPath (Join-Path $unpack 'cmdline-tools') -Destination $latest
+            Remove-Item -LiteralPath $unpack -Recurse -Force
         }
         $env:ANDROID_HOME = $sdk
         $env:ANDROID_SDK_ROOT = $sdk

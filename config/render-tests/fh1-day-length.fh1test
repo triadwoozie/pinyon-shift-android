@@ -1,0 +1,24 @@
+pinyon-shift-fh1-render-test-v1
+# clock-hz 60
+# #483 gate: with cheats on (--pinyon_shift_cheats=true), DAY LENGTH 12 MIN
+# (cheat_day_length_minutes 12) runs 24 game hours in 12 real minutes:
+# 120 game seconds per real second. cheat.day_clock logs each game hour
+# with host_ms, so the rate between two hours can be checked within 2 %.
+# The run then goes back to the title's rate.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 780 0000 0 0 0 0 0 0
+input 930 0000 0 0 0 0 0 0
+capture 1240 before
+cvar 1250 cheat_day_length_minutes 12
+capture 3100 running
+cvar 5000 cheat_day_length_minutes 0
+capture 5060 stock
+stop 5100

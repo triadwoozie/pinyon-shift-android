@@ -14,7 +14,7 @@ import sys
 import tempfile
 import uuid
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT = Path("0000000000000000/4D5309C9")
@@ -66,7 +66,11 @@ def package_paths(state: Path, package_id: str) -> tuple[Path, Path, Path]:
 
 def payload_catalog(root: Path) -> tuple[list[dict], str]:
     files = []
-    for path in sorted(root.rglob("*")):
+    # The digest depends on the order. Sort as Windows paths compare
+    # (case-insensitive, "\" separators) on every platform, the order the
+    # catalog's payload_sha256 values were made with; POSIX Path sorting
+    # is case-sensitive, so Rally failed to verify on macOS and Linux.
+    for path in sorted(root.rglob("*"), key=lambda p: PureWindowsPath(p.relative_to(root))):
         if path.is_symlink():
             raise ValueError("content contains a symbolic link")
         if path.is_file():
@@ -136,9 +140,60 @@ def safe_archive_path(name: str) -> None:
         raise ValueError("unsafe ZIP member path")
 
 
-def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple[Path, dict, dict]]:
+NOT_FOUND = ("no FH1 DLC packages found; choose the original package files (no "
+             "extension, starting with LIVE, CON or PIRS), a ZIP holding them, or "
+             "Xenia's installed content folder for the game (4D5309C9, holding "
+             "00000002 and Headers)")
+
+
+def unpacked_variants(header: bytes, package: dict) -> list[dict]:
+    """The catalog variants an installed package's header licenses, or
+    ValueError. The header is the 328-byte content record the runtime and
+    Xenia both keep, followed by the 4-byte licence mask."""
+    name = package["display_name"]
+    if (len(header) != 332 or header[4:8] != bytes.fromhex("00000002") or
+            header[0x140:0x144] != bytes.fromhex("4D5309C9") or
+            header[0x108:0x132].rstrip(b"\0").decode("ascii", "replace").upper()
+            != package["package_id"]):
+        raise ValueError(f"{name}: the installed package's header is not this package's; "
+                         "import the original package instead")
+    mask = int.from_bytes(header[328:332], "little")
+    variants = [v for v in package["accepted"] if int(v["license_mask"], 16) == mask]
+    if not variants and mask == int(combined_mask(package["accepted"]), 16):
+        variants = list(package["accepted"])
+    if not variants:
+        raise ValueError(f"{name}: the installed package's licence does not match a verified "
+                         "package; import the original package instead")
+    return variants
+
+
+def stage_unpacked(source: Path, manifest: dict) -> tuple[list[tuple], set[Path]]:
+    """Packages already unpacked by Xenia's Install Content, laid out as
+    <title>/00000002/<package id> with <title>/Headers/00000002/<id>.header,
+    the layout this importer publishes. Verified by payload digest and the
+    header's licence; the original package is not needed."""
+    packages = {p["package_id"]: p for p in manifest["packages"]}
+    folders = [source] + sorted(p for p in source.rglob("*") if p.is_dir() and not p.is_symlink())
+    found, roots = [], set()
+    for folder in folders:
+        package = packages.get(folder.name.upper())
+        if package is None or folder.parent.name != "00000002":
+            continue
+        roots.add(folder)
+        header = folder.parent.parent / "Headers" / "00000002" / (folder.name + ".header")
+        if not header.is_file():
+            raise ValueError(f'{package["display_name"]}: {folder} is an unpacked package without '
+                             f"its header ({header.parent}); choose Xenia's 4D5309C9 folder that "
+                             "holds both 00000002 and Headers, or the original package file")
+        variants = unpacked_variants(header.read_bytes(), package)
+        found.append((None, package, variants[0], variants, (folder, header)))
+    return found, roots
+
+
+def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
     """Read only the inputs; never extract wrapper member paths to the host."""
     found = {}
+    skipped = []
 
     def accept(stream, size: int) -> None:
         if size > MAX_PACKAGE:
@@ -161,13 +216,14 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple[Pa
                 found[id][3].append(variant)
             path.unlink()
             return
-        found[id] = (path, package, variant, [variant])
+        found[id] = (path, package, variant, [variant], None)
 
+    unpacked, unpacked_roots = stage_unpacked(source, manifest) if source.is_dir() else ([], set())
     inputs = sorted(source.rglob("*")) if source.is_dir() else [source]
     for path in inputs:
         if path.is_symlink():
             raise ValueError("input folder contains a symbolic link")
-        if not path.is_file():
+        if not path.is_file() or any(root in path.parents for root in unpacked_roots):
             continue
         with path.open("rb") as stream:
             magic = stream.read(4)
@@ -175,20 +231,39 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple[Pa
             with path.open("rb") as stream:
                 accept(stream, path.stat().st_size)
         elif zipfile.is_zipfile(path):
-            with zipfile.ZipFile(path) as archive:
-                for member in archive.infolist():
-                    safe_archive_path(member.filename)
-                    if member.is_dir():
-                        continue
-                    with archive.open(member) as stream:
-                        prefix = stream.read(4)
-                    if prefix in MAGIC:
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    for member in archive.infolist():
+                        safe_archive_path(member.filename)
+                        if member.is_dir():
+                            continue
                         with archive.open(member) as stream:
-                            accept(stream, member.file_size)
+                            prefix = stream.read(4)
+                        if prefix in MAGIC:
+                            with archive.open(member) as stream:
+                                accept(stream, member.file_size)
+            except (NotImplementedError, zipfile.BadZipFile, RuntimeError) as error:
+                # A folder can hold game ZIPs that are not DLC wrappers, such
+                # as an installed package's Media/DLCZips (an unsupported
+                # compression method): skip them. A chosen ZIP must be read.
+                # NotImplementedError is a RuntimeError; an encrypted member
+                # raises the plain one.
+                reason = ("it uses a compression method that can't be read here, such as "
+                          "Deflate64; extract it first" if isinstance(error, NotImplementedError)
+                          else "it is damaged" if isinstance(error, zipfile.BadZipFile)
+                          else "it is encrypted")
+                if not source.is_dir():
+                    raise ValueError(f"the ZIP cannot be read: {reason}") from None
+                skipped.append(f"{path.name} ({reason})")
         elif not source.is_dir():
             raise ValueError("choose a raw DLC package, DLC folder or ZIP")
+    for entry in unpacked:
+        id = entry[1]["package_id"]
+        if id not in found:
+            found[id] = entry
     if not found:
-        raise ValueError("no FH1 DLC packages found")
+        raise ValueError(NOT_FOUND + ("" if not skipped else
+                                      "; skipped: " + "; ".join(skipped[:5])))
     return list(found.values())
 
 
@@ -213,6 +288,11 @@ def mutation_lock(state: Path):
                     ["tasklist.exe", "/FI", "IMAGENAME eq pinyon_shift.exe", "/FO", "CSV", "/NH"],
                     creationflags=subprocess.CREATE_NO_WINDOW)
                 if b'"pinyon_shift.exe"' in running.lower():
+                    raise ValueError("close the game before changing DLC")
+            elif shutil.which("pgrep") and not os.environ.get("PINYON_SHIFT_TEST_ALLOW_RUNNING_GAME"):
+                # Linux and macOS: the game reads the content tree while it runs.
+                if subprocess.call(["pgrep", "-x", "pinyon_shift"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL) == 0:
                     raise ValueError("close the game before changing DLC")
             yield
         finally:
@@ -308,7 +388,7 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
         # Licences already imported for each package; a new variant adds to them.
         previous = {}
         # Reject batch conflicts before publishing any package.
-        for _, package, _, _ in inputs:
+        for _, package, *_ in inputs:
             id = package["package_id"]
             enabled, disabled, _ = package_paths(state, id)
             record_path = state / "dlc" / (id + ".json")
@@ -327,7 +407,7 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
                 _, digest = payload_catalog(enabled if enabled.exists() else disabled)
                 if digest != package["payload_sha256"]:
                     repair.add(id)
-        for index, (input_path, package, variant, variants) in enumerate(inputs):
+        for index, (input_path, package, variant, variants, unpacked) in enumerate(inputs):
             id = package["package_id"]
             enabled, disabled, header = package_paths(state, id)
             record_path = state / "dlc" / (id + ".json")
@@ -353,17 +433,26 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
                             header_sha256=hashlib.sha256(data).hexdigest().upper()))
                         continue
             extracted = staging / str(index)
-            result = subprocess.run([str(extractor), "--dlc-files", str(input_path), str(extracted), id],
-                                    capture_output=True, text=True)
-            if result.returncode:
-                raise ValueError(result.stderr.strip() or "DLC extraction failed")
             content = extracted / CONTENT / "00000002" / id
+            if unpacked:
+                # Xenia's installed copy: the same files and header the
+                # extractor would publish, verified below like extracted ones.
+                shutil.copytree(long_path(unpacked[0]), content)
+                staged = extracted / CONTENT / "Headers" / "00000002" / (id + ".header")
+                staged.parent.mkdir(parents=True)
+                shutil.copyfile(unpacked[1], staged)
+            else:
+                result = subprocess.run([str(extractor), "--dlc-files", str(input_path),
+                                         str(extracted), id], capture_output=True, text=True)
+                if result.returncode:
+                    raise ValueError(result.stderr.strip() or "DLC extraction failed")
             _, digest = payload_catalog(content)
             if digest != package["payload_sha256"]:
                 raise ValueError(f'{package["display_name"]}: extracted content failed verification')
             staged_header = extracted / CONTENT / "Headers" / "00000002" / (id + ".header")
             header_data = staged_header.read_bytes()
-            if len(header_data) not in (328, 332) or int.from_bytes(header_data[328:332], "little") != int(variant["license_mask"], 16):
+            if len(header_data) not in (328, 332) or int.from_bytes(header_data[328:332], "little") != int(
+                    combined_mask(variants) if unpacked else variant["license_mask"], 16):
                 raise ValueError("content header failed verification")
             header_data = header_data[:328] + int(mask, 16).to_bytes(4, "little")
             staged_header.write_bytes(header_data)

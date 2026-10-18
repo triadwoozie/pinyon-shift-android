@@ -70,7 +70,7 @@ $include = @(
     'config/supported-extracted-ms-2505.json', 'tools/verify-extracted-game.ps1', 'docs/EXTRACTED_GAME_INPUT.md',
     'config/supported-dlc.json', 'tools/manage-fh1-dlc.py', 'tools/manage-dlc.ps1', 'tools/prepare-fh1-rally.py', 'tools/patch-fh1-archive.py',
     'config/rexglue', 'include', 'mods_src', 'src', 'tests/config', 'tests/native_renderer',
-    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod',
+    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod', 'tests/telemetry',
     'tools/fh1_archive_extract.cpp', 'tools/fh1_texture_import.cpp', 'tools/thread_sampler.cpp', 'tools/vram_balloon.cpp',
     'tools/extract-fh1-shader-corpus.py', 'tools/build-fh1-gpu-prewarm.py',
     'tools/produce-fh1-artifacts.ps1', 'tools/prepare-fh1-shaders.ps1', 'tools/prepare-fh1-vulkan.ps1',
@@ -85,6 +85,11 @@ $include = @(
     'tools/pinyon_radio.py', 'tools/manage-radio.ps1', 'tools/build-fh1-radio.py',
     # Linux, the Steam Deck and macOS (docs/LINUX.md, docs/MACOS.md).
     'tools/pinyon_setup.py', 'tools/pinyon_steam.py', 'tools/pinyon_deck.py', 'config/steam',
+    # The launcher backends of pinyon.py on every OS: DLC, title update, saves,
+    # crash bundles, settings, the hardware check, paths and shader preparation.
+    'tools/pinyon_common.py', 'tools/pinyon_dlc.py', 'tools/pinyon_title_update.py',
+    'tools/pinyon_saves.py', 'tools/import-xenia-save.ps1', 'tools/pinyon_crash.py',
+    'tools/pinyon_config.py', 'tools/pinyon_hardware.py', 'tools/pinyon_shaders.py',
     'config/android-toolchain.json', 'android',
     'tools/fh1-profile.py', 'tools/fh1-strings.py', 'tools/inspect-fh1-ui.py',
     'tools/native-shader-pack.py',

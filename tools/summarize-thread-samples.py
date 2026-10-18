@@ -18,6 +18,7 @@ import argparse
 import collections
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -60,6 +61,31 @@ WAIT_LEAVES = (
 )
 
 
+GUEST_FUNCTION = re.compile(r"\bsub_([0-9A-Fa-f]{8})\b")
+
+
+def load_symbols(path: Path | None) -> dict[str, str]:
+    """`names` of tools/re/kb.py symbols (or the site's symbols.json): sub_X -> recorded name."""
+    if path is None:
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "names" in data:
+        return data["names"]
+    names: dict[str, str] = {}
+    for row in data.get("addresses", []):
+        names.setdefault(f"sub_{int(row['address'], 16):08X}", row["name"])
+    return names
+
+
+def label(name: str, symbols: dict[str, str]) -> str:
+    """`module!sub_82438EA8` -> `module!sub_82438EA8 crt pow` when the knowledge base names it."""
+    if not symbols:
+        return name
+    return GUEST_FUNCTION.sub(
+        lambda m: f"sub_{m.group(1)} {symbols[f'sub_{m.group(1).upper()}']}"
+        if f"sub_{m.group(1).upper()}" in symbols else m.group(0), name)
+
+
 def function(frame: str) -> str:
     """The frame without the source line the sampler's --lines adds to leaves."""
     return frame.split(" @", 1)[0]
@@ -69,7 +95,9 @@ def is_wait(frame: str) -> bool:
     return function(frame).split("!", 1)[-1] in WAIT_LEAVES
 
 
-def summarize(threads, stacks, samples, start_s, end_s, top, focus=None, weight="samples"):
+def summarize(threads, stacks, samples, start_s, end_s, top, focus=None, weight="samples",
+              symbols=None):
+    symbols = symbols or {}
     report = {"window_s": [start_s, end_s], "threads": {}}
     for thread_id, name in threads.items():
         exclusive = collections.Counter()
@@ -100,7 +128,7 @@ def summarize(threads, stacks, samples, start_s, end_s, top, focus=None, weight=
 
         def ranked(counter):
             return [
-                {"name": name_, "percent": round(100.0 * value / total, 2)}
+                {"name": label(name_, symbols), "percent": round(100.0 * value / total, 2)}
                 for name_, value in counter.most_common(top)
             ]
 
@@ -136,6 +164,9 @@ def main() -> int:
     parser.add_argument("--focus", help="only samples with a frame containing this text")
     parser.add_argument("--weight", choices=("samples", "cycles"), default="samples")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--symbols", type=Path,
+                        help="tools/re/kb.py symbols output (or the site's symbols.json): "
+                             "labels sub_XXXXXXXX functions with their recorded names")
     args = parser.parse_args()
 
     threads, stacks, samples = load(args.directory)
@@ -143,7 +174,8 @@ def main() -> int:
         timeline(threads, samples)
         return 0
     report = summarize(
-        threads, stacks, samples, args.from_s, args.to_s, args.top, args.focus, args.weight
+        threads, stacks, samples, args.from_s, args.to_s, args.top, args.focus, args.weight,
+        load_symbols(args.symbols)
     )
     text = json.dumps(report, indent=2)
     if args.output:

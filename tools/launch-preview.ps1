@@ -92,6 +92,13 @@ if ($TitleUpdateV4) {
         }
     }
 }
+if (-not $TitleUpdateV4 -and -not $RenderTestScript) {
+    # A v4 save (from Xenia, or an earlier v4 start) makes the base game ask
+    # for an update from Xbox Live (#555); say what to do instead.
+    $check = & (Get-PinyonPython) (Join-Path $PSScriptRoot 'title-update-profile.py') check-base `
+        --state-root $resolvedStateRoot
+    if ($LASTEXITCODE -eq 3) { throw (($check | Select-Object -Last 1) | ConvertFrom-Json).refusal }
+}
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw 'The preview has not been built. Run tools/setup-preview.ps1 first.'
 }
@@ -320,6 +327,19 @@ if ($exitCode -eq 1308) {
         result = 'graphics-unavailable'
         process_id = $process.Id
         exit_code = $exitCode
+    }
+    if ($Json) { $result | ConvertTo-Json -Compress } else { $result }
+    exit 1
+}
+if ($exitCode -eq 1306) {
+    # The game could not read or write its settings file and said so
+    # (src/pinyon_shift_app.cpp, EnsureSupportedConfig). The player can fix
+    # the file or its folder; a crash report would not help (#536).
+    $result = [ordered]@{
+        result = 'config-unavailable'
+        process_id = $process.Id
+        exit_code = $exitCode
+        config = Join-Path $resolvedStateRoot 'config\pinyon_shift.toml'
     }
     if ($Json) { $result | ConvertTo-Json -Compress } else { $result }
     exit 1

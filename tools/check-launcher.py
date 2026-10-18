@@ -33,6 +33,15 @@ class Check {
     static void Require(bool value, string message) {
         if (!value) throw new Exception(message);
     }
+    // A CI runner's scanner can briefly hold a ZIP the check has just
+    // written ("being used by another process"); the launcher's own reads
+    // are closed by then.
+    static ZipArchive OpenZipForUpdate(string path) {
+        for (var attempt = 1; ; attempt++) {
+            try { return ZipFile.Open(path, ZipArchiveMode.Update); }
+            catch (IOException) when (attempt < 10) { System.Threading.Thread.Sleep(200 * attempt); }
+        }
+    }
     [STAThread] static void Main(string[] args) {
         var app = new App();
         app.InitializeComponent();
@@ -364,7 +373,7 @@ class Check {
             && !CanChoose(), "Checkout relocated");
         File.WriteAllText(Path.Combine(root, ".pinyon-source-sha256"), "managed source");
         Require(Resolve(selected) == installed && CanChoose(), "Managed source bypasses payload checks");
-        using (var damagedZip = ZipFile.Open(Path.Combine(root, "pinyon-shift-source.zip"), ZipArchiveMode.Update))
+        using (var damagedZip = OpenZipForUpdate(Path.Combine(root, "pinyon-shift-source.zip")))
             damagedZip.GetEntry("src/main.cpp")!.Delete();
         var brokenRoot = Path.Combine(root, "broken release");
         try { Resolve(brokenRoot); throw new Exception("Incomplete release ZIP accepted"); }

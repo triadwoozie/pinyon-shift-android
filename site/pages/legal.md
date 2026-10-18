@@ -21,6 +21,10 @@ A lawfully acquired, personally dumped copy of the exact supported disc. The bui
 
 The Android package you build holds the game translated from your disc. Keep it on your own devices.
 
+## Native code that replaces the game's
+
+Some of the game's translated code runs as native code instead: hand-written functions, hooks, and replacements of libraries linked into the game such as FMOD Ex. That code is written independently, to a contract we documented from our own analysis and checked against the translated original, using our own or published, licensed algorithms. The repository never holds the game's functions rewritten statement by statement, data copied from the executable, or a middleware product's own algorithms beyond its public documentation. Code that must match the original exactly is generated on your machine from your own copy, like the rest of the translation.
+
 ## Licence
 
 The [BSD 3-Clause License](https://github.com/arcanite24/pinyon-shift/blob/dev/LICENSE) covers only the independently written material in the repository. It grants no rights to *Forza Horizon*, Xbox software, ReXGlue or anything you supply. Third-party components are listed in [THIRD_PARTY_NOTICES.md](https://github.com/arcanite24/pinyon-shift/blob/dev/THIRD_PARTY_NOTICES.md).

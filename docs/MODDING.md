@@ -119,6 +119,26 @@ set each one (CUSTOM). On the v4 build the title update's own
 `media.zip` carries `camera/cameraphysics.xml`, which the game reads instead,
 so the layers do not load there yet.
 
+`hidden_cars` (#484) is listed on F6 > MODS, off by default. Its
+`db/10-hidden-cars.sql` lists the 22 cars the database marks drivable but
+not selectable (traffic cars such as the tour bus, the Kenworth T440, the
+Leaf and the Prius, and the showcase Mini, 500 Abarth and 205 T16) and
+prices the seven that cost nothing. They are sold in the Autoshow under
+their make and play the modded profile. Most have no Autoshow thumbnail, so
+their tile is black until bought. The tour bus was bought, saved and driven,
+and the Kenworth raced, on the base build
+(`config/render-tests/fh1-hidden-car-drive.fh1test`).
+
+`photo_mode_limits` (#488) is listed on F6 > MODS, off by default, and
+keeps the player's own save (`shares_save`). It merges four
+`PhotoModeCam` keys into `camera.zip/CameraSettings.ini`: `MaxHeight` 2 to
+30 m, `BoundaryCeilingHeight` 6 to 50, `BoundaryCylinderRadius` 100 to 300
+and `MinFOVPhotoMode` 4.5 to 1 (more zoom). On the base build the photo
+camera climbed to the 30 m readout where stock stops at 2 m
+(`config/render-tests/fh1-photo-mode-limits.fh1test`). v4's `media.zip`
+has no `CameraSettings.ini`, so the merge should apply there too; not yet
+tried on v4.
+
 ## Asset mods
 
 Files under `game/` replace the game's files with the same path
@@ -169,9 +189,64 @@ Before each start, `tools/build-mod-archives.py` (run by
 copy: other members keep their compressed bytes, replaced ones are stored
 uncompressed, and a matching `zipmanifest.xml` goes with it, all as the
 generated mod `zz-archive-patches`. An earlier mod wins a member two mods
-replace. Only existing members can be replaced, and archives whose end
-record disagrees with the manifest (the largest track archive) must still be
-replaced whole. `zz-archive-patches/archives.json` lists what was rebuilt.
+replace. Archives whose end record disagrees with the manifest (the largest
+track archive) must still be replaced whole.
+`zz-archive-patches/archives.json` lists what was rebuilt.
+
+A new file goes under `add/` with the same layout, and is appended to the
+archive stored:
+
+```text
+<state>/mods/<name>/add/<archive path>/<member path>
+e.g. mods/my_mod/add/media/dynamicpost.zip/ColourGradingMaps/Sunset.dds
+```
+
+The build refuses a `members/` or `merge/` file the archive does not have
+(it belongs under `add/`) and an `add/` file it already has (it belongs under
+`members/`), so a typo cannot silently do nothing.
+
+### Strings
+
+New or changed text goes in `strings/<language>/<Table>.toml`, where
+`<language>` is the string archive's name (`EN`, `FR`, ...) or `ALL` for
+every language, and each line names a string by its `IDS_` name:
+
+```toml
+# mods/my_mod/strings/ALL/List_CarMake.toml
+IDS_Make_PinyonMotors = "Pinyon Motors"
+```
+
+A name the table has takes the new text; a new name is added to the table
+with its key. The database refers to a string as `_&N`, where N is
+`(table_hash << 16) | key`; `tools/fh1-strings.py` computes both
+(`string_reference("List_CarMake", "IDS_Make_PinyonMotors")`). A new name
+whose 16-bit key another name in the table already holds is refused. Seven
+tables keep no name order (no chunk 3) and take only changes to existing
+names. For a key two mods set, the earlier mod wins.
+
+### Colour grading
+
+The game grades the scene (not the HUD) with 16x16x16 colour maps in
+`media/dynamicpost.zip` (`ColourGradingMaps/*.dds`, `NormalGrading.dds` is
+the identity), chosen per area of the map by the loose
+`media/tracks/colorado/Ribbon_00/PostProcessingZones_Safe.xml`. A look mod
+either replaces maps under `members/`, or adds its own under `add/` and ships
+an edited copy of the zones file under `game/` that names them:
+
+```text
+mods/my_look/add/media/dynamicpost.zip/ColourGradingMaps/Warm.dds
+mods/my_look/game/media/tracks/colorado/Ribbon_00/PostProcessingZones_Safe.xml
+```
+
+A map is a DDS volume texture, A8R8G8B8, with red varying fastest, then
+green, then blue; start from a copy of `NormalGrading.dds` built on the
+player's machine.
+
+For a look over the whole scene without a mod, a player can drop a `.cube`
+3D LUT (2 to 256 points, `DOMAIN_MIN`/`DOMAIN_MAX` 0 to 1) into the state
+folder's `luts` folder and pick it in F6 > GRAPHICS > COLOUR LUT
+(`scene_lut_path`, `scene_lut_strength`). It applies after the game's
+grading, on the scene only.
 
 ### Settings merged by key
 
@@ -209,10 +284,12 @@ lists the mods merged into each member.
 
 ### Textures
 
-**Texture replacement works only on the D3D12 renderer today.** The dump,
-the replacement and the reload are implemented in the D3D12 texture cache;
-the Vulkan renderer, which every platform uses by default, ignores
-`textures/` folders ([#518](https://github.com/arcanite24/pinyon-shift/issues/518)).
+Texture replacement works on the Vulkan renderer every platform uses
+([#518](https://github.com/arcanite24/pinyon-shift/issues/518)). The dump,
+the lookup and the DDS files are shared with the legacy D3D12 cache
+(`pipeline/texture/replacement.cpp` in ShiftGlue). On a GPU without BC
+texture formats (most Android GPUs on their stock driver, #516) the game
+decodes DXT textures on load, so only 8_8_8_8 replacements apply there.
 
 A mod may replace textures without touching the archives that hold them:
 
@@ -321,6 +398,52 @@ earliest enabled mod in the load order that ships one is the base, recorded as
 `base` in `patches.json`. Archive members and merges likewise start from a
 mod's replacement archive or `zipmanifest.xml` when one is enabled.
 
+### New cars from existing models
+
+`tools/clone-fh1-car.py` turns a short spec into a database script and the
+cars' names, so a mod adds cars that reuse a model the game has, with their
+own name, price, power and listed class:
+
+```toml
+# cars.toml
+[[car]]
+id = 1700            # new id; 1700 and up are free of the game's and its DLC's
+source = 1496        # the Jaguar XKR-S's model, physics and upgrades
+name = "Pinyon XK"
+price = 85000
+torque_scale = 1.15
+pi = 598             # the Autoshow's index and class (A here)
+```
+
+```powershell
+python tools/clone-fh1-car.py cars.toml <state>/mods/my_cars --game-db <game>/media/db/gamedb.slt
+```
+
+It writes `db/50-clone-cars.sql`, which copies the source car's rows inside
+the player's own database when the mod is built (so the mod carries no game
+data), and `strings/ALL/Data_Car.toml` with the names. The new car is sold
+in the Autoshow under the source's make and appears in an event's
+recommendations when its class fits the event. Its thumbnail is the
+source's.
+
+The index and class in the spec are only what the Autoshow lists. Once
+bought, the game rates the car from its physics, as it does after an
+upgrade, so a listed index the physics do not produce changes when the
+car is delivered (an Exige clone listed at S 620 arrived at A 570).
+Without `pi` (or a raw `performance_index`) the tool estimates the index
+from `torque_scale`, usually within a few points; to list a car exactly,
+buy it once, read its index in the garage and set that as `pi`. The
+database's curb weight is not the weight the game uses, so the spec has no
+weight scale.
+
+Cars bought from a database mod live in the separate modded profile, not
+the player's own save. Removing the mod later leaves that profile
+loadable: the game switches to another owned car and leaves the clone out
+of car select. Whether the car returns when the mod is turned back on
+has not been tested. Clones are upgraded, painted (the Autoshow's colour
+choice) and changed like any car: five were bought, driven, Auto
+Upgraded at Dak's Garage and kept after a reload.
+
 ## The Forza Horizon XE mod
 
 [Forza Horizon XE](https://www.moddb.com/mods/forza-horizon-xe-mod) by
@@ -425,12 +548,17 @@ Guest memory is big-endian, as the title sees it; `read_guest` and
 `write_guest` copy bytes. Writing memory the GPU reads (textures, vertex
 buffers) is not supported: the renderer would not see the change.
 
-Mods never hard-code addresses. `find_symbol("frame.tick")` and
-`find_offset("vehicle.slot.position")` look names up in the symbol table for
-the supported executable: [`config/mod/fh1-symbols.toml`](../config/mod/fh1-symbols.toml),
-plus every hook site as `hook.<name>`. Unknown names return 0 or -1. The
-table is generated into the host by `tools/generate-fh1-symbols.py`, and a
-test fails when it and the hook declarations disagree.
+Mods look addresses up by name instead of hard-coding them.
+`find_symbol("frame.tick")` and `find_offset("vehicle.slot.position")` look
+names up in the symbol table for the supported executable:
+[`config/mod/fh1-symbols.toml`](../config/mod/fh1-symbols.toml), plus every
+hook site as `hook.<name>`. Unknown names return 0 or -1. The table is
+generated into the host by `tools/generate-fh1-symbols.py`, and a test fails
+when it and the hook declarations disagree. The table names functions, hook
+sites and offsets but not data globals yet; the two that object walks need,
+the game holder `0x832DF024` (v4 `0x833CAAE4`) and the activity manager's
+component index `0x832FEE8C` (v4 `0x833EDA1C`), are given on the site's Game
+objects page.
 
 Guest functions are called only from a guest task: `enqueue_guest_task`
 runs a callback on the title's main thread at the next frame tick, where

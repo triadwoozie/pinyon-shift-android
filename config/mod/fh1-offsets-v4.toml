@@ -16,8 +16,19 @@
 "barn_find.position" = 112  # addi 112(this) unchanged in a barn-find vtable method
 "barn_find.state" = 424  # barn-find vtable slot 20
 "barn_find_state.status" = 56  # 828BC5E0 -> 8296E2F8: lwz 56([this+424]) 828BC5F8 -> 8296E310
+"car.dynamics" = 11664  # car+11664 getter sub_8249E4B8 -> sub_8250AF98, both return r3+11664
 "collectible_state.found" = 44  # flyer.smash 828C0C80 -> 82972A38
 "collectible_state.revealed" = 40  # activity.reveal 828A52F0 -> 82956A20
+"dynamics.abs_active" = 3020  # ICarDynamics ABS light getter sub_82D1D880 -> sub_82DDF7E0
+"dynamics.abs_assist" = 3436  # same getter, second word: sub_82D1D880 -> sub_82DDF7E0
+"dynamics.engine_angvel" = 324  # RPM getter sub_82D1D078 -> v4 ICarDynamics slot 53, same field
+"dynamics.gear" = 2240  # gear getter sub_82D1D868 -> sub_82DDF7C8
+"dynamics.idle_angvel" = 1228  # idle getter (vtable slot 103) -> sub_82DDF050
+"dynamics.max_angvel" = 456  # limiter getter (vtable slot 102) -> sub_82DDF020
+"dynamics.redline_angvel" = 452  # redline getter (vtable slot 101) -> sub_82DDF010
+"dynamics.speed" = 3128  # speed getter sub_82D1CE38 -> sub_82DDED78
+"dynamics.wheel_stride" = 1024  # wheel getters index w << 10 in both, e.g. slip ratio slot 169 -> sub_82DDFD20
+"dynamics.wheels" = 3936  # slip ratio getter (vtable slot 169) -> sub_82DDFD20
 "flyer.collected_marker" = 96  # flyer.smash 828C0CF8 -> 82972AA8: lwz 96(this)
 "flyer.marker" = 56  # flyer.smash: addi r3,56(this) 828C0CE0 -> 82972A90
 "flyer.object" = 136  # flyer.smash: lwz 136(this) 828C0CA4 -> 82972A5C and 828C0CB4 -> 82972A6C
@@ -25,6 +36,11 @@
 "flyer.state" = 148  # flyer vtable +80 (GetState): 82C74640 -> 829607C8, both lwz r3,148(r3)
 "game.components" = 76  # sub_825F6FB0 -> 8269B4F8
 "game.user" = 108  # user-slot accessor 82880B40 -> 824ABD38, both addi r3,r3,108
+"launch_options.allowskipvoiceover" = 4952  # option visitor sub_824F8150 -> 82563570
+"launch_options.noattractvideo" = 4238  # option visitor sub_824F8150 -> 82563570
+"launch_options.nohandofgodreset" = 4965  # option visitor sub_824F8150 -> 82563570
+"launch_options.disablephotomodecollisiondetection" = 4949  # option visitor sub_824F8150 -> 82563570
+"launch_options.nohud" = 3217  # HUD reader sub_826BEC10 -> 8276ADD8: lbz after launch_options.get 82479E88 -> 824A94B8
 "main_loop.delta" = 448  # hook 823EDB84
 "map_entity.on_map" = 52  # map_marker.show 828E3580 -> 82995330
 "map_marker.entity" = 4  # map_marker.show: lwz 4(r3) 828E3580 -> 82995330
@@ -37,5 +53,8 @@
 "vehicle.slot.forward" = 15184  # 82BC5870: li r10,0x3B50 82BC5A08 -> 82C843F0
 "vehicle.slot.position" = 15120  # 82BC5870: li r25,0x3B10 82BC59F4 -> 82C843DC
 "vehicle.slot_stride" = 1056  # 82BC5870: mulli r11,r11,0x420 82BC59F8 -> 82C843E0
+"wheel.contact" = 796  # wheel contact getters, unchanged with the CCarDynamics layout
+"wheel.norm_slip_ratio" = 496  # smoothed slip ratio getter (vtable slot 169) -> sub_82DDFD20
+"wheel.surface_index" = 337  # surface record getter (vtable slot 206), unchanged with the CCarDynamics layout
 "world.session" = 124  # world.game_mode 824878D0 = v4 824B75E8: lwz r11,124(r3) unchanged
 "world.time_of_day" = 232  # time_of_day.from_world base 82486CF0 = v4 824B6990 = 'lwz r3,232(r3)

@@ -6,6 +6,8 @@
 #include <utility>
 #include <memory>
 
+#include <rex/ui/upscaler.h>
+
 #include "config/host_config.h"
 #include "save_backups.h"
 #include "ui/hostui/host_ui.h"
@@ -33,6 +35,10 @@ struct SettingsServices {
   // Where the latest frame reached the window, in pixels (after output
   // scaling and letterboxing); the display and graphics notes give it.
   std::function<std::optional<std::pair<uint32_t, uint32_t>>()> output_size;
+  // The output scalers the presenter has (rex/ui/upscaler.h), temporal ones
+  // with whether their runtime loaded; OUTPUT SCALING offers the available
+  // ones.
+  std::function<std::vector<rex::ui::UpscalerInfo>()> upscalers;
   // SAVE PHOTO: the frame behind the menu as a PNG, as F8 saves it; no row
   // without it. With the trainer, TRAINER (F10) opens it while cheats are
   // on. Both reach a controller-only or touch-only player (AP-4.4).

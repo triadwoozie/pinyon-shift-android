@@ -24,6 +24,11 @@ const std::filesystem::path& StateRoot();
 const std::string& SessionId();
 std::optional<std::filesystem::path> EnvironmentPath(const char* name);
 
+// "Pinyon Shift 0.5.1 (6f1a62a) | ShiftGlue 1e8968f | Windows Release | built
+// 2026-10-12 13:36 UTC": the release, the commits and the build time from the
+// build manifest, for the window title and the F3 overlay (#545).
+std::string BuildLabel();
+
 // Writes one schema-versioned JSON object to the session JSONL file and to the
 // ReXGlue logger. Values are JSON-escaped and intentionally represented as
 // strings so callers never inject untrusted JSON fragments.

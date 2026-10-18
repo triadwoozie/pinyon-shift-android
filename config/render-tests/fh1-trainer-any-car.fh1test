@@ -1,0 +1,55 @@
+pinyon-shift-fh1-render-test-v1
+# FB-12.3 gate (#479): the fh1-race inputs on a seed whose Gauntlet is
+# restricted to 1980s cars, a copy of the appdata-2026-09-27 seed with an
+# enabled mod shipping db/10-limit.sql:
+#   update EventRestrictions set Value = '0003000004000007BC000007C5'
+#     where EventID in (29, 43, 66);
+# (event 71's year limit; run tools/build-mod-patches.py on the copy). With
+# --pinyon_shift_cheats=true --cheat_any_car_events=true the ticket reads
+# CURRENT CAR ELIGIBLE, the 1994 Miata stays selected, the race starts and
+# cheat.applied names the event. Without the cheat the ticket reads GARAGE
+# CARS ELIGIBLE, car select offers only the 1983 Audi Sport quattro and the
+# race HUD check fails.
+# The class: the same inputs on a seed whose mod instead sets
+#   update Events set TargetClass = 2 where Id = 43;
+#   update EventRestrictions set Value = '0000000000' where EventID = 43;
+# (class D, no other limits). With the cheat the A 600 Miata races as it is; without it
+# car select offers to fit it to D 299 and the race HUD check fails.
+# clock-hz 60
+# expect-race-hud-any race-ready race-moving
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+capture 1560 event-ready
+input 1680 4000 0 0 0 0 0 0
+input 1686 0000 0 0 0 0 0 0
+capture 1860 event-entered
+input 2040 1000 0 0 0 0 0 0
+input 2046 0000 0 0 0 0 0 0
+capture 2220 event-step-1
+input 2400 1000 0 0 0 0 0 0
+input 2406 0000 0 0 0 0 0 0
+input 2760 1000 0 0 0 0 0 0
+input 2766 0000 0 0 0 0 0 0
+capture 2940 event-step-3
+input 3120 1000 0 0 0 0 0 0
+input 3126 0000 0 0 0 0 0 0
+input 3480 1000 0 0 0 0 0 0
+input 3486 0000 0 0 0 0 0 0
+input 3600 1000 0 0 0 0 0 0
+input 3606 0000 0 0 0 0 0 0
+input 3720 1000 0 0 0 0 0 0
+input 3726 0000 0 0 0 0 0 0
+input 3840 1000 0 0 0 0 0 0
+input 3846 0000 0 0 0 0 0 0
+capture 4080 race-ready
+input 4200 0000 0 255 0 0 0 0
+capture 4560 race-moving
+input 4570 0000 0 0 0 0 0 0
+stop 4590

@@ -11,7 +11,7 @@ The same generated C++ and the same Vulkan renderer run on every platform. What 
 
 | | Windows | Linux, Steam Deck | macOS | Android |
 | --- | --- | --- | --- | --- |
-| CPU | x86-64, SSE4.1 (FMA3 variant) | x86-64 | arm64 | arm64 |
+| CPU | x86-64, SSE4.1 (FMA3 variant) | x86-64, SSE4.1 (x86-64-v3 variant, the Deck's) | arm64 | arm64 |
 | Compiler | Clang 20.1.8 (`clang-cl`) | Clang 20.1.8, Steam Runtime 3 sysroot | Command Line Tools clang | NDK r29 |
 | Vulkan | system driver | RADV or NVIDIA | MoltenVK, bundled | Turnip on Adreno 7xx, else the system driver |
 | Host page size | 4 KB, 64 KB granularity | 4 KB | 16 KB | 4 or 16 KB |
@@ -25,6 +25,7 @@ The reference PC is a Ryzen 7 5800X (8 cores, 16 threads) with an RTX 4080. Agai
 
 | Preset | Settings | For |
 | --- | --- | --- |
+| Ultra Low 30 | Low-spec 60 without sun shadows, reflections at a quarter rate, the scene in one pass, textures at most 256 texels across, 30 limit | integrated graphics on 2 physical cores |
 | Low-spec 60 | 1x, no MSAA, bilinear, the game's anisotropy, no FXAA, 60 limit | new installs |
 | Balanced 40 | the same at 40, even pacing on 120 Hz displays and the Deck's 40 Hz mode | under 4 physical cores |
 | Performance 120 | | discrete GPU with 6 GB or more, 6 or more threads, a 120 Hz display |
@@ -57,6 +58,22 @@ The core-count limits were tested on the same PC with the game restricted to few
 - Input comes from SDL3, including SDL's Deck driver and Steam Input's virtual pad when Steam starts the game.
 - LLVM's Linux `ld.lld` and the sysroot's `wayland-scanner` link `libxml2.so.2`, which SteamOS, Arch and other distributions with libxml2 2.14 or newer no longer have. Setup runs both through small wrappers that load only that library and its ICU from the sysroot, so nothing has to be installed on the host.
 
+**Toolchain.** Linux x86-64 builds use the small code model with linker relaxation. The large model with `--no-relax` was there for code over 2 GB, but the executable's code is 53 MB, and the large model made nearly every call a `movabs` plus a register-indirect call (13 direct calls in the whole executable against 365,000 with the small model). The build also uses x86-64-v3 (AVX2, FMA3, BMI, MOVBE) when the CPU has it: setup reads `/proc/cpuinfo`, since the game is built on the machine that runs it, and the `linux-amd64-v3` preset builds the Deck variant on another PC. The same guard as on Windows stops a v3 build on an older CPU; the SSE4.1 build stays for those. Measured together on the Deck LCD, in six interleaved Steam launches of the race (three per build) with per-thread `perf stat` over 40 s from the start, against the spread of the three old-build runs:
+
+| Per frame | Change | Old-build spread |
+| --- | ---: | ---: |
+| Simulation thread cycles | −10.5 ± 1.2 % | 1.5 % |
+| Render thread cycles | −7.1 ± 3.0 % | 4.5 % |
+| Audio thread cycles | −26.4 ± 2.2 % | 0.7 % |
+| Job thread cycles | −14.3 ± 2.8 % | 2.0 % |
+| GPU command decoder cycles per draw | −2.9 ± 0.6 % | 0.9 % |
+| Process CPU time, adjusted for draws | −5.5 ± 0.5 % | |
+| Frame time p99 | −6.6 % | 1.0 % |
+
+GPU time and APU power did not change; the APU stays at its 15 W limit in both builds.
+
+**Thread placement.** On a Steam Deck (LCD or OLED, detected from the board's DMI name or the CPU model), `linux_thread_cores=auto`, the default, pins threads by name: the simulation and audio threads on core 0's two SMT siblings, render and GPU submission on core 1's, the GPU command decoder and the recorder on cores 2 and 3, and every other thread on the remaining siblings of cores 2 and 3. Elsewhere it changes nothing; the runtime log states the decision. An in-run A/B on the Deck race, switching placement on and off every 180 frames in five runs with two toggle orders (the toggles fall on fixed route frames), gave process CPU −6.1 ± 1.3 % and −6.8 ± 1.5 % adjusted for draws, mostly from the decoder (−7 to −10 %) and the recorder (−6 to −8 %), each alone on a physical core. p99 stayed level (23.45 ms unpinned against 23.56 ms pinned, both orders weighted alike, capture frames excluded) and p95 was about 1 ms better; frames over 25 ms were 3.3 against 4.8 a run, too few to call. A later check of the tails on the shipped build, with the on and off windows in a random order in eight runs and four pairs of whole runs, found p99 level (+0.09 ± 0.51 ms within runs, -0.14 ± 0.88 ms between runs) and p95 0.8 to 1.7 ms better; auto showed about two more frames over 25 ms a run, within noise. `linux_thread_cores` takes the same `NAME=CORES;...` entries as [Android's](android.md) `android_thread_cores` and changes while the game runs; `off` leaves placement to the scheduler.
+
 **The Deck.** The Steam Deck LCD (Zen 2, 4 cores and 8 threads, RDNA 2 on Mesa RADV) runs the race and free roam at 60 fps at 1x under its default 15 W limit. A replayed frame at 1x:
 
 | Change | Frame |
@@ -72,11 +89,15 @@ One trap: with Manual GPU Clock on in the Quick Access menu, Steam can pin the G
 
 **Build.** Command Line Tools clang for arm64 with a macOS 13 target, and a MoltenVK that ShiftGlue builds and bundles. The generated code is the same C++: VMX operations reach NEON through SIMDe (byte shuffles become `tbl`), FPCR replaces MXCSR, and `std::fma` is one instruction. Guest functions are weak thunks rather than aliases, because Mach-O has no overridable alias. Setup from the disc image to a built game takes about 18–20 minutes on an M4 Pro.
 
-**16 KB pages.** One host page holds four guest pages. The write-watch code took a host page's protection from its first guest page, so a committed page next to an uncommitted one faulted (SIGBUS in free roam, runs 2–4). Using the union of the four guest pages' access fixed it.
+**16 KB pages.** One host page holds four guest pages. The write-watch code took a host page's protection from its first guest page, so a committed page next to an uncommitted one faulted (SIGBUS in free roam, runs 2–4). Using the union of the four guest pages' access fixed it. The GPU's shared-memory tracking also used host pages, so a CPU write beside the 4 KB exposure resolve discarded it and free roam was overexposed and flashed (luma 171.5 against 114.7 on Windows); it now tracks 4 KB pages and keeps GPU-written pages a write did not touch (111.9).
 
 **MoltenVK limits.** No geometry shaders and no wireframe fill, so the vertex-shader expansion paths are used. No fragment shading rate, so SCENE SHADING does nothing. The portability subset lacks separate stencil reference masks, and SPIRV-Cross rejects some decorations on function-local arrays, which the translator avoids.
 
-**Results.** Free roam at 1x runs at a median of about 105 fps on an M4 Pro Mac mini. The M4 Pro is shading-bound, so two switches pay off there that don't on the RTX 4080: texture gamma through sRGB views (−8 % at 1x, offered as TEXTURE GAMMA FAST) and quads as triangle lists (−5 % at 2x, now the default everywhere).
+**Results.** Free roam at 1x holds a 120 Hz display on an M4 Pro Mac mini: a median of 8.35 ms a frame, with the GPU busy about 67 % of the time. The M4 Pro is shading-bound, as the Adreno GPUs are, so macOS takes their defaults: fast pixel math, texture signs as specialization constants and untiled predicated tiling. It also turns off MoltenVK's Metal argument buffers. Together these took the free-roam GPU frame from 12.3–12.7 to 5.6–5.7 ms ([measurements](gpu-optimizations.md#apple-silicon)). Two more switches pay off there that don't on the RTX 4080: texture gamma through sRGB views (−8 % at 1x, offered as TEXTURE GAMMA FAST) and quads as triangle lists (−5 % at 2x, now the default everywhere).
+
+**Startup.** MoltenVK passes every stored pipeline to the Metal compiler again at each start, so creating them before the title ran gave a black screen of about 20 s (732 pipelines in 21.6 s on 9 threads). The title now starts at once and the stored pipelines are created behind it.
+
+**Waits.** The GPU commands thread yields for up to 2 ms in WAIT_REG_MEM before it sleeps, as on Windows. macOS short sleeps overshoot under load: with 100 µs sleeps a free-roam drive had 187 frames over 25 ms and a p99 of 41.8 ms, against 23 frames and 19.8 ms with the yield. The slow frames that remain follow CPU load from other apps. When the guest audio thread falls behind, it kicks the XMA decoder up to 20 times as often, so a busy Mac shows bursts of slow frames that an idle one doesn't.
 
 **Distribution.** The launcher bundle is ad-hoc signed and not notarized, so players approve its first start in System Settings.
 
@@ -96,7 +117,7 @@ One trap: with Manual GPU Clock on in the Quick Access menu, Steam can pin the G
 | Older Turnip | 39 ms | 34 ms |
 | Turnip Gen8 V37 (bundled) | 32 ms | 28 ms |
 
-Qualcomm drivers needed three workarounds: infinite fence waits return at once, push descriptors read as null, and the recorder thread is off there. Sparse buffers read back zeros on Turnip, so shared memory uses a plain buffer. RedMagic phones cap an unknown app's clocks until the game is added to their Game Space.
+Qualcomm drivers needed three workarounds: infinite fence waits return at once, push descriptors read as null, and the recorder thread is off there. Sparse buffers read back zeros on an older Turnip, so shared memory used a plain buffer there; with the bundled Turnip gen8-v37 the Adreno 740 renders correctly with the sparse buffer and uses 290 MB less device memory in a race, so it is sparse again on that GPU (`vulkan_sparse_shared_memory_turnip`; other Adrenos are unchecked and keep the plain buffer). RedMagic phones cap an unknown app's clocks until the game is added to their Game Space.
 
 **Heat.** The RedMagic Astra (8 Elite) holds 60 fps for about the first minute, then 37–39 fps at 40–44 °C skin temperature and 26–28 fps above 44.5 °C, with the cores at 2.0–2.2 GHz and the GPU frame at 35.6 ms against 20 ms cold. An ADPF performance hint changed nothing. One build measured 21.5–32 ms in the same scene across a batch, which is why live settings are compared inside one run, flipping every 300 frames.
 
@@ -111,7 +132,7 @@ Both draw the scene's three bands in one pass (25.4 against 28.3 ms at 1x), upda
 
 **Tiled GPUs.** Adreno renders in tiles, so every rendering, clear and store has a cost a desktop GPU doesn't show. What paid off was fewer renderings (clears folded in, the scene drawn once) and specialized resolve and transfer passes; see [GPU optimizations](gpu-optimizations.md#renderings-and-clears). What didn't: forcing on-chip (GMEM) rendering for MSAA, 49.7 ms against 18.9 ms at 4x, so on-chip MSAA is no route to 4x at 60; store-op tuning; and trimming render areas, which the driver already does.
 
-**Stutters.** Hitches on Android came from the runtime's global lock, not the GPU; see [the global critical region](runtime.md#threads).
+**Stutters.** Hitches on Android came from the runtime's global lock, not the GPU; see [the global critical region](runtime.md#threads). A later periodic one, a 30–40 ms frame every 30 s of play on the Odin, was the driver pipeline cache being saved on the GPU commands thread; it is now saved on the storage write thread ([GPU optimizations](gpu-optimizations.md#shaders)). What remains in capture-free race and free-roam routes on the Odin, Windows and the Deck is the race's loading screen and a few frames where the game waits on GPU fences 60–100 times in one frame, each wait a full trip to the host GPU.
 
 ## What carried across
 

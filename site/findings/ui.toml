@@ -1,0 +1,465 @@
+# UI, menus, strings, movies and input in Forza Horizon (base and v4).
+# Rendered by site/build.py on the reverse-engineering UI page.
+
+# ---------------------------------------------------------------- UI system
+
+[[finding]]
+group = """UI system"""
+base = """media/UI.zip"""
+v4 = """same"""
+name = """Anark Gameface UI"""
+what = """The game's UI is Anark Gameface (UI4 in the code): `AnarkBGF` scenes under `Scenes/ui4` in `media/UI.zip`, driven by Lua scripts, with text from LSB2 string tables. Each scene is a triple of `.bgf`, `.bsg` and `.fbf` members. Same-length label rewrites and hiding rows work; adding a row needs coordinated changes to all three members and the scene's bindings."""
+how = """Archive contents, label rewrite and row-hiding experiments, and row insertion attempts."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md Where the code stands, NP-11.3; docs/UI_API_PLAN.md"""
+
+[[finding]]
+group = """UI system"""
+base = """0x824850A4, 0x826413C8, 0x824850CC, 0x824850E8, 0x82485110, 0x82485128"""
+v4 = """0x824850A4 -> 0x824B48BC, 0x826413C8 -> 0x826E9260"""
+name = """UI4 bootstrap and scene registry"""
+what = """UI4 starts by constructing a 2,820-byte scene registry at `0x824850A4` that holds pointers to scene name strings in the image, attached to its owner through the method at `0x826413C8`. Dispatches for registry, resource and scene setup follow at `0x824850CC`, `0x824850E8` and `0x82485110`, and `0x82485128` sends manager event 302."""
+how = """Trace hooks on each bootstrap dispatch that logged the registry and the names it points at."""
+confidence = """probable"""
+note = """The construction and dispatch order are traced; reading the object as a scene-name registry is an interpretation of its contents."""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftTraceUiSceneRegistry; config/rexglue/analysis/main-xex.toml UI4 bootstrap hooks"""
+
+[[finding]]
+group = """UI system"""
+base = """0x82E5E550, 0x82E5E568, 0x82E5E580, 0x823E4818, sub_82E62A10, 0x82F2B230, 0x82E72E68, 0x82E73008, sub_82E7A430, 0x82E7A4E0"""
+name = """CUserInterface4 helpers"""
+what = """`CUserInterface4` keeps a component table with get, store and clear at `0x82E5E550`, `0x82E5E568` and `0x82E5E580` (slot = argument + 29). Related helpers: an RTTI cast at `0x823E4818`, a scene tree walk `sub_82E62A10` that reads each expression node's binding when a scene opens, animation allocation at `0x82F2B230`, a path resolver at `0x82E72E68`/`0x82E73008`, and a second pass `sub_82E7A430` that calls vtable slot 1 on each child. A kind-5 expression node whose binding was never registered (seen as node `137ED5BA` on a cloned pause row) crashes the tree walk with a null read."""
+how = """Hooks during UI4 scene loading; crash report on a cloned pause row."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml UI4 hooks; docs/DLC_BACKLOG.md Native Rally pause-entry binding follow-up; docs/UI_API_PLAN.md"""
+
+[[finding]]
+group = """UI system"""
+base = """sub_82E7A238, 0x82E7A240, sub_82E78078, 0x82E7A38C, 0x82E7A394"""
+v4 = """sub_82F3BF50, 0x82E7A240 -> 0x82F3BF58, hook 0x82F3C0AC"""
+name = """UI4 per-child component builder"""
+what = """`sub_82E7A238` turns one authored element record into a live component. It allocates a 28-byte `CUI4CustomObject` descriptor, resolves the record's contract name into a string at r1+96 and calls the create-by-name registry lookup `sub_82E78078` (its only call site is `0x82E7A38C`). It then links {descriptor, component} into the owner's map at +8 (keyed by record) and its child vectors at +40 and sometimes +56. Menu item batches enter at the interior address `0x82E7A240`. The element's vtable slot 15 forwards to slot 1 of the `CUI4CustomObject` at element+32, and slot 32 returns element+500, the document."""
+how = """Midasm hooks at the builder entry, nine dispatch-chunk probes and after create-by-name; re-running the builder for a copied record."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp pause-item insertion comments; config/rexglue/analysis/main-xex.toml UiBuilderChunk hooks and midasm_hook 0x82E7A394"""
+
+[[finding]]
+group = """UI system"""
+base = """sub_82E73AB0, sub_82E5FBD0, sub_82E78BA0, sub_82E73B88, sub_82E73BA8, 0x8203650C"""
+v4 = """sub_82F354E0, sub_82F21830, sub_82F3A728, sub_82F355B8, sub_82F355D8"""
+name = """UI4 text binding"""
+what = """Text elements are bound by name hash. `sub_82E73AB0` hashes a UI name (`TEXT_TITLE` is the string at `0x8203650C`), `sub_82E5FBD0(screen, hash, element)` binds a text element to that named node, and `sub_82E78BA0(element, string)` sets its text by copying into the element's own wide string, so the string must exist first. `sub_82E73B88` and `sub_82E73BA8` construct and destroy a text element."""
+how = """Calling the chain from host code replaced a hub screen's heading; both hub openings showed the new text."""
+confidence = """confirmed"""
+note = """Exercised for one heading with ASCII text only."""
+source = """docs/UI_API_PLAN.md Private heading session; src/pinyon_shift_runtime_hooks.cpp RallyNativeHubInit"""
+
+[[finding]]
+group = """UI system"""
+base = """82F284A8, 82F2A380"""
+name = """UI4 animation entry"""
+what = """An animation entry is two flag bytes plus a 16-bit reference. `82F284A8` passes it to `82F2A380`, which treats the top two bits as flags and the low 14 bits as the capacity; zero in the first flag selects a style record, nonzero a property-track key."""
+how = """Hooks while loading scene animations; relocating cloned pause-row entries fixed the new row's focus highlight."""
+confidence = """confirmed"""
+source = """docs/UI_API_PLAN.md; docs/DLC_BACKLOG.md Native cloned-row visual focus fixed; eighth-row layout and native model probe"""
+
+[[finding]]
+group = """UI system"""
+base = """0x82806DD0, 0x82806E50, 8206D3B8, 82063974, 82063A0C, 82063CA4, 0x82E7CD78, 0x82E77260, 0x82E73BE0"""
+name = """menu list classes"""
+what = """Typed menu wrappers at `0x82806DD0` and `0x82806E50` hold their child at +312. The list vtable is `8206D3B8`; other menu vtables are `82063974`, `82063A0C` and `82063CA4`. `0x82E7CD78` and `0x82E77260` are `ANIMATED_SCROLLING_LIST` / `CMenuCtrl` methods, and `0x82E73BE0` is a pair helper."""
+how = """Vtable scans during pause menu tracing; class names from RTTI strings."""
+confidence = """probable"""
+source = """src/pinyon_shift_runtime_hooks.cpp"""
+
+[[finding]]
+group = """UI system"""
+base = """EDRAM surface 0x14000500"""
+name = """UI render pass"""
+what = """The UI renders into EDRAM surface `0x14000500`, color format 10 (`0x000A0000`), 1280x720, with about 166 draws over a few shader pairs. Some frames emit no UI pass and leave the previous frame's HUD in the target."""
+how = """Ordered UI capture and replay in the race pilot; frame census."""
+confidence = """confirmed"""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md FH1 frame facts; docs/native-renderer/RESEARCH.md Rayman and scene-native era"""
+
+[[finding]]
+group = """UI system"""
+name = """UI layout and safe area"""
+what = """The title lays out its UI on a 1280x720 canvas inside a 90 % safe area (x 64-1216, y 36-684). The margin outside it is the overscan area that a crop cuts into first."""
+how = """Measured from the title's UI layout; host crop and settings experiments."""
+confidence = """confirmed"""
+source = """docs/MODDING.md HUD labels and menu actions; src/ui/settings_menu.cpp"""
+
+# -------------------------------------------------------------- Scene files
+
+[[finding]]
+group = """Scene files"""
+base = '''GAME:\Media\UI\Scenes\UI4\925_PAUSE_MENU.bgf, 0x82036AD4, 82F260C8, 82DB7BC0, 82F248F0'''
+v4 = """same"""
+name = """925_PAUSE_MENU pause scene"""
+what = """The pause menu scene is `925_PAUSE_MENU.bgf` (path format string at `0x82036AD4`). Its rows are seven copies of a wrapper and a `pause_menu_button` element: `0x22352942` is the first row's wrapper name hash (each row has its own) and `0xBDF05338` the element contract hash; `0x223C2AFB` is another pause node hash. Rows are 53 units apart vertically. The header holds the highest native object ID at offset `0x1B` (763 in the stock scene); `82F260C8` stores it through `82DB7BC0`, and `82F248F0` sizes the scene lookup and binding tables to that value plus one, so added objects must raise it."""
+how = """Scene member parsed offline and its item stream scanned; confirmed by reader hooks and a clone run in which IDs 764-799 got undersized tables and crashed until the ceiling was raised to 799."""
+confidence = """confirmed"""
+source = """docs/UI_API_PLAN.md; src/pinyon_shift_runtime_hooks.cpp UI-14 scene probe; docs/DLC_BACKLOG.md 2026-10-06: native companion delivery and binding-table fix"""
+
+[[finding]]
+group = """Scene files"""
+base = """sub_82F26560, sub_82F25568, 0x82F255C0, 0x82F255EC, 0x82F265D4, 0x82F267C0, 0x82F268D0, 0x82F268EC"""
+v4 = """sub_82FE76B0, sub_82FE6610"""
+name = """BGF item deserializer"""
+what = """`sub_82F26560` (section, element) deserializes every authored item of one length-prefixed item section. It loops element count + wrapper count times (section +16 and +20, copied from the member header at `0x24`/`0x28`), building each item at `0x82F268D0` through an indirect builder call at `0x82F268EC`; both record allocator branches meet at `0x82F267C0`. Bytes come through the 12-byte reader at section+12, whose slot-1 method `sub_82F25568` copies from a cursor at reader+4 (+0 buffer base, +4 bytes consumed). The section length must equal the 4-byte declaration before the items, and the property count at `0x2C` (mirrored at `0x78`) sizes the document arena as (elements x 4 + properties) x 8 + wrappers x 68. In the pause scene the items start at stream offset `0x3AE2` with header counts `0x607` and `0x106`."""
+how = """Read-only scene probes and hooks on item construction; a loader-boundary substitution of a re-encoded member; a strict re-encoder that reproduces the member byte for byte."""
+confidence = """confirmed"""
+note = """The arena formula and the counts that must change together are probable: inserted rows are not qualified in game."""
+source = """src/pinyon_shift_runtime_hooks.cpp UI-14 scene-payload interception; tools/fh1-ui-scene-insert.py; config/rexglue/analysis/main-xex.toml scene deserializer hooks"""
+
+[[finding]]
+group = """Scene files"""
+base = """sub_82C7E0B0, 82E614C8, 0x82E614FC, 0x832BE9EC"""
+v4 = """0x82D3F300, 0x82F2310C, 0x833AA4DC"""
+name = """UI4 file readers"""
+what = """FBF files are read through `sub_82C7E0B0`, which builds a memory stream over a borrowed buffer and length (r4/r5). BGF and BSG go through the UI4 fread callback `82E614C8` (held in the global at `0x832BE9EC`), which follows cursor, holder and resource and copies from the resource's buffer (+112) at the cursor's position (+4) without checking the source length (+116). Loose replacement files for these members are ignored."""
+how = """Hooks at each reader substituting re-encoded pause scene members; whole-source matching at each reader boundary."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml UI4 reader hooks; src/pinyon_shift_runtime_hooks.cpp PinyonShiftUiCompanionFileRead; docs/DLC_BACKLOG.md 2026-10-06: coordinated native companion encoding"""
+
+[[finding]]
+group = """Scene files"""
+base = """sub_82F2E870, sub_82F2DF08, sub_82F2E000, sub_82F2EA38, sub_82F2E9A0, sub_82F288A0, 0x82F28994, 0x82F28544"""
+v4 = """sub_82FEFAF8, sub_82FEF270, sub_82FEF368, sub_82FE57F0"""
+name = """UI4 scene record layout"""
+what = """Each authored item becomes a wrapper record (`sub_82F2E870`, kind 7, the item's identity, with a float block at +48) and an element record (`sub_82F2DF08`, +0 the contract name hash). Records hold name hash +0, stream value +4, parent +12, next sibling +16, first child +20, a flag halfword at +28 (bit 0 puts the 8-byte {id, value} entries at +68 instead of +32), kind +30 and property count +31. `sub_82F2E000` appends one property to the last record (kept at document+80, with 8,192 bytes of room per record), `sub_82F2EA38` pushes a record to the section pool and `sub_82F2E9A0` only remaps the three link fields. The document has its arena at +84 and pools at +92/+124/+132. `sub_82F288A0` loads an item's identity."""
+how = """Hooks on reads while loading the pause scene; structural dumps of authored records and replaying the title's own construction calls."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp record dump and replay comments; config/rexglue/analysis/main-xex.toml scene reader hooks"""
+
+[[finding]]
+group = """Scene files"""
+base = """sub_82E6E1D8, sub_82E6AE50, sub_82E6B658, sub_82E605F8"""
+name = """FBF native objects"""
+what = """A UI4 scene is a `.bgf` file with companion `.fbf` (native objects and geometry) and `.bsg` (packed nodes and pool) files. The `.fbf` member holds the scene's native objects. The reader `sub_82E6E1D8` expects big-endian version 1008 and an object count, then records of type, ID, length-prefixed name and payload: type 1 frames carry three strings and appearance data, types 2-6 have fixed sizes, and type 7 is a material with owner, texture name and matrix. A geometry count (96 bytes each), extra bytes and a GPU data block follow. The retail pause FBF is 139,862 bytes: 501 objects, 106 geometry records, 3,816 extra bytes and 71,232 GPU bytes. BGF items of kinds 1 and 4-7 reference these object IDs, which resolve across all three files and are independent of the BGF string indexes (kind-5 ID 28 names a material, not a BGF string)."""
+how = """Reader functions identified in the generated code and checked with hooks; `tools/fh1-ui-fbf.py` and strict parsers consume the retail pause members to their last byte; cross-file ID checks."""
+confidence = """confirmed"""
+note = """Confirmed for the pause scene; other scenes not checked."""
+source = """docs/UI_API_PLAN.md; tools/fh1-ui-fbf.py; docs/DLC_BACKLOG.md 2026-10-06: native pause companion contract"""
+
+[[finding]]
+group = """Scene files"""
+base = """82F27210-82F279C8"""
+name = """BSG scene graph"""
+what = """The `.bsg` member is a big-endian scene graph read by `82F27210` through `82F279C8`. A 48-byte header (`FGBkranA` tag, then node count, pool count and node bytes at +32) precedes 96-byte nodes, each with a parent node index (parents precede children), a native object ID and its local Y position as a float at +16. A pool of 5-byte records (object ID and a kind byte) follows. The retail pause BSG has 241 nodes and 260 pool records, 24,488 bytes, and its nodes and pool together hold exactly the FBF's 501 object IDs."""
+how = """Parsing the retail pause BSG with `fh1-ui-fbf.py --bsg` and checking it against the reader hooks; the pause rows' Y positions form a regular step."""
+confidence = """probable"""
+note = """Layout confirmed for the pause scene; fields beyond parent, ID and Y are not traced. docs/UI_API_PLAN.md calls the header 32 bytes; the parser's 48 (tag block plus the 16 count bytes) is what adds up to the file length."""
+source = """tools/fh1-ui-fbf.py parse_bsg; docs/UI_API_PLAN.md"""
+
+# --------------------------------------------------------------- Pause menu
+
+[[finding]]
+group = """Pause menu"""
+base = """sub_8283AE80, sub_824984C8, sub_824AFB20, sub_82DE7330, 0x8271B408"""
+v4 = """sub_828F5818, sub_824D1CF0, hook 0x827D1618"""
+name = """pause menu data model"""
+what = """The pause menu's model sits at owner +368; its rows are a vector at owner +408/+412/+416 (begin, end, capacity), each row holding its action at +8 and a label string object at +12. The retail menu has seven rows, MAP first and Quit last, with actions 2, 6, 10, 5, 7, 11 and 16 (16 = Quit). Action 3 is Resume and 17 opens Difficulty; 18 reaches the dispatcher but is unhandled and leaves the menu inactive. `sub_8283AE80(model, label, action, 1, 0)` appends a row; `sub_824984C8` builds a native string from ASCII (owning a copy), `sub_824AFB20` copies a string reference and `sub_82DE7330` releases one. The optional list controller at +324 is null in the stock menu."""
+how = """Hook at the model bind `0x8271B408` calling the title's constructors: the model grew to eight rows; action and focus traces of an eight-row prototype."""
+confidence = """confirmed"""
+note = """The model accepts an eighth row; the authored widgets are a separate limit."""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftUiCompanionPauseModel; docs/DLC_BACKLOG.md live-context dispatch; config/rexglue/analysis/main-xex.toml midasm_hook 0x8271B408"""
+
+[[finding]]
+group = """Pause menu"""
+base = """8205109C, 82059E8C, sub_82739D00, 0x82739DB0, 0x8273A10C"""
+v4 = """82061F94, 8206AEEC, sub_827EBEE0, 0x827EC040, 0x827EC3FC, jump table 0x82060DD8"""
+name = """CPauseMenu action switch"""
+what = """`CPauseMenu` (vtable `8205109C`; the owner is also seen with `82059E8C`) handles a row activation in `sub_82739D00` (r3 the menu, r4 notification 2 on activation, r6 the action). Action 3 is Resume, with its activation sound and done callback. Case 6 (`0x82739DB0`) is MULTIPLAYER, which shows MULTIPLAYER UNAVAILABLE offline, and every case meets at a common exit (`0x8273A10C`) that records the row as the last selection in a field at +0xD48. v4 inserts Horizon Rally as a new case 6, so the old case 6 becomes case 7 and later actions move up by one; it switches to a halfword jump table at `0x82060DD8`, and the field moves to +0xD68 because the object grew by 0x20 bytes. The 1000 CLUB action is case 19 of the v4 switch."""
+how = """Midasm hooks on case 6 that open another screen and jump to the common exit (the pause menu stays open and `fh1-pause` passes); rewriting the action to 3 resumed the title; v4 comparison (both cases have identical instructions and the same exit)."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis-v4/overrides.toml; docs/NATIVE_PORT_BACKLOG.md NP-1.5; docs/TITLE_UPDATE_V4_BACKLOG.md TU-3, TU-7; src/pinyon_shift_runtime_hooks.cpp PinyonShiftPauseSettingsActivate"""
+
+[[finding]]
+group = """Pause menu"""
+v4 = """pause menu"""
+name = """v4 pause menu rows"""
+what = """v4's pause menu reads MAP, HORIZON RALLY, MULTIPLAYER, PHOTO MODE, MESSAGE CENTER, SPONSOR CHALLENGES, MY PROFILE, QUIT. With the 1000 Club package a 1000 CLUB row appears above HORIZON RALLY. Selecting HORIZON RALLY without the Rally package opens an unowned-content notice; with it, a prompt asks to leave Horizon Single Player and enter Horizon Rally."""
+how = """Captures of the `fh1-pause`, `v4-settings-gate`, `v4-rally-enter` and 1000 Club seed routes."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-5, TU-6, TU-7"""
+
+[[finding]]
+group = """Pause menu"""
+base = """0x820336A4, 0x8203363C, sub_8264FBA0, sub_827E5150, 0x82026B38, 0x82651438, 0x8264FC08, 82653938, 8265397C, sub_827DD058, sub_82E78820"""
+v4 = """0x820336A4 -> 0x82042CD4, 0x8203363C -> 0x82042C6C, 0x82026B38 -> 0x820307A4"""
+name = """CPauseMenuButton"""
+what = """`CPauseMenuButton` is a 280-byte object built by `sub_8264FBA0` (factory `PAUSE_MENU_BUTTON` at `0x82651438`), with primary vtable `0x820336A4` at +0 and a secondary interface table `0x8203363C` at +8. It embeds three 12-byte `CUI4TextElement`s (vtable `0x82026B38`; {vptr, +4, +8 resource}): +164 from the grandparent constructor `sub_827E5150`, +252 and +264 from its own. +84 is the label resource and +160 a state byte that hides the row. To show a label, `sub_827DD058` passes element +164 and the resolved string to `sub_82E78820`, which reads the element's +8 resource, so a cloned row whose element was never bound faults there. The title builds eight buttons per pause open (seven shown)."""
+how = """Constructor hook and allocation trace; read-only sampling of every pause button; a hide probe on +160; an access-violation probe on the row insertion route."""
+confidence = """confirmed"""
+note = """The fault path in `sub_82E78820` is probable."""
+source = """src/pinyon_shift_runtime_hooks.cpp UI-04 insertion and text probe comments, PinyonShiftTraceUiLabelApply; config/rexglue/analysis/main-xex.toml midasm_hook 0x8264FC08; docs/UI_API_PLAN.md"""
+
+[[finding]]
+group = """Pause menu"""
+base = """sub_828116C8, sub_82811670, sub_828090D8, sub_827E07A8, sub_82E74FC8, sub_82E739F8"""
+name = """pause list and selector"""
+what = """The pause list at owner +364 is built by `sub_828116C8` (through byte 328); its selector interface starts at +108, and `sub_82811670` writes the selected index into the first 20-byte frame at list +300. `sub_828090D8` binds the authored visual list at +320 and writes its byte 476; `sub_827E07A8` enumerates row controllers into a pointer vector at visual list +304/+308. `sub_82E74FC8` dispatches through row +84 for the label, and `sub_82E739F8` passes the row's +12 key to the document at +8. The resume callback is at owner +472 and flags at +76."""
+how = """Hooks and read-only snapshots during pause open and pause input."""
+confidence = """probable"""
+note = """Field roles come from snapshots; not every one was exercised."""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftUiCompanionPauseInputMatch, pause menu comments"""
+
+[[finding]]
+group = """Pause menu"""
+base = """0x8281BBA8, 0x8281BF4C, 8224B790"""
+name = """pause owner init and scaler bindings"""
+what = """The pause owner's init at `0x8281BBA8` sets up scaler bindings and `0x8281BF4C` binds them; an optional navigation interface uses vtable `8224B790`. Adding a pause row is blocked here: the animation loader registers a cloned owner's scaler bindings in this init."""
+how = """Hooks during pause open; row insertion attempts."""
+confidence = """probable"""
+source = """config/rexglue/analysis/main-xex.toml pause owner hooks; docs/NATIVE_PORT_BACKLOG.md NP-11.3"""
+
+[[finding]]
+group = """Pause menu"""
+base = """82726320, 0x82726350, 0x82720BF8, 0x82720CC0, 82834600"""
+name = """pause menu lifetime"""
+what = """Closing the pause menu runs cleanup at `0x82720BF8`, clears the model at `0x82720CC0` and releases the owner through the deleting destructor `82726320` (release at `0x82726350`); the model's own cleanup is `82834600`, which clears begin, end and capacity and frees the entries. Each close frees every displayed button and constructs a standby set of eight, so button allocations do not grow across opens. Owner addresses can be reused on reopen."""
+how = """Hooks on the teardown path; opt-in construction, destructor and post-free trace over three closes."""
+confidence = """confirmed"""
+note = """Covers pause buttons, owners and models, not every UI4 material, texture or heap allocation."""
+source = """docs/DLC_BACKLOG.md Native pause prototype repetition; Native pause lifetime qualification; config/rexglue/analysis/main-xex.toml pause cleanup hooks"""
+
+# --------------------------------------------- Event hubs and Rally screens
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+base = """0x82041D94, sub_829502A8, sub_826AA860, sub_826B4858, sub_8269BCF8, sub_8282D1F8, 0x82072344, 0x826A3304"""
+v4 = """sub_826AA860 -> sub_82755D60, sub_8269BCF8 -> sub_827464B8, sub_8282D1F8 -> sub_828D3930, 0x826A3304 -> 0x8274DFEC"""
+name = """event hub screen"""
+what = """The event hub screen (vtable `0x82041D94`) keeps its hub ID at +444, the selected event ID at +392 and a list at +412 (vtable `0x82072344`, row count `sub_8282D1F8`). `sub_829502A8` enters it, `sub_826AA860` initializes it and binds `TEXT_TITLE`, `sub_826B4858` updates it and `sub_8269BCF8` handles input. At the list probe `0x826A3304` r4 is the hub ID (4 is the Rally hub) and r5 decides whether locked tickets are listed; the query selects the hub's `Name` as its title."""
+how = """Dispatcher wrappers and probes on hub 4 (Rally) with the stock screen; a hook on the list probe and a trace of the hub screen."""
+confidence = """probable"""
+note = """No v4 addresses for the enter and update functions."""
+source = """src/pinyon_shift_runtime_hooks.cpp RallyNativeHub*; config/rexglue/analysis/main-xex.toml midasm_hook 0x826A3304"""
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+name = """street-race hub tickets"""
+what = """The base street-race hub reads `Events.EventTicket` for each card and titles every card with the hub's `Name`, not the event's. The ticket texture binder picks the `FestivalRaces` or `StreetRaces` folder from `CareerEventStyle`; a festival-style row in the street hub dereferences an unpopulated native row field. `LogoSmall` paths give the track thumbnails, and the hub title binds through `TEXT_TITLE`."""
+how = """Experiment: a private seven-row hub with SQL tracing and captures."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Native hub component probe; Native ticket championship titles; Owned ticket artwork binding; Private Rally hub heading"""
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+name = """InGameUI exit states and event loading"""
+what = """Controller Back arrives at a screen as event 95. `InGameUI.exit.enter` restores the HUD and releases game control; `InGameUI.exit.enterForLoading` does not, and needs `global.show_empty_screen` first or loading stalls. The registered `street_race_hubs.load_into_event` state loads the current native selection without an event name."""
+how = """Experiment: private hub fixtures with input and ownership traces."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Native hub Back and free-roam control; Native selector to resumed stage"""
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+name = """car selector ignores the Rally upgrade flag"""
+what = """`ShowRegisterEventCarScreen` opens the base CAR SELECT screen. The FR06 class restriction is `0x04`, and a B-class event compiles a performance-index ceiling of 0.6505. A restriction of `0x84` (adding the Rally upgrade flag) compiles exactly the same selector predicate: the base game ignores that flag. Picking an under-upgraded car shows the upgrade recommendation prompt (X Race Anyway)."""
+how = """Experiment: compared the compiled selector predicates for `0x04` and `0x84`."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Native car selector and championship class limits; Native car confirmation exit; Native pause, Rally ticket and car confirmation"""
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+v4 = """CLoadIntoRallyFreeRoam, CShowUIScreen_RallyHub"""
+name = """v4 Rally entry flow"""
+what = """In v4 the pause screen emits `onRally`; its flow switches audio and calls `global.load_into_rally_free_roam`, and `CLoadIntoRallyFreeRoam` loads the Rally hub. The hub removes the player car while paused, disables world presentation, plays a background movie and enters `ShowRallyHubScreen`; `CShowUIScreen_RallyHub` handles championship selection, car selection and purchase, return and outpost actions. Race Central also has a Rally hub return path."""
+how = """Read-only comparison of the base game-mode archive with the v4 update media."""
+confidence = """confirmed"""
+note = """Reference reading; the v4 flow was not run this way."""
+source = """docs/DLC_BACKLOG.md Original Rally entry flow traced; Physical placement and native ground controls"""
+
+[[finding]]
+group = """Event hubs and Rally screens"""
+v4 = """RALLY_RACE_TICKET"""
+name = """v4 Rally hub screen"""
+what = """v4's Rally hub is a seven-ticket screen with car eligibility and restrictions and a button bar. Its ticket contract is `RALLY_RACE_TICKET`, which uses the shared street-race ticket paths."""
+how = """Inventory of the v4 update media."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Original Rally hub asset inventory"""
+
+# -------------------------------------------------------------- HUD and map
+
+[[finding]]
+group = """HUD and map"""
+base = """0x833023C1, sub_826BEC10"""
+v4 = """0x833F0F91, 0x8276ADD8"""
+name = """HUD hidden byte"""
+what = """A HUD element's visibility update reads this byte: while it is set the update hides a shown element; once it is clear it shows a hidden one, unless `nohud` (options object +3213, v4 +3217) is set. Holding it at 1 removes the minimap, speedometer and event banner within a few frames and they return when it is cleared; the pause menu, photo menu and photo-mode camera overlay still draw. Writing `nohud` at run time instead changes nothing on screen, because it is read only before an element first shows. What else writes the byte was not found (no direct store with that displacement)."""
+how = """Reader in the generated code; free-roam and photo-mode routes from a pinned seed toggling the host's `hud_hidden`; v4 address from the v4 reader's load."""
+confidence = """confirmed"""
+issue = """#519"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Developer options and leftover systems"""
+
+[[finding]]
+group = """HUD and map"""
+v4 = """same"""
+name = """co-driver icon atlas"""
+what = """Rally's `CoDriverIconSet.xds` atlas holds the pace-note turn icons. Five turn shapes (easy, medium, hard, square, hairpin) cover the mapped calls, and left turns can be drawn by mirroring the right-facing tiles."""
+how = """Decoding the atlas and mapping it to the authored call icons."""
+confidence = """probable"""
+source = """docs/DLC_BACKLOG.md Private four-stage director and resume (HUD paragraph)"""
+
+[[finding]]
+group = """HUD and map"""
+v4 = """free-roam prompt slot"""
+name = """1000 Club promotion hint"""
+what = """When the 1000 Club status reports online, free roam shows a first-run hint to visit the 1000 CLUB screen in the prompt slot where event sign-up banners appear. After a visit it is replaced by the active-challenge prompt. Events can still be signed up for and entered while challenges are active."""
+how = """Scripted routes with the server check answered; manual play (2026-10-07)."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7"""
+
+# -------------------------------------------------------- Strings and fonts
+
+[[finding]]
+group = """Strings and fonts"""
+name = """language selection and string tables"""
+what = """FH1 reads the console language and country through `ExGetXConfigSetting`, mounts all 22 `stringtables` archives and loads the `.str` tables of one. (language, country) pairs select the 20 player tables: EN (1,103), GB (1,35), FR (4,34), DE (3,24), IT (6,50), ES (5,31), MX (5,71), BR (9,13), NL (16,74), DA (1,25), NB (15,75), SV (13,90), FI (1,32), PL (11,82), CZ (1,23), HU (1,42), RU (12,88), JP (2,53), KO (7,56), CHT (8,101). Japanese, Korean and Chinese text use a vertex shader that English never uses."""
+how = """Title-screen probe of 22 pairs; shader misses recorded in those languages."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-5.4"""
+
+[[finding]]
+group = """Strings and fonts"""
+base = """media/ui/Fonts.zip, media/ui/fonts"""
+v4 = """same"""
+name = """UI fonts"""
+what = """The UI uses FontCompiler CAFF assets (version `21.11.05.0034`) and vector fonts (`.dt`, asset type `vfont`, version `12.07.06.0035`, data section at `0x190`). Vector glyphs are triangle meshes in em units with half-float positions and a per-vertex coverage parameter that the title's VectorFont shader pair turns into coverage, drawn one draw call per glyph. `fontmap.xml` maps font names to targets, with per-language fallback adjusters and `_sd` variants for standard-definition output. Font E is used for pause items, B for the help bar and A for body text."""
+how = """Archive listing and `tools/inspect-fh1-ui.py` parsing the fonts and fontmap; frame captures."""
+confidence = """confirmed"""
+note = """The vfont glyph encoding is probable."""
+source = """docs/UI_ASSETS.md; tools/inspect-fh1-ui.py parse_vfont, parse_fontmap"""
+
+# -------------------------------------------------- Movies and camera shots
+
+[[finding]]
+group = """Movies and camera shots"""
+base = """0x8224BAB4, sub_82E69950, sub_82E5DB08, sub_82E69EC8, sub_82E619D0, sub_82E70DF0, sub_88058310"""
+v4 = """sub_82F1F740"""
+name = """CWMVMovie and its audio voice"""
+what = """`CWMVMovie` (class table `0x8224BAB4`, base `IMovie`) is the game's WMV movie object. Slot +4 `sub_82E69950` opens a movie, called through `CUIMovie` slot +4 `sub_82E619D0` and `CUI4MovieResource` slot +60 `sub_82E70DF0`; it fetches FMOD's XAudio2 engine through `CAudioEngine` and hands it to the movie module, whose `sub_88058310` creates a 16-bit PCM source voice on it. Slot +116 `sub_82E5DB08` (from slot +36 `sub_82E69EC8`) sets that voice's volume, kept at member +12, and creates nothing. Movie audio therefore plays through the title's one XAudio2 engine, next to FMOD's voice."""
+how = """RTTI class table; call chains and indirect-site counts from the probe build (NL-2.3); the movie module's generated code (format build and slot +32 call)."""
+confidence = """probable"""
+note = """The slots and counts are confirmed; that the facade creates the voice on the passed engine is probable (the probe does not record sites in the facade)."""
+source = """.local/backlog-research/near-native-2026-10-13/stage2/audio-census.md"""
+
+[[finding]]
+group = """Movies and camera shots"""
+base = """title flow file opens"""
+v4 = """same"""
+name = """title to free roam markers"""
+what = """On a played save the title flow opens files in a fixed order that marks each screen: `pressstart.wmv` when Press Start shows; after Press Start, the profile container's `forzaprofile`, `gameplaylog`, `playerdatabase`, `versionflags`, `storefrontpurchasehistory` and last the `thumbnails` folder, after which SINGLE PLAYER shows; after SINGLE PLAYER, the world's `trackroute000.xml` and `colorado.nav` with the loading screen. START IN SINGLE PLAYER (#617) presses A and waits for the next marker, which reached free roam in one press each on the base and v4 builds."""
+how = """`pinyon_shift_record_file_opens` with a route pressing A on each screen and captures between; the auto-start route without inputs on base and v4 seeds; a fresh profile leaves the menus alone."""
+confidence = """confirmed"""
+issue = """#617"""
+source = """src/auto_start.cpp"""
+
+[[finding]]
+group = """Movies and camera shots"""
+base = """media/ui/videos, sub_82E5D868"""
+v4 = """same"""
+name = """movies"""
+what = """Boot plays `media/ui/videos/splash_intros/*.wmv`; `PressStart.wmv` loops behind the Press Start and single-player menus. Only one movie plays at a time. The guest decodes movie frames into 8-bit texture planes drawn as ordinary textured draws (about 53 draws and 5 shader pairs a frame) through the XMedia wrapper `sub_82E5D868`. The new-player opening (Press Start, single player, the controls screen, the intro and the first drive) opens no `FMV_*.wmv`, so the story movies play later, if at all; where is unverified (#617)."""
+how = """Kernel file-open observer tracking the playing movie; frame census of the movie route; `fh1-opening-sync` from a fresh profile with `pinyon_shift_record_file_opens`."""
+confidence = """confirmed"""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-00, FH1 frame facts; docs/native-renderer/NATIVE_FRAME_CONTRACT.md Per-mode scale"""
+
+[[finding]]
+group = """Movies and camera shots"""
+base = """0x82E5D8AC"""
+v4 = """0x82F1F504"""
+name = """movie end-of-stream"""
+what = """At `0x82E5D8AC` the XMedia wrapper returns the decoder's end-of-stream result `0x16660026`, which runs the game's ordinary movie-finished path. Forcing it ends a splash movie early (the boot intros are under a `splash_intros` path); forcing it on the looping `PressStart.wmv` title loop leaves zeroed (green) or stale video planes behind the menus."""
+how = """Midasm hook used with the file-open observer to skip intro movies; behaviour observed in game."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x82E5D8AC; src/pinyon_shift_runtime_hooks.cpp PinyonShiftCompleteOpeningMovie"""
+
+[[finding]]
+group = """Movies and camera shots"""
+base = """sub_82649960, 0x826499C8"""
+v4 = """hook 0x826F2968"""
+name = """CUI4AnimatedCamera::Update"""
+what = """`CUI4AnimatedCamera::Update` advances scripted UI camera shots (car purchase and reveal) by a constant step per call held in f1: 1/30 s, or 1/60 s under a UI flag; r31 is the camera object. It assumes the console's 30 updates a second, so the shots play faster at higher update rates."""
+how = """Static pass over constant-step updaters; a midasm hook at `0x826499C8` reading and scaling f1 by real time, checked on `fh1-buy-car` at 30 fps and unlocked; per-site update-rate logging."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftScaleAnimatedCameraStep; config/rexglue/analysis/main-xex.toml midasm_hook 0x826499C8; docs/DESKTOP_RENDERER_BACKLOG.md DR-1.5"""
+
+[[finding]]
+group = """Movies and camera shots"""
+name = """car purchase timing"""
+what = """The car purchase sequence is neither purely per-frame nor purely timed. With an unlocked frame rate the showroom reached its close beauty camera by output frame 2668, while a 30 fps run still held the standard view at 2684; the loading screens after the purchase advance with wall time."""
+how = """Output-frame-paced captures of the purchase at a 30 fps limit and unlocked (about 112 fps), synchronized by game state."""
+confidence = """confirmed"""
+note = """Which animation ran fast for the player is still open."""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-3.7"""
+
+# ------------------------------------------------------ Input and system UI
+
+[[finding]]
+group = """Input and system UI"""
+base = """sub_8271CD10, 0x8271CD58, sub_82BFB768, sub_82BFB7D0"""
+v4 = """sub_827DADC8, 0x827DAE1C"""
+name = """pause input actions"""
+what = """The pause input handler `sub_8271CD10` resumes on input actions 95 (Back) and 103 (Start). v4 inserts an input action, so every later ID moves up by one and its handler compares 96 and 104. The input object keeps 16-byte context vectors at +24/+28; context 10 holds 28-byte action records with the action ID at +4, read by `sub_82BFB768` and `sub_82BFB7D0`."""
+how = """Hook on the handler and read-only snapshots of the pause input contexts; comparing both builds' handlers, which are otherwise identical around the action query."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis-v4/overrides.toml; docs/TITLE_UPDATE_V4_BACKLOG.md TU-3; src/pinyon_shift_runtime_hooks.cpp PinyonShiftUiCompanionPauseInputMatch"""
+
+[[finding]]
+group = """Input and system UI"""
+name = """system UI pauses the title"""
+what = """When system UI is reported active (`XN_SYS_UI` notification, `XamIsUIActive`), the title opens its own pause menu behind it. The title reads only gamepads, and its HUD button prompts are Xbox glyph textures, so keyboard prompts would need texture replacement."""
+how = """Host menus that set the system-UI state paused the title in every route; HUD inspection."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-1.3, NP-6.2; src/ui/hostui/host_ui.cpp"""
+
+[[finding]]
+group = """Input and system UI"""
+name = """XAM UI the title uses"""
+what = """FH1 reads the gamertag through `XamUserGetName`, calls `XamShowAchievementsUI` and the message box and keyboard dialogs, and imports `XamShowMessageBoxUIEx` without any call to it seen so far. Achievement icons come from the title's XDBF. Where the game shows the gamertag is not confirmed."""
+how = """Import tracing and host providers for each call (`fh1-xam-dialogs`, `fh1-host-features` routes)."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-5.1 to NP-5.3"""
+
+[[finding]]
+group = """Input and system UI"""
+base = """IDS_Mulligan"""
+name = """rewind control"""
+what = """The default controller layout maps Y to rewind (`IDS_Mulligan`, shown on the controller loading screen) and BACK to the race map. Rewinding shows the rewinding camera and a menu to resume, rewind further, cancel or view the replay. Profiles with another layout use Y for the camera."""
+how = """Scripted routes from a profile-free seed (`fh1-rewind-sync`) and the loading-screen layout."""
+confidence = """confirmed"""
+source = """docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-00"""
+
+[[finding]]
+group = """Input and system UI"""
+base = """sub_82BF80D0, sub_82BFBE20, sub_830EB918, sub_8310C968"""
+name = """wheel detection"""
+what = """The input module (about `0x82BF8000`-`0x82BFFxxx`) has wheel paths: two functions call the XInputGetCapabilities wrapper `sub_830EB918`, check for subtype 2 (wheel) with the force-feedback flag, require `sub_8310C968` to return 5 or more and then set a flag at +4."""
+how = """Static reading of the generated code."""
+confidence = """probable"""
+note = """Not confirmed at run time."""
+issue = """#337"""
+source = """docs/FEATURE_BACKLOG.md FB-2"""
+
+[[finding]]
+group = """Input and system UI"""
+base = """sub_830EB930, sub_8310CBC8, sub_8310C788, sub_82BFC6F0, sub_82BFA428"""
+name = """rumble and force-feedback output"""
+what = """The XInputSetState wrapper `sub_830EB930` and its asynchronous form `sub_8310CBC8` branch for a wheel with force feedback and swap the motors on kernels before 2.0.5611. `sub_8310CBC8` resolves `XamInputGetUserVibrationLevel` (ordinal 442) through `sub_8310C788`, and `sub_82BFC6F0` chooses between that path (`sub_82BFA428`, flag at +4244) and `sub_830EB930`. Output is two 16-bit motor values, tuned by `media/ControllerFFB.ini` (inertia, friction, damper, spring, dynamic scale, spring against speed, rear slip); `CSteeringWheelFilter` and `CCarPresentationSetSteeringWheelAngle` are in the image. The pad values live at `[0x834398E0] + 16 + 5648 × pad`: the left (low-frequency) motor at `+688`, the right at `+692` (0 to 65535), the same as 0..1 floats at `+696`/`+700` and the rumble-scale option at `+704`. Each frame `sub_8248AB08` builds 13 inputs for the player's car (engine RPM, transmission, three collision pulses, tyre traction overall, front and rear, air friction, surface bumpiness, two scripted motor adds, and engine sputter, shift and backfire events); `sub_82BFA050` sums per-motor response curves for them, read from `Game:\\Media\\ControllerRumble.xml`, so which motor carries what is data. On a drive the right motor carries the engine (about 9 % at idle, 15 to 33 % under load, peaks to 75 %) and the left the bumps, kerbs and impacts over a floor of about 6 %."""
+how = """Static reading of the generated code and strings; the motor census logged every XInputSetState value on a scripted drive (DS-2.0)."""
+confidence = """confirmed"""
+note = """What the two motor values mean under a wheel is not traced. In v4 the car's collision and motor-add fields read here moved by 4 bytes (`car + 14664..14684` to `+14668..14688`) and the backfire fields by 16 (`+15428`/`+15448`)."""
+issue = """#337"""
+source = """docs/FEATURE_BACKLOG.md FB-2; docs/DUALSENSE_BACKLOG.md DS-2, DS-3"""
+
+[[finding]]
+group = """Input and system UI"""
+base = """sub_82BFBA90, 0x822DAD70"""
+name = """raw-state device check"""
+what = """`sub_82BFBA90` uses `XamInputRawState` and `XNotifyGetNext` with a 16-byte ID comparison against `0x822DAD70`, possibly to detect the Speed Wheel accessory."""
+how = """Static reading of the generated code."""
+confidence = """guess"""
+source = """docs/FEATURE_BACKLOG.md FB-2"""

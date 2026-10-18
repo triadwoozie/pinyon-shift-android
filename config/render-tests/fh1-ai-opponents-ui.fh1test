@@ -1,0 +1,30 @@
+pinyon-shift-fh1-render-test-v1
+# clock-hz 60
+# Fair AI setting (#482): F6 > GAMEPLAY (the last root row) > AI OPPONENTS
+# (the last row there), cycled STOCK > NO RUBBER-BANDING > HARD > STOCK on
+# any seed. Each change is logged as a settings.changed event (row AI OPPONENTS) and the
+# run's config ends at "stock". Captures do not show the host UI.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+capture 1200 free-roam
+hostkey 1300 f6
+hostkey 1340 up
+hostkey 1370 enter
+hostkey 1420 up
+capture 1460 ai-stock
+hostkey 1480 right
+capture 1520 ai-fair
+hostkey 1540 right
+capture 1580 ai-hard
+hostkey 1600 right
+capture 1640 ai-stock-again
+hostkey 1680 escape
+hostkey 1720 escape
+stop 1800

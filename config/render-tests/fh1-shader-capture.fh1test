@@ -1,0 +1,9 @@
+pinyon-shift-fh1-render-test-v1
+# Boot to the title screen and quit (NN-2.5): the start translates every shader
+# the device's pipeline storage names, which is what `pinyon.py android
+# shader-pack` captures to build the device's SPIR-V pack. No input, no save.
+# A route needs one capture before its stop frame.
+# clock-hz 60
+input 0 0000 0 0 0 0 0 0
+capture 880 title
+stop 900

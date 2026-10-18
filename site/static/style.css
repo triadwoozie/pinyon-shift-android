@@ -407,6 +407,46 @@ h2:hover .anchor, h3:hover .anchor, .anchor:focus-visible { opacity: 1; }
 .prose .state-not-yet { color: var(--muted); }
 .prose .state-na { color: var(--faint); }
 
+/* Reverse-engineering records (site/findings) and the address index. */
+.prose table.findings { min-width: 40rem; }
+.prose table.findings td.addr { width: 1%; white-space: nowrap; font-size: 0.82rem; line-height: 1.7; }
+.prose table.findings td.addr code { background: none; border: 0; padding: 0; color: var(--text-strong); }
+.prose .v4-label {
+  display: block; margin-top: 0.35rem;
+  font: 600 0.68rem/1.4 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--faint);
+}
+.prose .finding-name { color: var(--text-strong); font-weight: 600; text-decoration: none; }
+.prose .finding-name:hover { text-decoration: underline; }
+.prose table.findings .how { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.84rem; }
+.prose table.findings .how strong { color: var(--faint); font: 600 0.72rem/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; margin-right: 0.25rem; }
+.prose table.findings td.confidence { width: 1%; min-width: 7.5rem; }
+.prose table.findings tr:target td { background: var(--surface); }
+.prose .conf {
+  display: inline-block; padding: 0.05rem 0.45rem; margin: 0 0.25rem 0.25rem 0;
+  border: 1px solid currentColor; border-radius: 999px;
+  font: 600 0.74rem/1.4 var(--font-display); letter-spacing: 0.03em; white-space: nowrap;
+}
+.prose .conf-confirmed { color: var(--accent); }
+.prose .conf-probable { color: var(--amber); }
+.prose .conf-guess { color: var(--muted); border-style: dashed; }
+.prose .conf-negative { color: var(--faint); }
+.prose .conf-note { display: block; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.prose table.address-index td { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+.findings-filter {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center;
+  margin: 0 0 1rem; padding: 0.6rem 0.75rem;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  font-size: 0.88rem;
+}
+.findings-filter input, .findings-filter select {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line-strong); border-radius: 4px; padding: 0.3rem 0.5rem;
+}
+.findings-filter input { flex: 1 1 14rem; min-width: 0; }
+.findings-filter output { color: var(--muted); white-space: nowrap; }
+.findings-hidden { display: none; }
+
 .prose blockquote {
   margin: 0 0 1.25rem;
   padding: 0.85rem 1.1rem;

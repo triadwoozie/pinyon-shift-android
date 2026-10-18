@@ -331,6 +331,20 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertIn("ConvertTo-PinyonCommandPath", common)
         self.assertIn("$inheritedPath = $env:PATH", common)
 
+    def test_pinned_git_trusts_the_checkout_whoever_owns_it(self):
+        # A checkout on a drive owned by another account failed setup with
+        # "detected dubious ownership" (#599).
+        common = (ROOT / "tools/release-common.ps1").read_text(encoding="utf-8")
+        get_git = common.split("function Get-PinyonGit", 1)[1][:600]
+        self.assertIn("Set-PinyonGitEnvironment -Root $root -Git $candidate", get_git)
+        trust = common.split("function Set-PinyonGitEnvironment", 1)[1]
+        self.assertIn("'safe.directory'", trust)
+        self.assertIn('"$trusted/*"', trust)
+        self.assertIn("GIT_CONFIG_COUNT", trust)
+        # A broken global http.sslCAInfo failed every clone (#604).
+        self.assertIn("'http.sslCAInfo'", trust)
+        self.assertIn(r"mingw64\etc\ssl\certs\ca-bundle.crt", trust)
+
     def test_powershell_is_started_by_full_path(self):
         # A PATH without the WindowsPowerShell folder failed setup with "The
         # specified file cannot be found" (#317).
@@ -372,6 +386,22 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertIn("NativeErrorCode -eq 1223", provision)
         self.assertIn("administrator permission was declined", provision)
 
+    def test_failed_build_tools_install_keeps_the_installer_logs(self):
+        # Exit code 87 has no documented meaning; only the installer's
+        # dd_*.log files explain it (#549).
+        provision = (ROOT / "tools/provision-toolchain.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("-Filter 'dd_*.log'", provision)
+        self.assertIn("'.local/logs/build-tools-installer'", provision)
+
+    def test_toolchain_zips_unpack_without_expand_archive(self):
+        # Windows PowerShell 5.1's Expand-Archive stopped partway through a
+        # zip on some PCs (#574); every tool archive uses .NET instead.
+        provision = (ROOT / "tools/provision-toolchain.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("Expand-Archive", provision)
+        self.assertEqual(provision.count("Expand-PinyonZip -Archive $archive"), 6)
+
     @unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell is required")
     def test_command_path_removes_entry_quotes_without_losing_parentheses(self):
         command = (
@@ -382,7 +412,9 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         environment = os.environ.copy()
         environment["PINYON_TEST_PATH"] = (
             'C:\\Windows;"C:\\Program Files (x86)\\Steam\\ext\\bin";'
-            "C:\\Tools"
+            "C:\\Tools;"
+            # A stray quote in one entry broke VsDevCmd (#560).
+            'C:\\Program Files\\PowerToys\\DSCModules";C:\\Program Files\\PuTTY\\'
         )
         completed = subprocess.run(
             ["powershell", "-NoLogo", "-NoProfile", "-Command", command],
@@ -395,7 +427,8 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(
             completed.stdout,
-            "C:\\Windows;C:\\Program Files (x86)\\Steam\\ext\\bin;C:\\Tools",
+            "C:\\Windows;C:\\Program Files (x86)\\Steam\\ext\\bin;C:\\Tools;"
+            "C:\\Program Files\\PowerToys\\DSCModules;C:\\Program Files\\PuTTY\\",
         )
 
     def test_launcher_payload_has_every_required_script(self):
@@ -534,18 +567,21 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         app = (ROOT / "src/pinyon_shift_app.cpp").read_text(encoding="utf-8")
         self.assertIn("constexpr uint32_t kConfigSchema = 29", app)
         self.assertIn(".schema", app)
+        # create-crash-report.ps1 is a wrapper over tools/pinyon_crash.py, the
+        # crash bundler every OS uses (LX-3.5).
+        crash_report = (ROOT / "tools/pinyon_crash.py").read_text(encoding="utf-8")
         for setting in ("anisotropic_override", "swap_post_effect", "draw_resolution_scale_x"):
             self.assertIn(setting, app)
-            self.assertIn(setting, (ROOT / "tools/create-crash-report.ps1").read_text(encoding="utf-8"))
+            self.assertIn(setting, crash_report)
         for setting in ("host_present_fps_limit", "host_present_sleep_spin",
                         "pinyon_shift_fh1_render_fps_limit"):
             self.assertIn(setting, app)
             self.assertIn(setting, (ROOT / "tools/set-graphics-experiment.ps1").read_text(encoding="utf-8"))
-            self.assertIn(setting, (ROOT / "tools/create-crash-report.ps1").read_text(encoding="utf-8"))
+            self.assertIn(setting, (ROOT / "tools/pinyon_config.py").read_text(encoding="utf-8"))
+            self.assertIn(setting, crash_report)
         # The native renderer is the only renderer: crash reports carry it as
         # a constant rather than reading a retired renderer choice.
-        crash_report = (ROOT / "tools/create-crash-report.ps1").read_text(encoding="utf-8")
-        self.assertIn("renderer = 'native'", crash_report)
+        self.assertIn('"renderer": "native"', crash_report)
         for retired in ("fh1_renderer", "pinyon_shift_native_renderer", "xenos_authority",
                         "'xenos'"):
             self.assertNotIn(retired, crash_report)
@@ -600,8 +636,10 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertIn("for (const auto& key : pinyon_shift::config::kSchema28Keys)", app)
         self.assertIn('{"keybind_a", "LMB,Space"}', keys)
         self.assertIn('{"keybind_right_trigger", "W"}', keys)
-        # Schemas 1..24 migrate; the current schema is accepted unchanged.
+        # Older schemas migrate; the current and newer ones are accepted
+        # unchanged (#536).
         self.assertIn("schema < 1 || schema >= kConfigSchema", app)
+        self.assertIn("if (schema > kConfigSchema) {", app)
         self.assertNotIn('"fh1_renderer = \\"native\\"\\n"', app)
         self.assertNotIn('\\"xenos\\"', app)
         retired_block = app[app.index("for (const char* retired_setting : {"):]

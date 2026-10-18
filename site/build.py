@@ -32,7 +32,7 @@ REPO = "arcanite24/pinyon-shift"
 REPO_URL = f"https://github.com/{REPO}"
 # The site documents the development branch, ahead of the latest release.
 BRANCH = "dev"
-SECTIONS = ["Start", "Playing", "Technical", "Internals", "Project"]
+SECTIONS = ["Start", "Playing", "Technical", "Internals", "Reverse engineering", "Project"]
 
 # Files copied from the repository into the site, by output name.
 STATIC_FROM_REPO = {
@@ -44,6 +44,17 @@ STATIC_FROM_REPO = {
 
 # A paragraph of its own, {{diagram:name|Caption}}, inlines site/diagrams/name.svg.
 DIAGRAM = re.compile(r"<p>\{\{diagram:([\w-]+)\|([^}]*)\}\}</p>")
+# A paragraph of its own, {{findings:topic}} or {{findings:topic/group}}, renders
+# the reverse-engineering records in site/findings/topic.toml.
+FINDINGS = re.compile(r"<p>\{\{findings:([\w-]+)(?:/([^}]+))?\}\}</p>")
+# {{addresses:all}}, {{addresses:symbols}}, {{addresses:hooks}}, {{addresses:offsets}}.
+ADDRESSES = re.compile(r"<p>\{\{addresses:(\w+)\}\}</p>")
+CONFIDENCE = {"confirmed": "Confirmed", "probable": "Probable", "guess": "Guess"}
+FINDING_KEYS = {"id", "group", "base", "v4", "name", "what", "how", "confidence", "note",
+                "negative", "issue", "source"}
+# Guest addresses inside a finding's base and v4 fields: sub_82D505C0, 0x8207AA58,
+# or a bare 825A6320 (thread entries and code sites).
+GUEST_ADDRESS = re.compile(r"\b(?:sub_|0x)?(8[23][0-9A-Fa-f]{6})\b")
 MD_LINK = re.compile(r'href="(?!https?:|mailto:|#)([^"#]+?)\.md(#[^"]*)?"')
 
 
@@ -165,6 +176,225 @@ def features_markdown() -> str:
     return "\n".join(lines) + "\n"
 
 
+@dataclass
+class Finding:
+    topic: str
+    id: str
+    group: str
+    base: str
+    v4: str
+    name: str
+    what: str
+    how: str
+    confidence: str
+    note: str
+    negative: bool
+    issue: str
+    source: str
+    page: str = ""  # the page slug that shows it, set while building
+
+
+def load_findings() -> dict[str, list[Finding]]:
+    """Every record in site/findings/<topic>.toml, checked."""
+    topics: dict[str, list[Finding]] = {}
+    for path in sorted((SITE / "findings").glob("*.toml")):
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        seen: set[str] = set()
+        records = []
+        for number, raw in enumerate(data.get("finding", []), 1):
+            where = f"{path.name} finding {number}"
+            unknown = set(raw) - FINDING_KEYS
+            if unknown:
+                raise SystemExit(f"{where}: unknown keys {sorted(unknown)}")
+            if not raw.get("name") or not raw.get("what"):
+                raise SystemExit(f"{where}: needs a name and a what")
+            confidence = raw.get("confidence", "")
+            if confidence not in CONFIDENCE:
+                raise SystemExit(f"{where}: confidence must be one of {list(CONFIDENCE)}")
+            ident = raw.get("id") or slugify(raw["name"], "-")
+            if ident in seen:
+                raise SystemExit(f"{where}: duplicate id {ident!r}; give it an explicit id")
+            seen.add(ident)
+            records.append(Finding(path.stem, ident, raw.get("group", ""), raw.get("base", ""),
+                                   raw.get("v4", ""), raw["name"], raw["what"].strip(),
+                                   raw.get("how", "").strip(), confidence, raw.get("note", ""),
+                                   bool(raw.get("negative", False)), raw.get("issue", ""),
+                                   raw.get("source", "")))
+        topics[path.stem] = records
+    return topics
+
+
+def inline_markdown(text: str) -> str:
+    rendered = markdown.markdown(text, extensions=["attr_list"])
+    return re.sub(r"^<p>(.*)</p>$", r"\1", rendered.strip(), flags=re.S)
+
+
+def issue_links(text: str) -> str:
+    return re.sub(r"#(\d+)", lambda m: f'<a href="{REPO_URL}/issues/{m.group(1)}">#{m.group(1)}</a>',
+                  html.escape(text))
+
+
+def source_link(source: str) -> str:
+    """'docs/X.md item; src/y.cpp Name' -> links to the files on GitHub, the rest as text.
+
+    A path may name a commit (docs/X.md@1a2b3c4d5e6f) for a file that has
+    since changed, so the link keeps pointing at the text the record cites.
+    """
+    parts = []
+    for part in (p.strip() for p in source.split(";")):
+        path, _, rest = part.partition(" ")
+        path, _, commit = path.partition("@")
+        tail = f" {html.escape(rest)}" if rest else ""
+        if (re.fullmatch(r"[\w./-]+\.(md|toml|py|cpp|h|inc|json)", path)
+                and (re.fullmatch(r"[0-9a-f]{7,40}", commit) or (not commit and (ROOT / path).exists()))):
+            parts.append(f'<a href="{REPO_URL}/blob/{commit or BRANCH}/{path}">{html.escape(path)}</a>{tail}')
+        else:
+            parts.append(html.escape(part))
+    return "; ".join(p for p in parts if p)
+
+
+def address_cell(text: str) -> str:
+    parts = [p.strip() for p in re.split(r",\s*(?![^()]*\))", text) if p.strip()]
+    return "<br>".join(f"<code>{html.escape(p)}</code>" for p in parts) if parts else "—"
+
+
+def findings_html(records: list[Finding]) -> str:
+    rows = []
+    for f in records:
+        confidence = f'<span class="conf conf-{f.confidence}">{CONFIDENCE[f.confidence]}</span>'
+        if f.negative:
+            confidence += ' <span class="conf conf-negative">Negative</span>'
+        if f.note:
+            confidence += f'<span class="conf-note">{inline_markdown(f.note)}</span>'
+        details = [f"<strong>Established by</strong> {inline_markdown(f.how)}" if f.how else ""]
+        if f.source:
+            details.append(f"<strong>Detail</strong> {source_link(f.source)}")
+        if f.issue:
+            details.append(f"<strong>Issue</strong> {issue_links(f.issue)}")
+        details = [d for d in details if d]
+        v4 = f'<span class="v4-label">v4</span>{address_cell(f.v4)}' if f.v4 else ""
+        rows.append(
+            f'<tr id="{f.topic}-{f.id}" data-confidence="{f.confidence}">'
+            f'<td class="addr">{address_cell(f.base)}{v4}</td>'
+            f'<td><a class="finding-name" href="#{f.topic}-{f.id}">{html.escape(f.name)}</a> '
+            f'{inline_markdown(f.what)}'
+            + (f'<p class="how">{"<br>".join(details)}</p>' if details else "") +
+            f'</td><td class="confidence">{confidence}</td></tr>')
+    return table_html(["Address", "Finding", "Confidence"], rows)
+
+
+def findings_for(topics: dict[str, list[Finding]], topic: str, group: str | None,
+                 page: Page) -> str:
+    if topic not in topics:
+        raise SystemExit(f"{page.source.name}: no site/findings/{topic}.toml")
+    records = [f for f in topics[topic] if group is None or f.group == group]
+    if not records:
+        raise SystemExit(f"{page.source.name}: no findings in {topic}/{group}")
+    for f in records:
+        if f.page and f.page != page.slug:
+            raise SystemExit(f"{topic}/{f.id} is shown on both {f.page} and {page.slug}")
+        f.page = page.slug
+    return findings_html(records)
+
+
+def hook_comments() -> dict[str, str]:
+    """The comment above each [[midasm_hook]] in the main-XEX analysis file."""
+    notes: dict[str, str] = {}
+    pending: list[str] = []
+    current = ""
+    for line in (ROOT / "config/rexglue/analysis/main-xex.toml").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            pending.append(line.lstrip("# "))
+        elif line == "[[midasm_hook]]":
+            current, pending = " ".join(pending), []
+        elif line.startswith("name = "):
+            name = line.split("=", 1)[1].strip().strip('"')
+            notes[f"hook.{name}"] = current
+        elif line:
+            pending = []
+    return notes
+
+
+def symbol_table() -> tuple[list[dict], list[dict]]:
+    """Mod symbols, hooks and offsets with base and v4 values and their comments."""
+    def entries(path: str, kind: str) -> dict[str, int]:
+        pattern = re.compile(rf'PINYON_{kind}\("([^"]+)", (0x[0-9A-Fa-f]+|\d+)\)')
+        return {m.group(1): int(m.group(2), 0)
+                for m in pattern.finditer((ROOT / path).read_text(encoding="utf-8"))}
+
+    comments = hook_comments()
+    for line in (ROOT / "config/mod/fh1-symbols.toml").read_text(encoding="utf-8").splitlines():
+        match = re.match(r'"([^"]+)"\s*=\s*\S+\s*#\s*(.+)', line)
+        if match:
+            comments[match.group(1)] = match.group(2).strip()
+    base, v4 = "src/mod/fh1_symbols.inc", "src/mod/fh1_symbols_v4.inc"
+    v4_symbols, v4_offsets = entries(v4, "SYMBOL"), entries(v4, "OFFSET")
+    symbols = [{"name": n, "base": a, "v4": v4_symbols.get(n),
+                "kind": "hook" if n.startswith("hook.") else "symbol",
+                "description": comments.get(n, "")}
+               for n, a in entries(base, "SYMBOL").items()]
+    offsets = [{"name": n, "base": o, "v4": v4_offsets.get(n), "description": comments.get(n, "")}
+               for n, o in sorted(entries(base, "OFFSET").items())]
+    return sorted(symbols, key=lambda s: s["base"]), offsets
+
+
+def hex_cell(value: int | None) -> str:
+    return f'<td class="addr"><code>{value:08X}</code></td>' if value is not None else "<td>—</td>"
+
+
+def table_html(headers: list[str], rows: list[str], cls: str = "findings") -> str:
+    head = "".join(f"<th>{h}</th>" for h in headers)
+    return f'<table class="{cls}"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+
+
+def address_index(topics: dict[str, list[Finding]], prefix: str) -> tuple[dict[str, str], dict]:
+    """The address index tables, and the same data for symbols.json."""
+    rows: list[dict] = []
+    for records in topics.values():
+        for f in records:
+            if not f.page:
+                raise SystemExit(f"finding {f.topic}/{f.id} is not shown on any page")
+            for match in GUEST_ADDRESS.finditer(f.base):
+                rows.append({"address": int(match.group(1), 16), "name": f.name, "kind": f.topic,
+                             "v4": f.v4, "confidence": f.confidence,
+                             "page": f"{f.page}/#{f.topic}-{f.id}"})
+    symbols, offsets = symbol_table()
+    anchors = {"symbol": "mod-symbols", "hook": "hook-sites"}
+    for s in symbols:
+        rows.append({"address": s["base"], "name": s["name"],
+                     "kind": "mod symbol" if s["kind"] == "symbol" else "hook",
+                     "v4": f"{s['v4']:08X}" if s["v4"] else "", "confidence": "confirmed",
+                     "page": f"game-addresses/#{anchors[s['kind']]}"})
+    rows.sort(key=lambda r: (r["address"], r["kind"], r["name"]))
+
+    index = [f'<tr data-confidence="{r["confidence"]}">{hex_cell(r["address"])}'
+             f'<td><a href="{prefix}{r["page"]}">{html.escape(r["name"])}</a></td>'
+             f'<td>{html.escape(r["kind"])}</td><td class="addr">{html.escape(r["v4"]) or "—"}</td></tr>'
+             for r in rows]
+    def symbol_rows(kind: str) -> list[str]:
+        return [f'<tr><td><code>{html.escape(s["name"].removeprefix("hook."))}</code></td>'
+                f'{hex_cell(s["base"])}{hex_cell(s["v4"])}<td>{html.escape(s["description"])}</td></tr>'
+                for s in symbols if s["kind"] == kind]
+    offset_rows = [f'<tr><td><code>{html.escape(o["name"])}</code></td><td align="right">{o["base"]}</td>'
+                   f'<td align="right">{"—" if o["v4"] is None else o["v4"]}</td>'
+                   f'<td>{html.escape(o["description"])}</td></tr>' for o in offsets]
+    named = ["Name", "Base", "v4", "What it is"]
+    parts = {
+        "all": table_html(["Base", "Name", "Kind", "v4"], index, "findings address-index"),
+        "symbols": table_html(named, symbol_rows("symbol")),
+        "hooks": table_html(named, symbol_rows("hook")),
+        "offsets": table_html(["Name", '<span class="num">Base</span>', '<span class="num">v4</span>',
+                               "What it is"], offset_rows),
+    }
+    export = {
+        "executables": {"base": "default.xex", "v4": "default.xex+default.xexp"},
+        "addresses": [r | {"address": f"0x{r['address']:08X}"} for r in rows],
+        "offsets": offsets,
+    }
+    return parts, export
+
+
 def render_markdown(text: str) -> tuple[str, list[dict]]:
     converter = markdown.Markdown(
         extensions=["tables", "fenced_code", "codehilite", "toc", "attr_list", "md_in_html"],
@@ -269,6 +499,7 @@ def build(out: Path) -> None:
     slugs = {p.slug for p in pages if p.slug}
     template = (SITE / "template.html").read_text(encoding="utf-8")
     release = latest_release()
+    topics = load_findings()
 
     if out.exists():
         shutil.rmtree(out)
@@ -278,16 +509,26 @@ def build(out: Path) -> None:
     for name, source in STATIC_FROM_REPO.items():
         shutil.copyfile(ROOT / source, out / name)
 
+    rendered_pages: list[tuple[Page, str, list[dict]]] = []
     for page in pages:
         text = page.body.replace("{{release}}", release_block(release))
         if "{{features}}" in text:
             text = text.replace("{{features}}", features_markdown())
         body, toc = render_markdown(text)
+        body = FINDINGS.sub(lambda m: findings_for(topics, m.group(1), m.group(2), page), body)
+        rendered_pages.append((page, body, toc))
+    # The address index links to every record, so it is filled in once all
+    # records know their page.
+    for page, body, toc in rendered_pages:
+        if ADDRESSES.search(body):
+            parts, export = address_index(topics, "../" * page.depth)
+            body = ADDRESSES.sub(lambda m: parts[m.group(1)], body)
+            (out / "symbols.json").write_text(json.dumps(export, indent=1), encoding="utf-8")
         body = rewrite_links(body, page, slugs)
         body = DIAGRAM.sub(lambda m: diagram_html(m.group(1), m.group(2)), body)
         if "{{diagram:" in body:
             raise SystemExit(f"{page.source.name}: a diagram placeholder must be a paragraph of its own")
-        body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
+        body = re.sub(r"<table\b", '<div class="table-wrap"><table', body).replace("</table>", "</table></div>")
         prefix = "../" * page.depth
         body = body.replace('src="img/', f'src="{prefix}img/')
         version = release["tag"] if release else ""

@@ -419,9 +419,10 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         String selected = prefs.getString(PREF_SELECTED_DRIVER, "auto");
         String adreno = PinyonShiftActivity.adrenoModel();
         String rec = PinyonShiftActivity.recommendedDriver(adreno);
-        activeDriverText.setText("Active: " + selected + ("auto".equals(selected) && rec != null ? " (" + rec + ")" : ""));
+        activeDriverText.setText("Active: " + ("system".equals(selected) ? "System" : selected) + ("auto".equals(selected) ? (rec != null ? " (" + rec + ")" : " (System)") : ""));
 
-        addDriverItem("System Default Driver", "auto", "System Vulkan stack (Turnip if Adreno)", "auto".equals(selected));
+        addDriverItem("System Default Driver", "system", "System Vulkan stack (Qualcomm stock driver)", "system".equals(selected) || ("auto".equals(selected) && rec == null));
+        addDriverItem("Auto Recommend", "auto", "Auto picks Turnip V37 on 7xx/8xx or System on 6xx", "auto".equals(selected));
 
         File[] dirs = driversDir.listFiles();
         if (dirs != null) {
@@ -783,7 +784,8 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         args.add("--present_letterbox=" + ("letterbox".equals(aspect) || "crop".equals(aspect)));
         if ("crop".equals(aspect)) args.add("--present_crop=true");
 
-        args.add("--android_gpu_driver=" + prefs.getString(PREF_SELECTED_DRIVER, "auto"));
+        String drv = prefs.getString(PREF_SELECTED_DRIVER, "auto");
+        args.add("--android_gpu_driver=" + ("system".equals(drv) ? "" : drv));
         int res = prefs.getInt(PREF_RES_SCALE, 720);
         int scale = (res >= 1080) ? 2 : 1;
         args.add("--draw_resolution_scale_x=" + scale);
@@ -797,6 +799,9 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         boolean potato = "potato".equals(preset);
         args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : "1.0"));
         args.add("--pinyon_shift_fh1_shadows=" + (!potato));
+        args.add("--disable_depth_of_field=true");
+        args.add("--anisotropic_override=-1");
+        args.add("--fh1_msaa_single_sample=true");
 
         String upscaler = prefs.getString(PREF_UPSCALER, "bilinear");
         args.add("--present_effect=" + ("fsr".equals(upscaler) ? "fsr" : "cas".equals(upscaler) ? "cas" : "bilinear"));

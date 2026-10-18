@@ -114,6 +114,13 @@ as `index:address:value:step` (`*` where poked). Poking hundreds of values
 can crash the title: list them first with a count of 0, then narrow the
 range and step. The time of day was found this way, in seconds
 (`scanpoke <frame> 40000 50000 79200 200 350` turns free roam to night).
+`audiocapture <frame>` records eight seconds of the title's native mix
+(six channels at 48 kHz, before the host's volume) to
+`<output>/rally-audio-probe.wav` and logs its RMS and peak with
+`dlc.rally.audio_capture_saved`. The radio and the timing differ between
+runs, so compare sound settings by isolating them (every other category
+at 0) rather than by the whole mix; the audio mixer (#486) was measured
+this way.
 `hostclick <frame> <left|right> <x> <y>` moves the pointer and clicks at
 `(x, y)` in the title's 1280x720 layout space, mapped onto the painted guest
 output, which is the space the host UI lays its rows out in. The host UI

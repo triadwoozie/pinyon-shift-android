@@ -1,0 +1,206 @@
+# Files and formats: the media layout, archives, string tables, textures,
+# the game database and other formats. Rendered on site/pages/game-files.md.
+
+# --- Media layout and file access -------------------------------------------
+
+[[finding]]
+group = """Media layout and file access"""
+id = """media-census"""
+name = """media folder census"""
+what = """`media/` on the disc is 7.18 GB in 2,385 files: 524 ZIP archives with 258,936 members, 984 loose FMOD sound banks (`.fsb`) and 34 event files (`.fev`), 431 loose XML files, 174 compiled effects (`.fxobj`), 120 loose `.carbin` models and the SQLite game database. By size: `tracks` 2.9 GB (Colorado's `bin.zip` alone 2.9 GB, 230,057 members), `cars` 1.5 GB, `audio` 1.4 GB, `ui` 0.7 GB, `wheels` 135 MB."""
+how = """Directory walk and ZIP central directories of the base disc."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Media layout and file access"""
+base = """default.xex, media/"""
+v4 = """same"""
+name = """game folder layout"""
+what = """An extracted game folder holds `default.xex`, the two facade modules and the `media` tree. On the supported dump `media/db/gamedb.slt` is 2,903,040 bytes and `media/gamemodes.zip` 1,032,991 bytes."""
+how = """Extraction listing and file hashes of the supported dumps."""
+confidence = """confirmed"""
+source = """docs/EXTRACTED_GAME_INPUT.md; config/supported-dumps.json"""
+
+[[finding]]
+group = """Media layout and file access"""
+base = """update media loader, image offset 0x1378C"""
+v4 = """same"""
+name = """update media mount order"""
+what = '''The loader opens `game:\update\media.zip`, then `update:\media.zip`. The strings sit at image offset `0x1378C`, identical in base and v4, so both builds read update media and prefer the update's copies over the disc's.'''
+how = """Strings in both images; v4 runs used the update's game flows and database."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds, TU-4"""
+
+[[finding]]
+group = """Media layout and file access"""
+base = """sub_82C05530, sub_82BFFDA0, 0x82C057D0, 0x82C0580C"""
+v4 = """0x82CC4C00, 0x82CC4C3C"""
+name = """per-block SHA-256 dirty-disc check"""
+what = '''The title checks some game files block by block against a SHA-256 table of the originals (32 bytes per block). The block reader `sub_82C05530` calls `sub_82BFFDA0` for each block; the block results are at `0x82C057D0`, and at `0x82C0580C` for the last block. A mismatch raises the dirty-disc error. The table is in the executable and names files relative to their root (`db\gamedb.slt`, `zipmanifest.xml`).'''
+how = """Hooks on the block check, triggered with modified files; replaced files load once the hooks accept them. The XE mod's executables differ from the disc's only in two names in this table."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml dirty-disc hooks; docs/NATIVE_PORT_BACKLOG.md NP-10.1, NP-10.2; docs/MODDING.md The Forza Horizon XE mod; src/pinyon_shift_runtime_hooks.cpp PinyonShiftAcceptModdedBlock"""
+
+[[finding]]
+group = """Media layout and file access"""
+base = """sub_82C03E90, 0x82C041A4, sub_82A7CDB8"""
+v4 = """0x82CC359C"""
+name = """file size check"""
+what = """`sub_82C03E90` opens a game file and compares its real size (from `sub_82A7CDB8`) with the size in the hash table. At `0x82C041A4` the path is at r1+92, r6 holds the real size and r31 the table size. `media/db/gamedb.slt` is opened loose and checked this way."""
+how = """Hook on the comparison; replaced files pass once it accepts them."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x82C041A4; docs/NATIVE_PORT_BACKLOG.md NP-10.1"""
+
+[[finding]]
+group = """Media layout and file access"""
+name = """loading is guest work, not disk"""
+what = """The game's file I/O during play is small: one run read 189 MB in 4,538 reads for 91 ms of read time, and 1,203 opens took 108 ms; a warm town window had 161 reads (2.5 ms) and 47 opens (5.5 ms). Load time sits in the game's own work (asset decompression, texture reloads: one transition frame reloaded 75-350 textures in 212-343 ms) and in its waits."""
+how = """Host I/O counters during a 2026-09-28 play session."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md Loading times on modern storage; docs/DEVELOPMENT.md Non-renderer findings"""
+
+# --- Archives ---------------------------------------------------------------
+
+[[finding]]
+group = """Archives"""
+id = """compression-methods"""
+name = """compression methods in use"""
+what = """99.3 % of archive members (257,122) use method 21, the Xbox XMem LZX codec; 1,415 are stored (method 0) and 399 deflated (method 8). Every member carries extra field `0x1123`, which the game reads for the absolute payload offset."""
+how = """Central directory census; the `0x1123` role is described in `tools/patch-fh1-archive.py`."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Archives"""
+base = """ZIP method 21, extra field 0x1123"""
+v4 = """same"""
+name = """ZIP container quirks"""
+what = """FH1 archives are ZIP files whose central directory carries, for each member, extra field `0x1123` (4 bytes): the absolute offset of the member's payload. The title reads that offset, so a rewritten archive must update it along with the local-header offsets; ordinary ZIP repacking leaves it pointing into unrelated data. Some archives omit local headers, and their directory offset is then the payload itself. The CRC is of the decompressed data."""
+how = """Archive reader and writer (`fh1_archive.cpp`, `patch-fh1-archive.py`); repacked archives with and without offset updates; an unchanged rebuild reproduced 120 of 120 stock archives byte for byte, and a rebuilt `EN.zip` with a replaced `PauseMenu.str` loaded in game."""
+confidence = """confirmed"""
+source = """tools/patch-fh1-archive.py; src/ui/hostui/fh1_archive.cpp; docs/NATIVE_PORT_BACKLOG.md NP-10.1; docs/DLC_BACKLOG.md Base-disc Rally investigation"""
+
+[[finding]]
+group = """Archives"""
+base = """ZIP method 21 (XMem)"""
+v4 = """same"""
+name = """XMem LZX frame format"""
+what = """A method-21 payload is a run of frames, each 32 KiB of output. A full frame starts with a big-endian u16 compressed size; a shorter frame starts with `0xFF` and big-endian u16 uncompressed and compressed sizes. The frame bodies concatenate into one LZX stream, decoded with a 64 KiB window (falling back to 128 or 32 KiB). A stream of LZX uncompressed (type 3) blocks with the E8 transform off also decodes."""
+how = """Host extractor decoding every member it reads and checking the CRC, checked against all UI archives and byte for byte against QuickBMS; a writer of type-3 streams validated by the extractor."""
+confidence = """confirmed"""
+note = """Whether the title itself accepts type-3 streams is not tested."""
+source = """tools/fh1_archive_extract.cpp; tools/patch-fh1-archive.py; src/ui/hostui/fh1_archive.h"""
+
+[[finding]]
+group = """Archives"""
+base = """media/zipmanifest.xml, media/FilesToCache.xml"""
+v4 = """same"""
+name = """archive manifest and file access"""
+what = """Most game data lives in archives listed in `media/zipmanifest.xml`, which gives each archive a `dirsize` that includes the end record. One archive's end record disagrees with the manifest: Colorado's 230,057-entry track `bin.zip`. The title reads archives through C streams and enumerates some directories with wildcards from `FilesToCache.xml`. Packed game-flow members take precedence over loose XML: a loose file under `media/GameModes` does not replace a `gamemodes.zip` member."""
+how = """Archive and manifest reads; file-open and directory-listing traces; a loose-file override test."""
+confidence = """confirmed"""
+source = """docs/MODDING.md Asset mods; docs/NATIVE_PORT_BACKLOG.md NP-10.1; docs/DLC_BACKLOG.md Base-disc Rally investigation"""
+
+[[finding]]
+group = """Archives"""
+id = """member-types"""
+name = """archive member types"""
+what = """Inside the archives: `.bin` (115,538, mostly track geometry and scenery), `.bix` (43,589 scenery models), `.pgeo` (41,884), `.fiz` (17,035), `.xds` textures (9,646), `.xml` (6,433), `.carbin` (5,435 car and part models), `.sh` (4,768), `.soundscape` (4,724), `.pvsz` visibility zones (3,551), `.str` string tables (2,481), and UI scenes as `.bgf`/`.bsg`/`.fbf` triples (about 300 each). Five Lua scripts and one Python file ship inside archives."""
+how = """Extension census over every archive's central directory."""
+confidence = """confirmed"""
+note = """what `.fiz`, `.pgeo` and `.sh` hold is not established"""
+
+# --- String tables ----------------------------------------------------------
+
+[[finding]]
+group = """String tables"""
+base = """.str (LSB2)"""
+v4 = """same"""
+name = """LSB2 string table format"""
+what = """A `.str` table is big-endian, with an `LSB2` header whose u32 at +12 is the offset of the string chunk and whose u32 at +16 counts the chunk pointers from +20 (four in a 36-byte header). The chunks are contiguous and unaligned: the strings ([u32 size][u32 count], then count + 1 entries of (u16 key, u32 character offset) in ascending key order, the last a `0xFFFF` sentinel pointing at a trailing empty string, then a pool of NUL-terminated UTF-16BE strings), the `IDS_` names (key, 1-based position in the key-order chunk, byte offset, an ASCII pool in source order), optional translator notes, and the key order. A key is a 16-bit hash of the lower-case name: start at 0xFFFF and, for each character, XOR it in and rotate left by 7; it matches all 10,415 names in the 113 English tables. A new key must go into chunks 0, 1 and 3 (7 tables have no chunk 3); `tools/fh1-strings.py` adds keys and rebuilds tables byte-identical to the originals. `set_ui_string` replaces only existing keys, because the game's own count of a loaded table is kept apart from the chunk, where was not found. Tables live LZX-compressed in `media/StringTables/<language>.zip`."""
+how = """Parser and writer in `tools/fh1-strings.py`; the hash fitted to every name; replaced tables load in game (mod string overrides, custom station names)."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Custom content; tools/fh1-strings.py; src/pinyon_shift_runtime_hooks.cpp NP-1.5 comment"""
+
+[[finding]]
+group = """String tables"""
+base = """sub_82CAFF28, sub_82CAC5B8, sub_82CB1FB0, 0x82CAFFA0, 0x82CAC704, 0x82CAC740, 0x82CB00AC, 0x82CB2018"""
+v4 = """0x82D71A88, 0x82D6E25C, 0x82D6E298, 0x82D71B94, 0x82D73B00"""
+name = """string table loader and lookup"""
+what = '''`sub_82CAFF28` builds the path `game:\media\StringTables\<table><language>.str` (at `0x82CAFFA0` the stack string at r1+96 holds it with `.str` appended) and `sub_82CAC5B8` parses the chunk into a fresh allocation (`0x82CAC704` is the allocation, r3 the size). At `0x82CAC740` (r30 payload, r29 length, r26 flag) the payload is copied verbatim when the ownership flag is set; otherwise it is expanded into a fixed-stride table. `0x82CB00AC` stores the parsed handle the localization manager keeps, and `sub_82CB1FB0` looks a key up: at `0x82CB2018` r3 holds the resolved string and r29 the key. The title reads a string up to its NUL and reads a table when it next loads it. Tables load in name order. In `pausemenu.str`, key `0xDD6B` is `IDS_Multiplayer`, the MULTIPLAYER pause row label (`IDS_MultiplayerOption` reads the same), and `0xDED7` is PHOTO MODE.'''
+how = """Hooks on load, parse and lookup, used to rewrite and extend strings (the pause row reads SETTINGS); rewriting `0xDD6B` changed only the pause row; `tools/fh1-strings.py` listing."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml string table hooks; src/pinyon_shift_runtime_hooks.cpp PinyonShiftTraceUiStringTableChunk, PinyonShiftSizeUiStringChunk; src/pinyon_shift_runtime_hooks.cpp PinyonShiftTraceUiStringLookup; docs/NATIVE_PORT_BACKLOG.md NP-1.5; docs/MODDING.md HUD labels and menu actions"""
+
+[[finding]]
+group = """String tables"""
+v4 = """same"""
+name = """longer strings can be appended"""
+what = """The title reads a string up to its NUL, so a longer string can be appended after the pool if its entry and the sentinel are moved. Pause row art stretches to fit a longer label."""
+how = """Rewriting tables at load: PHOTO MODE replaced by a 27-character label rendered in full."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-11.2; src/pinyon_shift_runtime_hooks.cpp NP-1.5 comment"""
+
+# --- Textures and models ----------------------------------------------------
+
+[[finding]]
+group = """Textures and models"""
+base = """.xds"""
+v4 = """same"""
+name = """XDS texture header"""
+what = """An `.xds` texture is a `0x34`-byte (52-byte) header, first u32 = 3, holding a Xenos texture fetch constant at `0x1C` (format, width and height, pitch, tiling, endianness, swizzle, mip count, packed mips), followed by the texture data. A base level no larger than 16 texels sits in the packed mip tail."""
+how = """`inspect-fh1-ui.py` decodes every UI texture; uncompressed textures re-encode to the stored bytes."""
+confidence = """confirmed"""
+source = """tools/inspect-fh1-ui.py parse_xds, decode_xds; docs/UI_ASSETS.md"""
+
+[[finding]]
+group = """Textures and models"""
+base = """media/UI archives, Fonts.zip, Horizon.zip"""
+v4 = """same"""
+name = """UI textures and fonts"""
+what = """The four UI archives hold 4,373 `.xds` textures (2,825 uncompressed), in 8888 and DXT1/3/5 formats (also as 16_16_16_16 variants) and DXT3A/DXT5A, tiled with a packed mip tail, plus vector fonts and `fontmap.xml`. The Latin fonts are GPU meshes, not bitmaps: no installed TTF matches their advances within 5 %, and their coverage rule is in the title's shader. UI layout is a 1280x720 space with a 90 % safe area; `Fonts.zip` and `Horizon.zip` hold the fonts, selection mask and button art."""
+how = """`tools/inspect-fh1-ui.py --decode-assets` with read-back and byte-exact re-encoding checks; host UI built from them."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-1.2, NP-1.3; docs/UI_ASSETS.md"""
+
+# --- Game database ----------------------------------------------------------
+
+[[finding]]
+group = """Game database"""
+id = """gamedb-schema"""
+name = """gamedb.slt schema"""
+what = """`media/db/gamedb.slt` is a plain SQLite 3 database of 2.9 MB: 221 tables, one index, no views, 43,949 rows. Table prefixes: `List_` (80 tables: upgrade parts, physics, wheels, manufacturers), `NewProfile` (19, the starting profile), `Rewards` (6), `Data_` (5, among them `Data_Car`), `Livery` (5) and `Combo` (4). The largest tables are `Livery_DecalsSortOrder` (2,436 rows), `GraffitiPoints` (2,063), `CarPartPositions` (1,760), `Combo_Colors` (1,281), `TurnSections` (1,095), `StartGridPositions` (1,073) and `PlayerLevelDef` (1,000)."""
+how = """Read-only SQLite queries of the schema and row counts."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Game database"""
+base = """media/db/gamedb.slt"""
+v4 = """update media db/gamedb.slt"""
+name = """database merge files"""
+what = """The title opens `gamedb.slt` loose, as an ordinary SQLite file. DLC and title updates add rows through merge databases under `db/patch/`: `1401000_merge.slt` in v4, `1600000_merge.slt` in Rally."""
+how = """Opening the files with SQLite; a patched copy loads in game through the mod overlay."""
+confidence = """confirmed"""
+source = """tools/build-mod-patches.py; docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-6"""
+
+# --- Other formats ----------------------------------------------------------
+
+[[finding]]
+group = """Other formats"""
+base = """media/shaders/**/*.fxobj, default.xex"""
+name = """shader corpus"""
+what = """Shader programs ship in `media/shaders/**/*.fxobj`, some inside method-21 `bin.zip` archives (197 archived members). The retail disc has 4,293 containers with 3,349 unique raw programs (1,615 vertex, 1,734 pixel); its 34 vertex declarations patch the fetch templates into 8,377 more vertex programs. `default.xex` holds further programs and vertex declarations used by the map and motion passes; with them there are 3,819 raw programs in 4,770 containers, and 12,846 programs counting derived vertex variants (10,818 vertex, 2,028 pixel)."""
+how = """Extraction over loose assets, LZX archives and the loaded executable image; leaving out the executable's programs gave a blank map and smeared cars."""
+confidence = """confirmed"""
+source = """docs/native-renderer/CANDIDATE_SHADER_CAPTURE.md Retail-disc corpus; docs/native-renderer/SHADER_PACK_FORMAT.md Qualification history; docs/PERFORMANCE_BACKLOG.md PB-1.8"""
+
+[[finding]]
+group = """Other formats"""
+base = """Radio_Music.fsb, Radio_VO_<lang>.fsb"""
+v4 = """same"""
+name = """FSB4 bank layout"""
+what = """The radio banks are FSB4 version `0x40000`, header mode `0x40`: a 48-byte header (magic, sample count, header and data sizes, version, mode, 24 reserved bytes) and 80-byte sample headers (size, 30-byte name, lengths, loop points, mode, frequency, volume, pan, priority, channels, 3D and variation fields). Each music sample header is followed by a `SYNC` block of three points, each a 32-bit sample offset and a 256-byte name (`SongStart`, `EventStart`, `IdentStart`). The header block and each sample's data are zero-padded to 32 bytes. Every music sample's mode is `0x90000200`: `0x200` is FMOD's MPEG flag; the two high bits are unexplained."""
+how = """`build-fh1-radio.py --check-bank` parses each bank and rebuilds its header byte for byte."""
+confidence = """confirmed"""
+note = """One stock sample spells its first sync point SongSTart."""
+issue = """#420"""
+source = """docs/FEATURE_BACKLOG.md FB-1.3; tools/build-fh1-radio.py"""

@@ -33,6 +33,7 @@ public static class HardwareCheck
     public const int CapableLogicalProcessors = 6;
     public const int CapableRefreshHz = 119;
     public const int SteadySixtyCores = 4;
+    public const int UltraLowCores = 2;
 
     public static Recommendation Recommend(HardwareInfo info)
     {
@@ -48,6 +49,13 @@ public static class HardwareCheck
         {
             return new Recommendation("performance_120", "Performance 120",
                 "A discrete GPU with 6 GB or more, 6 or more CPU threads and a 120 Hz display.", warning);
+        }
+        // Ultra Low 30 (#515): integrated graphics on 2 CPU cores, the
+        // weakest machines the game starts on.
+        if (info.Gpu is { Discrete: false } && info.PhysicalCores > 0 && info.PhysicalCores <= UltraLowCores)
+        {
+            return new Recommendation("ultra_low_30", "Ultra Low 30",
+                $"Integrated graphics and {info.PhysicalCores} CPU cores: 30 fps without shadows.", warning);
         }
         if (info.PhysicalCores > 0 && info.PhysicalCores < SteadySixtyCores)
         {

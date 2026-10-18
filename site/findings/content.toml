@@ -1,0 +1,648 @@
+# Cars, events and DLC: what the game's content is made of and how the
+# title finds, merges and owns it. Rendered by site/build.py.
+
+# --- Game database --------------------------------------------------------
+
+[[finding]]
+group = """Game database"""
+base = """media/db/gamedb.slt"""
+v4 = """update media.zip db/gamedb.slt"""
+name = """gamedb.slt game database"""
+what = """Car, upgrade, wristband, event, track and time-of-day data is a plain SQLite database with 221 tables. It defines 145 active tracks, 85 of them used by events. Car prices (`Data_Car.BaseCost`), upgrade prices (`List_Upgrade*`), event prizes (`Events.CashPrize`), the XP curve (`PlayerLevelDef`) and event car restrictions (`EventRestrictions`) are rows. Lowering car 1496's price (Jaguar XKR-S, 120,000 Cr) to 1,000 makes the showroom offer it for "1,000 Cr or 1 Token"; v4 ships a replacement copy in its update `media.zip`."""
+how = """Read-only survey of the tables; a patched database merged in free roam."""
+confidence = """confirmed"""
+note = """Only the car price edit has been tried in game; the other columns' effects are read from the schema."""
+issue = """#478"""
+source = """docs/NATIVE_PORT_BACKLOG.md Where the code stands, NP-10.2; docs/FEATURE_BACKLOG.md FB-12, FB-12.2, FB-12.3, FB-12.16; docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds"""
+
+[[finding]]
+group = """Game database"""
+base = """GameTunableSettings.ini, PhysicsSettings.ini, AIOpenWorld.xml"""
+v4 = """same"""
+name = """tunable settings and traffic density"""
+what = """The game's `.ini` tunables (`GameTunableSettings.ini`, `PhysicsSettings.ini`) are plain Section/Key value pairs. Free-roam traffic density comes from `AIOpenWorld.xml`; emptying it removes the traffic."""
+how = """Merging edited members into the game files and driving in free roam."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md Where the code stands, NP-10.2"""
+
+[[finding]]
+group = """Game database"""
+base = """.str string tables, _&N in name columns"""
+v4 = """same"""
+name = """localized string tables"""
+what = """Database name columns refer to text as `_&N`, where N = (table hash << 16) | a 16-bit key in that table's `.str` (`List_CarMake` is `0x3323`); the table hash is the same 16-bit hash as a string key, taken of the table's name (Files and formats). DLC packs ship whole replacement tables rather than additions."""
+how = """Reading the database and string tables; our string override can only replace keys already in all three parts."""
+confidence = """confirmed"""
+note = """The XE mod writes plain text into 141 of 175 new `Data_Car.DisplayName` rows, so plain names probably display too (not tried here)."""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Custom content"""
+
+[[finding]]
+group = """Game database"""
+base = """sub_8282DEF0, 0x82C18964, 0x832E5510"""
+v4 = """sub_828D3DD0, 0x82CD880C, 0x833D2FFC"""
+name = """async SQL query worker"""
+what = """`sub_8282DEF0` runs queued database queries: the task holds a future at +4, the database at +8, the SQL as a 24-byte std::string at +16 (copied before querying) and a method at +44. `0x82C18964` is an SQLite prepare call site (r30 the SQL text, r15 the database, r3 the result). The upgrade-view database pointer is the global at `0x832E5510`."""
+how = """Hooks and a function replacement on the worker that log the queries, among them the `View_Upgrade` queries."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp TraceDlcAsyncQuery, PinyonShiftTraceDlcSqlPrepare; config/rexglue/analysis/main-xex.toml midasm_hook 0x82C18964"""
+
+[[finding]]
+group = """Game database"""
+base = """sub_82C188D0, sub_8307BB98"""
+v4 = """sub_82CD8778, sub_8313CC98, sub_8313FEA8"""
+name = """SQLite 3.6.19 and the raw query method"""
+what = """The title links SQLite 3.6.19 (source id dated 2009-10-14). That version has no automatic indexes and never flattens a subquery on the right of a LEFT JOIN: it builds the subquery's rows into a temporary table and scans all of them for every outer row. Every statement is prepared with `sqlite3_prepare_v2` (`sub_8307BB98`, a stub that passes 1 as the keep-SQL flag), so a prepared statement prepares itself again after a schema change. The database object's method at +32 (`sub_82C188D0`, v4 `sub_82CD8778`) takes (recordset out, database, C string), prepares and runs the statement under the object's lock and returns a recordset. The recordset's method at +184 gives the row count and the one at +80 an integer by (row, column). The title runs `CREATE VIEW` statements on the main schema at every start, so the schema is writable at run time, and none of it is saved: each start creates the same views again. v4's virtual machine loop (`sub_8313FEA8`) is where a slow query's time goes."""
+how = """Version string and source id in the executable image; the prepare stub's arguments in the generated code; queries run through the method from a host task; the SQL profile and the hitch sampler."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp RunGameSql, SpeedUpRestrictionsView; docs/UPSCALING_BACKLOG.md UP-1.7 spikes"""
+
+[[finding]]
+group = """Game database"""
+v4 = """Restrictions_Data_Car, sub_8253D9E0"""
+name = """Restrictions_Data_Car view"""
+what = """At start v4 creates the view `Restrictions_Data_Car`: `Data_Car` LEFT JOINed with subqueries for each car's level-4 springs (`List_UpgradeSpringDamper`), level-5 tyres (`List_UpgradeTireCompound`) and level-4 transmissions (`List_UpgradeDrivetrain` joined with `List_UpgradeDrivetrainTransmission`), plus `CarValue`, `IsRally` (all three stock) and `CouldRally` (all three at those levels). `gamedb.slt` has no index on those tables, and SQLite 3.6.19 rescans all three subqueries for each of about 350 cars. When the player returns to free roam after a race, `sub_8253D9E0` (under `sub_82548B50`) reads every installed restricted car (`SELECT * FROM Restrictions_Data_Car WHERE IsCarInstalled(ModelId) ORDER BY ModelId`) on the title thread. On multivac that took 158-186 ms of one frame. Pinyon Shift indexes the four join columns and then, when the view's text is exactly v4's, replaces the view with joins on the base tables (level tests in the ON clauses, the drivetrains kept only when they have a level-4 transmission). The replacement returns the same column names and the same rows in the same order: compared on v4's database and on a copy with duplicated parts and missing level-4 transmissions. The frame then took 49-55 ms, the rest being the routine's other queries."""
+how = """`pinyon_shift_sql_profile` and the hitch sampler in the drive route from a warm v4 seed; `EXPLAIN QUERY PLAN` on a copy of the database with automatic indexes off; the view's text logged at prepare."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp kRestrictionsView, SpeedUpRestrictionsView; docs/UPSCALING_BACKLOG.md UP-1.7 spikes"""
+
+# --- Cars -----------------------------------------------------------------
+
+[[finding]]
+group = """Cars"""
+base = """Data_Car, Data_CarBody, Combo_Colors"""
+v4 = """same"""
+name = """car data tables"""
+what = """A car is rows in about 47 tables, all present in every DLC merge database: `Data_Car`, `Combo_Colors` (car x 1000 + n), `CameraOverrides`, `CarExceptions`, `CarPartPositions`, physics, `List_Upgrade*` by ordinal and `Data_CarBody` (car x 1000). Engines, drivetrains, torque curves and aero are shared by ID. The Autoshow hides a car without a valid `PowertrainId`."""
+how = """Reading the DLC merge databases; the Autoshow's query."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Cars"""
+base = """Autoshow make grid"""
+name = """make list query"""
+what = '''The Autoshow's make grid comes from one SQL query in the executable: makes that have a selectable, visible, non-unicorn car, sorted by name, with the logo `Manufacturer_Logos_I\L_MAN_<IconPathBase>_Logo.tga`. There is no hard-coded make list, so DLC-only makes appear once their cars are owned.'''
+how = """Executable strings."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Cars"""
+base = """ui/Textures.zip manufacturer logos"""
+v4 = """same"""
+name = """dormant make logos"""
+what = """`ui/Textures.zip` holds 37 make logos with no `List_CarMake` row (among them Porsche, DeLorean, Saab, Spyker, Holden, Opel, Seat and Spada), in six sizes from 220x123 to 882x315, RGBA8 with mips."""
+how = """Archive listing."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Cars"""
+base = """media/cars/<id>.zip"""
+v4 = """same"""
+name = """car archive layout"""
+what = """Members use compression method 21: `<id>_lod0.carbin`, `<id>_cockpit.carbin`, per-wheel caliper and rotor `carbin`s, `stripped_*` variants, `.xds` atlases (damage, no damage, lights, interior, digital gauge), `LiveryMasks/*.tga` with `Masks.xml`, `physicsdefinition.bin` and `Physics/MAXData.xml`. The target of a car importer."""
+how = """Archive listing of one car."""
+confidence = """confirmed"""
+issue = """#496"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Cars"""
+base = """Data_Car.MediaName, media/cars/<MediaName>.zip"""
+v4 = """same"""
+name = """car media name"""
+what = """`Data_Car.MediaName` names the car's archive: `media/cars/<MediaName>.zip` exists for all 176 base-game cars, so a database row leads straight to its models, textures and physics files."""
+how = """Read-only SQLite query of `gamedb.slt` compared with the disc's `media/cars` listing (2026-10-12)."""
+confidence = """confirmed"""
+
+
+[[finding]]
+group = """Cars"""
+base = """Data_Car clones, CarClasses"""
+v4 = """same"""
+name = """a clone car in game"""
+what = """A car copied to id 1700 from the XKR-S (its rows in 28 tables renumbered as the Rally DLC's clones are: car id, `ModelId`, car x 1000 + n for body, colours, physics and upgrades; engines, drivetrains and aero shared) is listed, named from a new `Data_Car.str` key, bought and saved. The game shows `PerformanceIndex` linearly within its class, from the previous class's `MaxPerformanceIndex`/`MaxDisplayPerformanceIndex` to this one's (0.72 shows as A 579), and `ClassID` is the first class whose maximum is at or above it for all 153 base cars. Event recommendations query `EventRecommendedCars` with `IsDrivable`, `IsSelectable`, `IsUnicorn=0`, `IsCarVisible`, `IsInstalled`, `IsPurchased` and the event's class filter, sorted by index: a clone moved to class S left the class-A list. The Autoshow lists `Data_Car.PerformanceIndex` and `ClassID` as written, rounded up when shown (an exact 197 shows as 198); the owned car does not (see the next record)."""
+how = """`tools/clone-fh1-car.py`; buy-car route from a pinned seed with the clone recommended; query strings in the executable."""
+confidence = """confirmed"""
+source = """tools/clone-fh1-car.py; docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Custom content"""
+
+[[finding]]
+group = """Cars"""
+base = """owned car performance index"""
+v4 = """same"""
+name = """a bought car's index"""
+what = """Once a car is bought the game shows an index it computes from the car's physics, not `Data_Car.PerformanceIndex`: five clones listed at D 216, C 342, B 451, S 620 and A 521 were delivered at E 197, C 342, B 423, A 570 and A 532, their sources' own values moved by the torque change. `GameTorqueScale` raises it by about 0.20 raw index per unit of ln(scale) (an Exige at 1.2: A 528 to A 570; a 370Z at 1.1: A 510 to A 532); the speed-limited XKR-S gained 0.15 per unit (A 574 to A 598 at 1.15). For stock cars the two agree (M3 A 521 listed and owned). Upgrades recompute it too: Auto Upgrade took the five to D 241, C 400, B 497, A 595 and A 600, kept after a reload. Setting the listed index to the owned value makes the Autoshow and the garage agree."""
+how = """Five clones bought from the Autoshow in a chosen colour, driven, Auto Upgraded at Dak's Garage and reloaded, each from a pinned seed; Autoshow listing and garage captures."""
+confidence = """confirmed"""
+source = """tools/clone-fh1-car.py; docs/MODDING.md New cars from existing models"""
+
+[[finding]]
+group = """Cars"""
+base = """Data_Car.CurbWeight"""
+v4 = """same"""
+name = """not the car's weight in game"""
+what = """A clone with `CurbWeight` scaled by 0.9 weighed the same as its source in the upgrade screen (a Corolla 1,045 kg, an Exige 930 kg) and rated within a point of it (E 196 to E 197). The game takes the weight from other data, not identified (body or upgrade tables are the candidates)."""
+how = """The same five-clone runs; the garage's Install Upgrades screen."""
+confidence = """confirmed"""
+negative = true
+source = """tools/clone-fh1-car.py"""
+
+[[finding]]
+group = """Cars"""
+base = """owned car whose id is missing from the database"""
+v4 = """same"""
+name = """a removed clone car"""
+what = """A profile that owns and drives a clone (id 1700) loads after the mod is removed: the title makes another owned car current (a Corrado here), leaves the clone out of car select and keeps the rest of the profile (credits as after the purchase). With the mod kept, the clone is current and drives. A database mod plays the separate modded profile (`user-modded`) even when its `mod.toml` says `shares_save = true`, so a clone never reaches the player's own save."""
+how = """Seeds from a clone purchase with the mod removed (a placeholder mod keeping the modded profile) and kept: free roam, car select, full-throttle drive."""
+confidence = """confirmed"""
+note = """Re-enabling the mod after a run without it, and whether the title drops the orphan when it next saves, were not tested."""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Custom content"""
+# --- Upgrades, colours and liveries ---------------------------------------
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = """UpgradeTypes, List_Wheels, Combo_Colors"""
+v4 = """same"""
+name = """parts, rims and colours"""
+what = """There are 46 part types, fixed by an enum in the code. Rims (736, 112 of them aftermarket) are offered when priced and branded unless excluded. There are 1,281 factory colours. There is no horn table, and number plates are decals."""
+how = """Reading the database."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = """sub_8252A630, sub_82551648, 0x82551760, 0x82551668, 0x82551690"""
+v4 = """sub_825979B8, sub_825C2730, 0x825A32A8, 0x825C2750, 0x825C2778"""
+name = """car upgrade views"""
+what = """`sub_8252A630(profile)` returns the current garage ID and `sub_82551648(profile, garage ID)` builds that car's upgrade views. After a save reload the title first caches the active garage car (profile +60, at `0x82551760`). At the guard sites r3 holds the current garage ID, r30 the profile and r31 the requested ID."""
+how = """Midasm hooks on the reload and upgrade-view paths (`PinyonShiftInitializeCarUpgradeViews`); DLC SQL traces."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftInitializeCarUpgradeViews; config/rexglue/analysis/main-xex.toml upgrade hooks"""
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = """0x82BEFC50"""
+v4 = """0x82CAF1A0"""
+name = """tyre physics record constructor"""
+what = """The tyre-physics constructor takes its required record in r30 and calls through its vtable at once. A saved car whose tyre upgrade comes from missing or disabled DLC (a Rally tyre on a base car) leaves the record null, and the game crashes here at startup instead of falling back to stock parts."""
+how = """Crash analysis after disabling Rally with a Rally-tyred Mustang saved; guard hook `PinyonShiftRequireTyrePhysicsRecord`."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftRequireTyrePhysicsRecord; docs/DLC_BACKLOG.md Missing saved Rally tyre recovery"""
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = '''Liveries\<n>.liv, Career_Garage.LiveryFileName'''
+name = """livery files"""
+what = """Each painted car has one encrypted livery file (32-byte header, size, padding, encrypted body), named in its garage row of the profile's `PlayerDatabase`. A design is layered vectors (`CLivery`, layers, groups, elements, colours), rendered onto the car through the six planes of `LiveryMasks/Masks.xml`."""
+how = """A seed save; traces of old saves; class names."""
+confidence = """confirmed"""
+note = """Confirmed for the files; the design layout is probable."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = """Livery.zip"""
+v4 = """same"""
+name = """vinyl shape library"""
+what = """`Livery.zip` holds 880 vector vinyl shapes in 22 categories of 40, and 492 decals (a quad plus a texture, most 512x512 DXT5). They are listed in `Livery_VinylsDecals`, `Livery_Decals`, `Livery_DecalsSortOrder` (by make) and `Livery_Categories`."""
+how = """Archive listing; database tables."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Upgrades, colours and liveries"""
+base = """CImportForzaLiveryGroups, CCrossTitleLayerGroupEnumerator, title 0x4D530910, title 0x4D53084D"""
+name = """FM4 vinyl-group import"""
+what = """The game has code to import vinyl groups from Forza Motorsport 4 (and probably Forza Motorsport 3) saves; the executable header lists those titles as alternate titles, and the SDK's aggregate content enumerator already includes them."""
+how = """Class-name strings; the XEX header; SDK source."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+# --- Events and career ----------------------------------------------------
+
+[[finding]]
+group = """Events and career"""
+base = """Events, Races, Tracks, EventParticipants, EventScoring, WristbandScoring"""
+v4 = """same"""
+name = """event definition"""
+what = """An event is database rows: its type, tier, unlocks, hub, prizes, AI, time of day, laps, route, opponents (7 per event, 8 start slots) and rewards. Event IDs above 255 work; Rally uses 247-274."""
+how = """Reading the database; the Rally events."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Events and career"""
+base = """TrackRoute%03d.xml, aiopenworld.zip route_NNN.owt"""
+v4 = """same"""
+name = """routes and AI lines"""
+what = """Race routes are numbered `TrackRouteNNN.xml` files, leaving about 750 free numbers below 1000. Festival and plane routes have an `OWTM` racing line in `aiopenworld.zip` (46 files); street and Nemesis routes have no AI file."""
+how = """String scan of the executable; archive listing."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Events and career"""
+base = """gamemodes.zip Colorado/autoshow.xml and siblings"""
+v4 = """same"""
+name = """shops are activities"""
+what = """The Autoshow (a 21 m trigger on `festival_01`), workshop (`festival_06`), paint shop, DLC centre (`festival_04`), gas stations and barn finds are activity lists triggered by objects in `GameObjs.xml`. The model and make screens take no attributes; their filters are in code."""
+how = """Archive contents."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Events and career"""
+base = """speed_camera.xml, average_speed.xml, mission_*.xml, barnfinds.xml, Flyers.xml, FreeRoamDrivers"""
+v4 = """same"""
+name = """free-roam activities"""
+what = """Speed traps (22), zones (9), PR and speed stunts (10 each), photo shoots (10), barn finds (9), discount signs (100) and head-to-head drivers (91) are XML files and rows. Discount signs are "flyers" in the code: `Flyers.xml` lists `flyer_001` to `flyer_100`, placed by `GameObjs.xml` objects of the same name; barn finds are `barnfinds.xml` entries placed by trigger zones. Each makes two map entities (`flyer`/`flyer_collected`, `barnfind`/`barnfind_collected`), and its found state is a `CFlyerState` or `CBarnFindState` record in the profile, looked up by activity name."""
+how = """Archive contents and the database; the map-marker cheat's logs of every sign and barn find."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content; src/cheats_map.cpp"""
+
+[[finding]]
+group = """Events and career"""
+base = """CareerRaceModes.xml mode 4, CareerEventTypes id 3"""
+v4 = """same"""
+name = """unused elimination mode"""
+what = """A "Festival Elimination" race mode with `EndCondition Elimination` is defined and mapped, but no event uses it. Drag (mode 6), drift and autocross scoring are also present."""
+how = """Archive contents; strings."""
+confidence = """probable"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Events and career"""
+base = """0x828D94FC, 0x82078E54, 0x82137C70, 0x82137C88"""
+v4 = """0x8298B244"""
+name = """CTriggerZone parser"""
+what = """The `CTriggerZone` base parser reads named world objects (r29 the trigger, r31 the XML reader, whose vtable +180 reads a float; the X and Z key strings are at `0x82137C70` and `0x82137C88`). `CActivityGeneric` (vtable `0x82078E54`) embeds its trigger at +48 and its name string at +16. The trigger's position is at +64..+76 and a flag byte at +192 holds bit 32."""
+how = """Hook on the parser while loading Rally events."""
+confidence = """confirmed"""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x828D94FC"""
+
+[[finding]]
+group = """Events and career"""
+v4 = """same"""
+name = """WristbandGet.wmv is not on the disc"""
+what = """The wristband ceremony requests `WristbandGet.wmv`, but the retail disc's videos folder holds only `FMV_01`, `FMV_02`, `FMV_04`, `PressStart` and the splash intros, and no file or archive contains that name; only the executable does. The green and pink seen during the blue-wristband cinematic are most likely the movie quad drawn with no decoded frame. `FMV_02`, the VIP-lounge scene, is the likely blue-wristband cinematic."""
+how = """Listing of all 2,400 extracted files; `FMV_02` played cleanly for 50 s from a mirror of the game files."""
+confidence = """confirmed"""
+note = """The cause of the colours is probable; FMV_02's role is a guess."""
+negative = true
+source = """docs/NATIVE_PORT_BACKLOG.md NP-2.9"""
+
+# --- Event restrictions --------------------------------------------------
+
+[[finding]]
+group = """Event restrictions"""
+base = """EventRestrictions.Value"""
+v4 = """same"""
+name = """restriction encoding"""
+what = """One row per event (120, all `BucketId` 0). `Value` is hex: a 40-bit mask in its first five bytes, least significant byte first, then the value of each set bit in bit order. Bits 8 and 9 are the oldest and newest model year, two 32-bit values (event 71: `0x7BC` to `0x7C5`, 1980 to 1989). Bit 34 (`0x04` of the fifth byte, set in 75 of the 120 values) sets record byte +64; what that does is not known: with it clear the Gauntlet still reads OPEN and takes the same cars. The decoder's other fields are named by the `RestrictionMakeId` to `RestrictionPIMin` strings at `0x82048844`-`0x820489FC`; their bits are not mapped."""
+how = """Decoder read; event 71's value written to the Gauntlet (events 29, 43, 66) by a database mod: the ticket changed from CURRENT CAR ELIGIBLE to GARAGE CARS ELIGIBLE and car select offered only the garage's 1983 Audi Sport quattro."""
+confidence = """confirmed"""
+note = """Confirmed for the byte order and the year bits; bit 34's effect unknown; other bits not mapped."""
+issue = """#479"""
+source = """docs/FEATURE_BACKLOG.md FB-12.3; docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_8260A448, sub_8260A3E8, sub_826052A0"""
+v4 = """0x826B0D68, 0x826B0D08, 0x826AAEF0"""
+name = """load one event's restrictions"""
+what = """Empties the restriction object's four lists (`sub_826052A0`: one 16-byte list per bucket), runs `SELECT * FROM EventRestrictions WHERE EventId=%d` (string `0x8202C700`, v4 `0x8203B288`) and parses the rows with `sub_826087A0`. `sub_8260A3E8` does the same as a constructor. Called from `sub_825DE820`, `sub_8260AE18`, `sub_82781968`, `sub_8283EEA0` and `sub_82842340`; which of them builds the event ticket is not traced."""
+how = """Generated code."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_826087A0, 0x826088B4"""
+v4 = """0x826AEFF8, 0x826AF10C"""
+name = """restriction row parser"""
+what = """For each row whose `EventID` matches (r25) and whose `BucketId` is 0 to 3, sets up a record at r1+176 (`sub_825F3138`), decodes `Value` into it (`sub_825FE8B0`) and appends it to that bucket's list (`sub_826081D8`). The trainer's hook at `0x826088B4` skips the decode."""
+how = """Generated code; the trainer's any-car route."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_825F3138"""
+v4 = """0x82696E88"""
+name = """restriction record setup"""
+what = """Sets every limit to none and byte +64 to 1, so a record that is not decoded has no limits; decoding sets +64 from bit 34."""
+how = """Generated code; the trainer route (the Gauntlet limited to 1980s cars takes the 1994 Miata when the decode is skipped)."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_825FE8B0"""
+v4 = """0x826A33B8"""
+name = """restriction decoder"""
+what = """Takes the `Value` string (at least 10 hex digits, an even count), builds the mask from its first five bytes and reads each set bit's value into the record. Its only caller is the parser."""
+how = """Generated code."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """EventRestrictions.Value = '0000000000'"""
+v4 = """same"""
+name = """all-zero restriction value"""
+what = """Every row set to an all-zero value: the Gauntlet still reads OPEN and CURRENT CAR ELIGIBLE, and the race runs as with the stock value. A database mod can lift the restrictions this way; the trainer skips the decode instead, so it needs no restart and leaves the database alone."""
+how = """`fh1-race` route on a seed with that database mod."""
+confidence = """confirmed"""
+note = """Confirmed for the Gauntlet."""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """Events.TargetClass"""
+v4 = """same"""
+name = """event class"""
+what = """Not part of `EventRestrictions`; applied on top of them by `sub_825F6ED8`. With the Gauntlet's class set to D (`TargetClass` 2) the ticket shows a D badge and still reads CURRENT CAR ELIGIBLE for an A 600 car, but car select offers INSTALL UPGRADES to fit the car to D 299 (765 Cr); declining returns to car select, so the race cannot start in the A car. The restriction hook alone does not change this; with the class hook too, the A 600 Miata races. Whether the AI field is picked against the lifted limit is not traced."""
+how = """`fh1-trainer-any-car` inputs on a seed with that database change, with and without the cheat."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_825F6ED8, 0x825F6EE4, 0x825F6FA8, sub_82BDE490"""
+v4 = """0x8269B3B8, 0x8269B3C4, 0x8269B488, 0x82C9D7C0"""
+name = """apply the event class to its restrictions"""
+what = """Arguments: the restriction object, the class (from `Events.TargetClass`, read by `sub_82600440`) and two flags. When bucket 0 has records and the first flag is set, it converts the class to a 16-bit limit with `sub_82BDE490` (through a global object) and writes it at +4 of every bucket-0 record (76-byte stride); the second flag also writes the class byte at +0. The checks that load restrictions call it right after `sub_8260A448` with flags 1 and 0: `sub_82781968`, `sub_8283EEA0` (v4 `0x828E2278`), `sub_82842340` (twice; v4 `0x828EA000`) and `sub_825DE820`. The trainer's hook at `0x825F6EE4` jumps to the epilogue at `0x825F6FA8`, so +4 keeps the set-up value of no limit. Whether the limit is in PI or a class index is not traced."""
+how = """Generated code; base and v4 bodies match apart from call targets and one global; the class-D route."""
+confidence = """confirmed"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+[[finding]]
+group = """Event restrictions"""
+base = """sub_824DA3E8"""
+v4 = """0x82548B50"""
+name = """reads every restriction row"""
+what = """Runs `SELECT * FROM EventRestrictions` (string `0x8200BEE8`) next to `TargetClass` reads and does not use the decoder. In v4 it runs on the title thread when the player returns to free roam after a race. It reads every restricted car through `sub_8253D9E0` (the `Restrictions_Data_Car` view, Game database) and runs several more queries through `sub_825473B8` and `sub_8252F610`. Together they took most of a 140-186 ms frame before the view was replaced. Purpose not traced (perhaps the career event list)."""
+how = """String xrefs; the hitch sampler's stacks on v4."""
+confidence = """guess"""
+issue = """#479"""
+source = """docs/REVERSE_ENGINEERING.md@fc1751fe2a38 Event restrictions"""
+
+# --- Downloadable content -------------------------------------------------
+
+[[finding]]
+group = """Downloadable content"""
+v4 = """same"""
+name = """Marketplace package set"""
+what = """FH1 add-ons are STFS `LIVE` packages under `4D5309C9/00000002` (content type 2), each named by a 42-hex-digit package ID that is also its DLC directory name. The collected set has 21 distinct packages: Rally, 1000 Club, seven monthly car packs (October to April), two VIP packages, Honda Challenge, Pre-Order, the Season Pass Miura Concept, the Rockstar Energy Shelby GT500, five single-car promotional packages and the LCE Day1 pack (the October pack plus five custom-painted LCE cars)."""
+how = """Reading the STFS headers (title ID, content type, package filename, display name) and member lists of the player's own packages."""
+confidence = """confirmed"""
+note = """Establishes the collected set, not that every historical variant was found."""
+source = """docs/DLC_BACKLOG.md Local inventory"""
+
+[[finding]]
+group = """Downloadable content"""
+base = """sub_82516630"""
+v4 = """sub_82580638"""
+name = """Marketplace mounting"""
+what = '''The title finds DLC with `XamContentCreateEnumerator` and `XamEnumerate` (flags always 0) and opens each package with `XamContentCreateEx` as `DLCRoot<n>`; 21 packages enumerate as exactly 21 items and mount as `DLCRoot0`-`DLCRoot20`. Each package's offer ID comes from its `media\<hex>.puboffer`, and the returned licence mask is ORed into that offer. Marketplace content lives only under the common `0000000000000000` profile. In v4 the function behind `content.mount_marketplace` was rewritten (0x3E8 to 0x4E4 bytes).'''
+how = """Base trace with the Rally package installed; v4 run with all 21 packages; reading Xenia Canary and SDK code; v4 function matching (all 23 mapped callees match, manual override)."""
+confidence = """confirmed"""
+note = """What changed inside the v4 rewrite is not traced."""
+source = """docs/DLC_BACKLOG.md DLC-1, DLC-2; docs/TITLE_UPDATE_V4_BACKLOG.md Xenia Canary comparison, TU-3, TU-8; config/rexglue/analysis-v4/overrides.toml"""
+
+[[finding]]
+group = """Downloadable content"""
+v4 = """same"""
+name = """DLC database merge"""
+what = """The game merges each package's car, upgrade and offer tables into its database through its normal Marketplace flow, so DLC cars need no replacement tables or extra ownership grants. With all 21 packages it merges every DLC database shortly after Start (normally 0.1-0.6 s), and the merge ends with an open of `media/db/patch`. Mounting alone does not make expansion gameplay work."""
+how = """Native database query after the normal merge; startup timing across 120 runs; file-open trace."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Native Rally car database and entitlement check; Car packs on v4"""
+
+[[finding]]
+group = """Downloadable content"""
+v4 = """same"""
+name = """car-pack rosters"""
+what = """The 21 packages' merge databases hold 84 car rows; the October database has eleven, including the LCE variants. DLC-only makes appear in the Autoshow make grid with NEW badges (AMC, Bowler, Cadillac, Devon, GMC, Gumpert, HUMMER, Joss, Koenigsegg, Pagani, RUF, plus Honda additions). The five single-car promotional packages carry only wheels and strings for the Pre-Order bundle's cars, so they overlap without duplicates."""
+how = """Reading each package's merge database; Autoshow captures; entitlement traces on base and v4."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Car packs on v4; DLC-5; Complete-profile October fixture"""
+
+[[finding]]
+group = """Downloadable content"""
+v4 = """same"""
+name = """December IGN package variants"""
+what = """Three December IGN Car Pack packages share a display name, package filename (`BC6F8A24F1F38F719B9F09C002DDC1F3024AC2AB4D`) and size but differ in whole-package hash; all three extract to the same 24 files. They differ only in licence data, and together their licences cover the full pack. One copy circulates under the label "2006 Ford GTX1"."""
+how = """Header reads and extraction with per-file SHA-256 comparison; entitlement check after importing all variants."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Local inventory; DLC-4"""
+
+[[finding]]
+group = """Downloadable content"""
+v4 = """same"""
+name = """VIP Membership packages"""
+what = """The VIP Membership & Cars Pack exists as two different packages with the same display name. `210BB00587D95ACFD8CEDCA23B7E16AE2C59C3DB4D` (larger) supplies offer `2100` and 10 files; `A5B171B88811F1785A9AFC1F956C768A97029C004D` supplies offer `1006` and 8 files. Both carry Gallardo and GT3 RS engine audio, but their archives and offers differ, and only both together make all five VIP cars owned."""
+how = """Package headers and member listings; v4 gameplay check with both mounted."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Local inventory; DLC-5"""
+
+[[finding]]
+group = """Downloadable content"""
+base = """CStorefront"""
+name = """storefront is online only"""
+what = """The storefront screens and downloaders are client-side, but every listing, purchase and rating is one of about 40 web-service calls with encrypted and signed replies, none of which were captured."""
+how = """Executable strings."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+
+[[finding]]
+group = """Downloadable content"""
+name = """Marketplace UI not called"""
+what = """No route run so far has called `XamShowMarketplaceUI`, `XamShowMarketplaceUIEx` or `XamShowMarketplaceDownloadItemsUI`, on base or v4."""
+how = """Import call logs on base and v4 routes."""
+confidence = """probable"""
+note = """Covers only the routes run so far."""
+negative = true
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-8"""
+
+# --- Entitlements and licences --------------------------------------------
+
+[[finding]]
+group = """Entitlements and licences"""
+base = """0x832E4A80"""
+v4 = """0x833D23E0"""
+name = """content manager"""
+what = """The content manager global holds the database at +8, a category table at +124 (v4 +140) of 8-byte {first, count} entries indexed by content type, and the entitlement vector at +180 (v4 +204) of 8-byte rows {content ID, installed, purchased, base, visible}. The database's vtable +32 runs a raw SQL query from a C string (+36 takes a std::string); the record set's vtable +184 returns the row count and +80 a value by (row, column). Content types 1 and 3 are in use."""
+how = """Read-only traces of the entitlements and SQL queries through the title's database; layout compared from both builds' manager dumps."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp TraceDlcCars; docs/TITLE_UPDATE_V4_BACKLOG.md TU-6"""
+
+[[finding]]
+group = """Entitlements and licences"""
+v4 = """same"""
+name = """ContentOffersMapping and licence masks"""
+what = """Car ownership follows the database's `ContentOffersMapping` and each package's licence mask, not the merged `Data_Car` rows. Rally's publication 1600 has offers for masks 1, 2 and 4: the mask-1 offer maps the Escort (1272), WRX (365), Lancer (378) and 037 (1295) among others, and the Focus SVT (346) maps to the mask-4 Season Pass offer. The Rally package's mask is `00000001`, so with Rally on 27 entitlements load and the Focus is installed but neither purchased nor visible, on base and v4 alike."""
+how = """Reading the owned database and package header; read-only queries of the live entitlement cache after the normal merge (`v4-rally-car-database`)."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Native Rally car database and entitlement check; docs/TITLE_UPDATE_V4_BACKLOG.md TU-6"""
+
+[[finding]]
+group = """Entitlements and licences"""
+v4 = """same"""
+name = """IsPurchased is not ownership"""
+what = """The raw `Data_Car.IsPurchased` column in a merge database does not decide ownership; the game's offer and entitlement cache does. Pre-Order and VIP cars carry the flag only because their rows already ship in the base database."""
+how = """Comparing raw database rows with the entitlement cache for Rally, October and all 21 packages."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Native Rally car database and entitlement check; Complete-profile October fixture; Car packs on v4"""
+
+[[finding]]
+group = """Entitlements and licences"""
+name = """November licence variants"""
+what = """One November Bondurant Car Pack variant has licence mask `00000002`, which covers only the Gallardo offer: with it the entitlement cache leaves the Cobra 427, 240SX, M3 GTS and Shelby 1000 unpurchased and hidden. The full-licence variant (`FFFFFFFF`) owns the whole pack; the payloads are identical."""
+how = """Entitlement trace (`v4-dlc-car-database`) with each variant imported."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Car packs on v4 (2026-10-07)"""
+
+# --- Rally expansion ------------------------------------------------------
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally package contents"""
+what = '''Horizon Rally is package `6F6992766050D818245ADD408031E280FB5F4E634D` (v4 mounts it as `DLCRoot0:\media\dlczips\1600_pri_65`). Its database supplies the `ColoradoDirt` environment, 34 track records, seven event locations and its hub activities `horizon_rally_01` to `horizon_rally_07` on hub 4. Its four archives hold marketplace art, car thumbnails and seven `RallyTickets` images but no hub scene. Co-driver audio is `CoDriver_<lang>.fev` and `.fsb` (EN and MX) under `Media/Audio/VO`, with event groups such as `CoDriver_<lang>/CoDriver/Turns/Right`.'''
+how = """Reading the owned package's header, database and archive listing; hub probes and co-driver playback."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md DLC-2; Original Rally hub asset inventory; src/pinyon_shift_runtime_hooks.cpp PinyonShiftUseBuiltinRallyAdapter, ProbeRallyAudio"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally car roster"""
+what = """Rally's database adds 16 car rows with their tyre compound, spring/damper and engine options. Five are selectable when owned: Escort RS Cosworth, Lancia 037, Toyota Celica, Mitsubishi Lancer and Subaru WRX. The Focus SVT is Season Pass only, and ten further variants are event-only duplicates that are not selectable by design."""
+how = """Read-only query comparing the live merged database and entitlement cache with the package."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Native Rally car database and entitlement check; Car packs on v4"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally championships and stage routes"""
+what = """Rally has seven championships of four stages (28 stages): routes 1-21, plus routes 41-47 (track names `RALLY_025`-`RALLY_031`) as the fourth stages. Series `MS_RALLY_01` to `07` run routes 11,10,12,44 / 13,14,15,45 / 4,5,6,42 / 19,20,21,47 / 7,8,9,43 / 16,17,18,46 / 1,2,3,41. Routes 10 and 11 are swapped relative to their `RALLY_010`/`RALLY_011` names. Free roam, route 24, routes 100-102 and developer test route 211 are not championship stages."""
+how = """Event relationships in the owned database and the v4 behaviour reference; stage runs."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Fourth stages and save migration; src/dlc/rally_progress.h"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally championship names and classes"""
+what = """In series order the championships are Rockies, Clear Springs, North Plains, Montano Plains, Beaumont, Kettle Hills and Red Rock, with car class targets A, S, B, A, B, S and R3. In the base `CarClasses` table `TargetClass` 4 is B, not A."""
+how = """The owned `Tracks` table and `Tracks.str` labels (28 routes x 20 languages); class rows from the reference data; a read of the base `CarClasses`."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Correct championship and stage name assignments; Native car selector and championship class limits"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally localized tables"""
+what = """Rally ships its own `Events`, `Tracks.str` and `Environments.str` tables for all 20 player languages. They can disagree with the base text: three Traditional Chinese sponsor names differ from the base table."""
+how = """Comparing all 40 owned and base string-table pairs."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Normal entry asset preparation; Native hub component probe and owned route labels"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally RibbonConfiguration"""
+what = """Rally's track records use `RibbonConfiguration=8`, with which the base race engine shows a lap counter. A track record with the base sprint flags shows the progress HUD instead."""
+how = """Experiment: the merged Rally database on the base build, and a separate track record with sprint flags."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Base-disc solo stage probe"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally pace-note route data"""
+what = """Each Rally route's `media/Tracks/ColoradoDirt/Ribbon_00/TrackRouteNNN.xml` holds `RallyCall` trigger gates: a transform facing along the road, a width and an ordered list of co-driver samples (all 28 routes: 682 gates, 2,011 samples). Gate names are exporter names, not unique IDs; route 47 repeats them. Each sample ID maps to a group, cue and icon (or `None`) in `audio/VO/CoDriverAudio.xml`."""
+how = """Parsing the owned route XML and audio mapping for all 28 routes; playback in route runs."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Private four-stage director and resume (pace-note implementation); src/dlc/rally_pace_notes.cpp"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """Rally upgrade parts and compound 9"""
+what = """The Rally tyre is compound 9, using existing affect and friction curves. Part IDs look like car ID x 1000 + level: the Escort (1272) Rally tyre is `1272005` and suspension `1272004`, the Mustang (404) stock tyre `404001` and Rally tyre `404005`; the Rally transmission is `676004`. The Rally transmission cuts shift time by 0.15 s and the Rally suspension raises ride height. A base car's Rally tyre conversion lists at 10,000 credits."""
+how = """SQL trace of the compound request; purchases and saved garage records; comparison with the v4 behaviour reference."""
+confidence = """confirmed"""
+note = """The car x 1000 + level numbering is our reading of the observed IDs (probable)."""
+source = """docs/DLC_BACKLOG.md Rally upgrade definitions and tyre purchase; Rally transmission purchase; Base-disc Rally tyre conversions"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """base disc lacks Rally upgrade menus"""
+what = """On the base disc the Rally package's parts (level-5 tyre, level-4 suspension and transmission) have no matching upgrade-menu definitions, so the option query cannot join them, and base Rally suspension physics rows are absent. Rally tyre conversions for base cars derive from 173 base race-tyre rows in the reference; the Ferrari 599XX has none."""
+how = """Option query on the base build; comparison with the v4 behaviour reference."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Rally upgrade definitions and tyre purchase; Base-disc Rally tyre conversions"""
+
+[[finding]]
+group = """Rally expansion"""
+v4 = """same"""
+name = """corrupt standalone Rally wrapper"""
+what = """A separately distributed Rally wrapper's `ColoradoDirt_pri_65.zip` differs from the aggregate copy in 48,980 bytes, and three terrain members fail XMem decompression. The aggregate copy decompresses and matches the CRCs stored in the archive."""
+how = """Archive comparison; XMem decompression with CRC checks."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Local inventory"""
+
+# --- Title update content -------------------------------------------------
+
+[[finding]]
+group = """Title update content"""
+name = """Rally and 1000 Club code is v4-only"""
+what = """The base executable has no Rally-specific strings or Rally game flow. Title update 4 adds Rally scoring, wristbands and XP, multi-stage progression and the Rally flow; the original Rally and 1000 Club behaviours exist only in v4's code. The base image names `CShowPauseScreen` and `CShowUIScreen_CareerStreetRaceSelect`, but not the Rally hub, loader or initial-unlock behaviours."""
+how = """String inventory of the base mapped image; comparison with the v4 behaviour reference."""
+confidence = """confirmed"""
+note = """The ASCII name inventory is not a complete proof over the factory dispatch."""
+negative = true
+source = """docs/DLC_BACKLOG.md DLC-2; 2026-10-06 update; Original Rally hub asset inventory"""
+
+[[finding]]
+group = """Title update content"""
+v4 = '''update:\media.zip'''
+name = """v4 media.zip"""
+what = """The update's `media.zip` has 918 members: 795 not on the disc and 123 replacing disc files, `db/gamedb.slt` among them. It holds 113 UI scenes (the Rally hub among them), `rally.str` and `rallyupgraded.str` in every language, `rallyaidifficulty.xml`, `rallytracktimings.xml`, dust and dirt effects, `db/patch/1401000_merge.slt`, Car Challenge transforms (`carchallenges/named_transforms.xml`) and `car_challenge_*` menus. v4's `gamedb.slt` already holds the Rally cars the base disc lacks, except the Season Pass Focus (row 346 is only in Rally's `1600000_merge.slt`). It ships no shaders."""
+how = """Archive listing compared with the disc; car-row trace on v4."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds, TU-4, TU-6, TU-7"""
+
+[[finding]]
+group = """Title update content"""
+base = """XDBF achievements 155-205"""
+v4 = """XDBF achievements 155-215"""
+name = """achievement ID ranges"""
+what = """The base XEX defines 50 achievements (155-205) and v4 defines 60 (155-215, Rally included). The Rally package's `spa.bin` holds the same 60-entry table; 1000 Club's holds 70, adding 216-225. No other package adds achievements. Rally achievements unlock through v4's own XDBF, 1000 Club's through its `spa.bin`."""
+how = """Reading the XDBF and `spa.bin` tables; the DLC achievement registration log; manual play unlocking 206, 208 and 216."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md Xenia Canary comparison, TU-4, TU-6, TU-7, TU-8"""
+
+[[finding]]
+group = """Title update content"""
+name = """car challenge data is local"""
+what = """The 1000 Club package ships 218 loose `carchallenges/carchallenges_<car>.xml` files (pass and fail rules, HUD and string IDs per car) and 271 textures; the MX-5, for example, has five challenges. Leaderboards and the confirmation of a completed goal are server-side."""
+how = """Package listing; the eligible-car list showed the MX-5's challenges from the local XML once the server check was answered."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-7"""

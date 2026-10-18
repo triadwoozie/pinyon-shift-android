@@ -1,160 +1,34 @@
 # Reverse-engineering records
 
-What we have learned about FH1 by reverse engineering, so later work can
-build on it instead of finding it again (#448). Symbols and offsets that
-mod code uses live in [`config/mod/fh1-symbols.toml`](../config/mod/fh1-symbols.toml)
-(v4 in [`fh1-offsets-v4.toml`](../config/mod/fh1-offsets-v4.toml)); every
-other finding gets a row here. Negative results count too.
+The reverse-engineering records moved to the docs site (#448): the
+[Reverse engineering](https://arcanite24.github.io/pinyon-shift/reverse-engineering/)
+section explains each part of the game with diagrams and examples, and
+lists every finding with its address, method and confidence.
 
-Only our own analysis goes here: no disassembly listings, decompiled code
-or game data ([LEGAL.md](LEGAL.md)).
+The records themselves are data in [`site/findings/`](../site/findings),
+one TOML file per topic, rendered by `site/build.py`. Add a finding there,
+in the same change as the work that found it:
 
-Confidence: **confirmed** (shown directly), **probable** (strong indirect
-evidence) or **guess**.
+```toml
+[[finding]]
+group = "Time of day"              # a section of the topic's page
+base = "sub_825C7DD0"              # base address(es), comma-separated
+v4 = "sub_82656D40"                # v4 address(es), when known
+name = "time-of-day request"
+what = "What it does, in our own words."
+how = "How it was established: hook, trace, xref, string, experiment."
+confidence = "confirmed"           # confirmed, probable or guess
+negative = false                   # true for a result that rules something out
+source = "docs/SOME_BACKLOG.md ID" # optional: where the detail lives
+```
 
-## Rendering
+Symbols and offsets that mod code uses still go in
+[`config/mod/fh1-symbols.toml`](../config/mod/fh1-symbols.toml) (v4 offsets
+in [`fh1-offsets-v4.toml`](../config/mod/fh1-offsets-v4.toml)); the site's
+[address index](https://arcanite24.github.io/pinyon-shift/game-addresses/)
+lists them with the records. Only our own analysis goes in a record: no
+disassembly listings, decompiled code or game data ([LEGAL.md](LEGAL.md)).
 
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| guest phys `1FCA6000`, 4 KB | — | scene luminance resolve | A 32x32 `k_32_FLOAT` resolve from a 1x `k_32_FLOAT` color target (`c14->t36`), resolved every frame in free roam. The game reads it at guest size, through a texture key that is not marked as a scaled resolve. If guest memory under it is stale, the screen is overexposed as if auto exposure sat at its daytime limit (#444). | Experiment: bisecting resolves at 2x on the `i444` route; writing the unscaled copy of only this resolve restored 1x brightness (mean 120.0 against 173.7). Texture-cache probes showed two 32x32 format-36 keys over it, one scaled and one not. | Confirmed that it drives exposure; probable that it is a luminance average. The address was seen on one seed only. |
-| — | — | not the #444 cause | Ruled out for the morning overexposure at 2x: post effects (swap and present effects), MSAA (single sample), the GPU record thread, resolve-to-texture, EDRAM pass specialization, small copy views, texture band reloads. Guest CPU reads of resolved ranges (none), vertex fetches over scaled ranges (none), and unscaled textures over scaled ranges caught by the generic probe (none). | Experiment: one cvar or probe at a time on the `i444` route. | Confirmed |
-
-The fix and its reasoning are in [DEVELOPMENT.md](DEVELOPMENT.md)
-(guest-visible resolves).
-
-## World detail
-
-What was found while looking for a draw distance setting (#421,
-[FEATURE_BACKLOG.md](FEATURE_BACKLOG.md) FB-4). None of the data knobs
-below gave a visible gain.
-
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| `sub_82D505C0` | — | track render settings | Serializes the per-track render settings that `media/tracks/<track>/TrackSettings.xml` sets, plain XML read in free roam. Field offsets: `GrassLODDist` +712, `GrassLODFadeRange` +716, `GrassMinNumShells` +720, `GrassFadeStartDistance` +728, `GrassFadeEndDistance` +732, `Crowds` +832, `CollidableDropDistance` +656, `wholeTrackLightmapRadius` +1248, `depthPassRadius` +1252, `screenAreaDistances` +1260, `Performance` +1378, `MipMapLodBiasModifier` +1404, besides lighting, tone map and wind fields. | Key strings mapped to the serializer's field arguments; a mod replacing the file logged `mod.file.override` in free roam. | Confirmed |
-| `TrackSettings.xml` (Colorado) | same | no visible gain | Doubling the grass fade distances, the crowd LOD and sprite distances and `screenAreaDistances mainScene` changed nothing visible in free-roam views; the only differences were moving cars. | A/B captures of the same free-roam views from one seed. | Confirmed |
-| `tracks\%s\Ribbon_%02d\*.pvs`, `PVSZLookup`, `CTrackPVSZoneResource`, `PVSZoneSpeeds.dat` | same | scenery visibility | Track scenery is culled through precomputed visibility (PVS) zones, not by a distance, so there is no draw distance value to raise for it. | Strings and class names in the executable. | Probable |
-| `0x8207AA58` `draw_distance`, `sub_828C6E68` | — | map draw distance | Belongs to the map and minimap profiles (`MapProfileFullscreen.xml`, `MapProfileMinimap.xml`), not the 3D world. | String xref. | Probable |
-| `0x820744F0` `CamFarClip` | — | camera far plane | Read by the camera functions `sub_8284DAE0`, `sub_8284CB30`, `sub_8284C5D0`, `sub_8284C410`. `camera.zip` sets only near planes (`CameraSettings.ini`), so the far plane is a code default. | String xref; reading the camera archive. | Probable |
-| `0x8201BA00` `SLod.xml`, `sub_82548C20`, `sub_82548E78` | — | car shader settings | `cars/Shared.zip` `ShaderSettings/Slod.xml` (and `Tire/Slod.xml`): settings for the distant-car "super LOD" shader, not world LOD. | String xref; archive listing. | Confirmed |
-| `sub_82D86268` | — | dynamic render settings | Constructor of the per-scenario render settings that `media/renderscenarios.zip` fills (`CDynamicRenderControl` entries: `FrameRate`, `TilingScenario`, car LOD, crowds, particles and more). Every scenario file is parsed into its own object at boot, through one XML reader archive (vtable `0x8222B154`, v4 `0x8223DEC4`). Each control's vtable holds a name getter, a serialize (a visitor binding attribute names to fields) and a reset. | Probe hooks on the visitors logged every read with the archive's vtable. | Confirmed |
-| `sub_82D7E2A8` reset, `sub_82D7E1F8` visitor, `sub_82D7E290` name | `sub_82E404D0`, `sub_82E40420`, — | `CarLODTransDist` | Three floats (`near`, `far`, `veryfar`) at +168/+172/+176 of the render settings (control at +164); compiled defaults 15/25/50 m, the same as every race file. | Hooks on every writer: reset, constructor and XML visitor. | Confirmed |
-| `sub_82D7E4B0` reset, `sub_82D7E2E8` constructor, `sub_82D7E390` visitor, `sub_82D7E498` name | `sub_82E406B0`, `sub_82E40510`, `sub_82E405B8`, — | `CarLODTransDistTraffic` | Six floats (`LOD2`..`LOD5`, `LOD4_closest`, `LOD5_closest`); defaults 15/25/50/100/20/80 m, and `Horizon_Race.xml` sets 22/40/75/100/30/80. | Same hooks. | Confirmed |
-| `CarLODTransDist`, `CarLODTransDistTraffic` | same | no visible car LOD change | Scaling both tables by 0.01 at every writer left the cars' models unchanged, in free roam and in a race (`fh1-race-start-wait`, frames aligned within 5 % of pixels). They do not select the model LOD the player sees. | Deterministic A/B captures with the scale hooks (not kept). | Confirmed |
-| `CarLODThresholds` | same | no visible change on the grid | Setting `lod1`, `lod2` and `count` to 0 in all 19 scenarios that set them left the race grid cars unchanged. An earlier probe on 2026-10-10 that saw `Horizon_Race.xml` change race cars was not reproduced and was probably run-to-run variance. | Member-replacing mod, A/B grid captures. | Confirmed for the grid view |
-| `CarFocusLODMinMax min=0 max=0` | same | player car held at LOD0 | Seven scenarios clamp the focused car's LOD to 0, which is why the player's car never changes detail. | Reading the scenario files; the player car stayed identical in every probe. | Probable |
-| `0x82237FE4` (`CCullingGroupTable`), `0x82243414` (`CTrackRenderModel`), `0x82243464` (`CTrackRenderModelInstance`), `0x82001474` (`CTrackSubModel`), `0x820016B4` (`CTrackModel`) | — | track class vtables | Found through their RTTI. The instance's methods are short thunks, so the LOD or cull decision is not in them. No executable string names a scenery LOD scale, bias or distance. | RTTI type descriptors and complete-object locators. | Confirmed |
-| `sub_82DB8AE8` > `sub_82DC1CB0` > `sub_82D65608` | — | scene draw on the render thread | In free roam the render thread (guest `825A6320`) spends most of its busy time here, and below `sub_82D65608` only in draw submission (`sub_82440CF8`). The main thread (guest `8255AE10`, also `82C0C8C8`) walks the scene through `sub_82D4E2E0` > `sub_82D4DE30`, into `sub_82D46EF8` > `sub_82D3A528` and `sub_82D4DCC8` > `sub_82D43818` > `sub_82D41A30` next to the culling-group table's method: the next place to look for where a model LOD is chosen. | `pinyon_shift_thread_sampler` over every guest thread during a free-roam drive. | Probable |
-| Xenia `4D5309C9` game patches | — | no LOD patch exists | Xenia Canary's FH1 patches cover motion blur, depth of field, shadows and hash checks; none raises LOD or draw distance. | Reading the patch file. | Confirmed |
-| `PhotoMode.xml` keys `CarMinWheelLOD 0`, `CollidableShadows 1`, `SoftParticles 1` | same | no visible gain in races | Merged into all 28 gameplay scenarios (every race, pre-race, post-race and replay file): the merges applied, but race captures at 1x showed no visible difference in wheels, shadows or particles. | Key merges through a test mod; A/B on `fh1-race-start-wait`. | Confirmed at 1x |
-| `media/tracks/colorado/bin.zip`, `Ribbon_00/FilenameMap_00.dat`, `Colorado_00.pvs`, `PVSZLookup_00.dat` | same | scenery layout | Colorado's scenery is about 230,000 `_0x........_B.bix` model files in `bin.zip`, named through the filename map and made visible per precomputed PVS zone. What is drawn from where is baked into the PVS data, so raising scenery draw distance would mean changing that data or the code that reads it, not a setting. | Archive listing and file names. | Probable |
-
-## Radio
-
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| `media/audio/radio/RadioSystem.xml` | same | station list | Nine stations: `Radio1` Horizon Bass Arena, `Radio2` Horizon Pulse, `Radio3` Horizon Rocks (stereo music), `Radio4_Silent` (off), and the mono 3D location stations `Radio5_3d_PreRace`, `Radio6_3d_Autoshow`, `Radio7_3d_Workshop`, `Radio8_3d_Paintshop`, `Radio9_3d_Streetrace`. | Reading the file; station changes in game. | Confirmed |
-| executable strings | — | selectable stations | The executable names the player-selectable stations itself: the `RadioN` names, `Radio4_Silent` for off, `ui\textures\horizon\hud\radio\radio1..3.xds` and the option strings `IDS_RadioStation_Option_1/2/3/Off`. Adding a fourth selectable station therefore needs guest code changes, not only data (#453). | Strings in the executable. | Confirmed that the names are there; probable that the selectable count is fixed in code. |
-| `Horizon.zip/Hud/Radio/RS_BassArena.xds`, `RS_Pulse.xds`, `RS_2Eleven.xds` | same | station popup logos | The logos shown at the right of the HUD when the station changes: 210x100 DXT5 (`k_DXT4_5_AS_16_16_16_16`), tiled, 8-in-16, one level. `RS_2Eleven` is Horizon Rocks. `RS_Off.xds` (32x32) is the radio-off icon. | Experiment: a re-encoded `RS_BassArena` showed in the Radio1 popup (#445); decoding the textures. | Confirmed |
-| `Horizon.zip/Hud/Radio/Radio1-3.xds` | same | placeholder logos | 64x32 DXT1 images that only read "Radio N". Their paths are the ones in the executable, but the popup shows the `RS_*` textures. | Decoding the textures; route captures. | Guess: unused in normal play |
-| `MyProfile.str` `0xA29E`, `0xA31E`, `0xA39E` | same | station names | HORIZON BASS ARENA, HORIZON PULSE and HORIZON ROCKS, the RADIO STATION option's values (`0x7693` is the row's label). | Reading the string tables. | Confirmed in the tables; probable on the option screen (not seen on screen) |
-| `Tips.str` `0x0B3A`/`0xE484`, `0xF203`/`0x0063`, `0x9730`/`0x94AE` | same | station tips | The loading tips' title and text for Bass Arena, Pulse and Rocks. `Livery_Decals.str` `0x6AF9`, `0x328D` and `0xAEF9` name the station decals. | Reading the string tables. | Confirmed |
-| `Radio_Music.fsb` | same | music bank | The FSB4 layout, sync points and the info file. | See [FEATURE_BACKLOG.md](FEATURE_BACKLOG.md) FB-1.3. | Confirmed |
-
-## Developer options and leftover systems
-
-Found in the second feature research round (2026-10-11,
-[FEATURE_BACKLOG.md](FEATURE_BACKLOG.md) FB-12) by string and
-cross-reference scans of the base image, archive listings and read-only
-`gamedb.slt` queries. The launch-option rows were then checked at run time
-(FB-12.0, 2026-10-11) with a read-only probe mod and a probe that writes
-two flags, on the free-roam route from a pinned seed; the other rows have
-not been run.
-
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| `0x8200F000`-`0x82010DA0`, `sub_824F8150`, `sub_82C096E0` | — | launch-option table | About 300 developer option names. `sub_824F8150`, slot 5 of the options object's vtable, is a per-token visitor: it offers one token to the matcher `sub_82C096E0` for each option (about 246 calls). The matcher toggles the byte flag on a bare name and sets it on `name=true` or `name=1`. Includes race setup (`launch`, `launchtype`, `trackname`, `ribbon`, `numlaps`, `numaicars`, `aicar%d`, `aiskill`, `timeofdayindex`, `numtrafficcars`), QoL (`allowskipvoiceover`, `skiptutorials`, `disablesplashintro`, `noattractvideo`, `nohud`, `hidecockpitglass`, `zoomoutminimap`, `nocameravibration`, `NoHandOfGodReset`), restrictions (`chooseillegalcarforevent`, `eventrestrictions`, `showallcars`), photo mode (`disablephotomodecollisiondetection`, `allowhighzoomaperture`) and modes (`splitscreenlaunch`, `MultiscreenView`). | String xrefs; matcher read in the generated code. | Confirmed |
-| `0x832E29A0`, vtable `0x8200E724`, getter `sub_82479E88`, constructor `sub_824ECF48` | — | launch-options object | A static singleton built at boot by its getter (guard word `0x832E4A70`; the getter has 356 call sites). Its flags are bytes at fixed offsets: `nohud` +3213, `showframerate` +4170, `zoomoutminimap` +4869, `allowskipvoiceover` +4924, `skiptutorials` +8362; `hidecockpitglass` is a global at `0x832B8700`. At run time the defaults read 1 for `zoomoutminimap` and `hidecockpitglass` and 0 for the others. | Constructor and getter in the generated code; probe mod reading the bytes at frames 1, 300 and 1200. | Confirmed |
-| options object flags | — | flags written at boot take effect | A mod writing `nohud` = 1 from the first file open and every frame removed the whole HUD (minimap, speedometer, event banner) in free roam; the route still passed. `showframerate` = 1 drew nothing visible. Each other flag needs its own check. | Probe mod with `write_guest`; capture compared with a run without it. | Confirmed for `nohud`; `showframerate` no visible effect |
-| kernel command line, `cl` cvar | — | not parsed in retail | `--cl="nohud=1 showframerate=1 ..."` leaves every flag at its default and changes nothing on screen: retail does not feed the kernel command line to the visitor. | Probe mod reading the flags with and without `cl`; captures. | Confirmed |
-| `0x82143254` `GAME:\cmdline.txt`, `sub_82C0A420`; `sub_824E4228` | — | cmdline.txt never opened | `sub_82C0A420`, the base constructor, keeps the path, but retail never opens the file: no open is attempted without it, and a `cmdline.txt` in the game root changed nothing. `sub_824E4228` (vtable slot 3) handles `loadcmdlinedottxt` and `ignorecmdlinedottxt`. | Kernel open log; probe run with the file present. | Confirmed |
-| `0x820E01E8` `d:\DebugOptions.ini`, `sub_82AA8AA0` | — | network library options, not game options | Opened at every boot (`d:` is the game root). Its keys (`forceLogger`, `errorMode`, `minSeverity`, `defaultTimeoutMs`, `defaultContentTimeoutMs`) belong to the socket and web-service library, not to the launch options. | Kernel open log; strings next to the path. | Confirmed |
-| `forceEnableDebugMenus`, `debugmenudescriptions` (read at `824F81FC`, `824F81E8`); `CConsole`, `CDebugSkip`; `UI.zip` scenes `DEBUG_TEMPLATE`, `DEV_IMPORT_PROFILE`, `DEV_REPLAY_HUD_TRIAL` | — | debug menus | Option flags and scenes for developer menus; the menus themselves may be compiled out. | Strings; archive listing. | Guess |
-| `HeadTracking/Enabled`, sensitivities at `0x8200DEC0`-`0x8200DFBC`, inputs `HeadTrackingX`..`HeadTrackingPitch` at `0x82073DD4`-`0x82073E18`, `CHeadTrackingSetup` | — | Kinect head tracking | The settings, input channels and setup class of the console's head-tracking feature survive; a host tracker could feed the inputs. | Strings. | Probable |
-| `CMultiscreenServer`, `CMultiscreenClient`, `CHudMultiscreenClient`, scene `835_C_MULTISCREEN_SETUP`, `MultiscreenDegreesBetweenScreens`, `CameraSettings.ini Driver\TripleScreenAdditionalZOffset` | — | linked-console triple screen | The three-console side-view mode and its angle settings. | Strings; camera archive. | Probable |
-| `CSplitscreenLobby`, `CHudSplitscreen`, `CPauseSplitscreen`, scene `948_HUD_Split_Screen`, `Splitscreen_Race.xml`, `Splitscreen_321_and_PostRace.xml`, `CameraOverrides.SplitscreenCamCockpitOffset*` | — | split-screen | Lobby, HUD, pause, render scenarios and per-car camera offsets for two-player split-screen survive, although FH1 shipped none. | Strings; archive listing; `gamedb`. | Code present; working unknown |
-| `CTelemetryHud`, `IDS_Telemetry`, scene `968_TELEMETRY`; references at `827AC92C`, `827ACC7C`, `827B892C` | — | telemetry pages | Forza's car telemetry screens; their data sources should lead to RPM, gear, slip and suspension values. | Strings and xrefs. | Probable |
-| `CTeleportCarToFastTravelDestination`; `gamemodes.zip` `fast_travel.xml`, `map.xml` (`is_fast_travel_enabled`) | — | fast-travel teleport | Moves the car through the game's fade-and-stream path; a candidate for teleport that does not fight the physics body (NP-8.1). | Strings; archive listing. | Probable |
-| `CSetSatNavDestinationPos`, `CSatNavDestinationManager`, `CLockSatNavDestination`, `0x8207BC58` `satnav_arrows_enabled` | — | GPS destination | Sets and locks the sat-nav route target. | Strings. | Probable |
-| `CWatchReplay`, `CReplayDVRControls`, `watch_replay_flow.xml`, `IDS_SaveReplay`, `ReplayTheater`, `savereplaytodevkit`, `savewmvtodevkit`, `040_D_WMV_Exporter` | — | replays | The post-race replay player, strings for saved replays and a developer WMV exporter. | Strings; archive listing. | Probable |
-| `time_of_day.request` `0x825C7DD0` | — | time-of-day rate | Besides the hour, takes a rate (game seconds per real second) in a float register; the trainer only uses it to hold an hour. | Existing symbol; argument use. | Confirmed |
-| `Data_Car` `IsSelectable=0`, `IsDrivable=1` (23 rows) | same | hidden drivable cars | Traffic cars (tour bus, trucks, Leaf, Prius) and showcase variants, each with its media archive. | `gamedb` query. | Probable that they drive |
-| `AIRubberbands` (24 rows), `AISkills` (87), `AITemperaments`; `GameTunableSettings.ini` `[DynamicDifficulty]`, `[AIAutoUpgrades]`, `[HandOfGodReset]` | same | AI and reset tuning | Catch-up behaviour, AI skill levels and the automatic off-track reset are data. | `gamedb` and ini reads. | Probable |
-| `dynamicpost.zip` `Tracks/Colorado/Fog_Templates.xml` and grading maps | same | atmosphere templates | Six fog templates (`NoFog` to `Mountains`), bloom, vignette and colour settings, and 21 grading maps. | Archive listing. | Probable |
-| `AudioEngineConfig.xml`, `AudioMixerSnapshots.xml`, `audio/cars/CarModelTuning.zip` | same | audio mix | Per-category levels (player engine, opponents, tyres, wind, music, ambience), a normal and a TV compressor set, per-state ducking, and the car-to-engine-bank map. | Archive listing. | Probable |
-| `Environments` `TestBed`, `DebugTrack`, `TuningTrack`, `BVT` | same | dev tracks: not loadable | Named in the database, but only `colorado` and the UI tracks ship under `media/tracks`. | Directory listing. | Confirmed |
-| `CSoccerComponent`, `[CarSoccer]`, `[ConesScoring]`, `PittingProfiles`, `TiresAndFuel` | same | Forza 4 modes: code only | Car Soccer, Bowling and pit or wear code and tunables remain; no ball or pin assets ship. | Strings; `gamedb`; media listing. | Guess that the code runs |
-| `media/tracks/colorado/SmashableObjectTypes.xml` | same | smashable types | Loose XML listing the object types the track lets the car smash: `Fence`, `Flyer`, `Mailbox`, `RaceActivation`. Candidate data path for breakable barriers (#495); how a physics type maps to these types is not traced. | Reading the file. | Confirmed that the file lists them; effect of adding types unknown |
-| `Ribbon_00/CollObjs.xml`, `GameObjs.xml`, `TrackRoute*.xml` | same | world placements | Plain XML. `CollObjs.xml` places 21,877 collidable objects, each a physics type (`CO_*.rmb`, most often festival signs, `CO_CLRD_FenceF` parts, picnic tables, marker poles, speed signs, `CO_WoodenBarrier`, `CO_ArmcoArrow`) and a position and orientation. `GameObjs.xml` places 2,148 gameplay objects by `GameplayID` (barn finds and others). The 243 `TrackRoute*.xml` files hold each route's start locations, waypoints, checkpoints with a width, checkpoint indicators, boundaries, finish and post-race locations, and the start and end points of stunts and photo missions (corrected in the custom content analysis; an earlier reading of one file saw only start locations). The editable base for a world editor (#497). | Reading the files. | Confirmed |
-| `media/cars/<id>.zip` | same | car archive layout | Compression method 21 members: `<id>_lod0.carbin`, `<id>_cockpit.carbin`, per-wheel caliper and rotor `carbin`s, `stripped_*` variants, `.xds` atlases (damage, no damage, lights, interior, digital gauge), `LiveryMasks/*.tga` with `Masks.xml`, `physicsdefinition.bin` and `Physics/MAXData.xml`. The target of an Assetto Corsa importer (#496). | Archive listing of one car. | Confirmed |
-| tyre `WetFriction*`, `realtimesky.zip` | same | no weather | The only wet strings are tyre friction scales; the sky has one cloud set. | Strings; archive listing. | Confirmed |
-
-## Custom content
-
-Found in the custom content analysis (2026-10-11,
-[FEATURE_BACKLOG.md](FEATURE_BACKLOG.md) FB-13) from read-only reads of
-`gamedb.slt`, archives, executable strings, DLC and XE merge databases and a
-seed's save. Nothing here has been run in game.
-
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| `_&N` in name columns | same | database string references | N = (table hash << 16) \| a 16-bit key in that table's `.str` (`List_CarMake` is `0x3323`). XE writes plain text into 141 of 175 new `Data_Car.DisplayName` rows instead. | Database and string tables. | Encoding confirmed; plain text probable |
-| `.str` string tables | same | three-part layout | The strings, a list of `IDS_` names and a key-order list; a new key must go into all three. `set_ui_string` replaces only existing keys. DLC packs ship whole replacement tables. | Reading tables; `ApplyUiStringOverrides`. | Confirmed |
-| Autoshow make grid | — | make list query | One SQL query in the executable: makes with a selectable, visible, non-unicorn car, sorted by name, logo `Manufacturer_Logos_I\L_MAN_<IconPathBase>_Logo.tga`. No hard-coded make list. | Executable strings. | Confirmed |
-| `ui/Textures.zip` manufacturer logos | same | dormant logos | 37 make logos with no `List_CarMake` row (among them Porsche, DeLorean, Saab, Spyker, Holden, Opel, Seat, Spada), in six sizes (220x123 to 882x315), RGBA8 with mips. | Archive listing. | Confirmed |
-| car tables | same | what a car's data is | About 47 tables in every DLC merge database: `Data_Car`, `Combo_Colors` (car x 1000 + n), `CameraOverrides`, `CarExceptions`, `CarPartPositions`, physics, `List_Upgrade*` by ordinal, `Data_CarBody` (car x 1000); engines, drivetrains, torque curves and aero shared by id. The Autoshow needs a valid `PowertrainId` or hides the car. | DLC merge databases; Autoshow query. | Confirmed |
-| `gamemodes.zip` `Colorado/autoshow.xml` and siblings | same | shops are activities | The Autoshow (21 m trigger on `festival_01`), workshop (`festival_06`), paint shop, DLC centre (`festival_04`), gas stations and barn finds are activity lists triggered by `GameObjs.xml` objects. The model and make screens take no attributes; their filters are in code. | Archive contents. | Confirmed |
-| `Liveries\<n>.liv`, `Career_Garage.LiveryFileName` | — | livery files | One encrypted file per painted car (32-byte header, size, padding, encrypted body), named in the garage row of the encrypted, deflated SQLite `PlayerDatabase`; tunes are 36 `Tuning_*` columns of that row. Designs are layered vectors (`CLivery`, layers, groups, elements, colours), rendered onto the car through `LiveryMasks/Masks.xml`'s six planes. | Seed save; old save traces; class names. | Confirmed for the files; layout probable |
-| `Livery.zip` | same | shape library | 880 vector vinyl shapes in 22 categories of 40 and 492 decals (quad plus texture, most 512x512 DXT5); tables `Livery_VinylsDecals`, `Livery_Decals`, `Livery_DecalsSortOrder` (by make), `Livery_Categories`. | Archive listing; tables. | Confirmed |
-| `CImportForzaLiveryGroups`, `CCrossTitleLayerGroupEnumerator`; alternate titles `0x4D530910`, `0x4D53084D` | — | FM4 vinyl-group import | Code to import vinyl groups from FM4 (and probably FM3) saves; the SDK's aggregate content enumerator already includes alternate titles. | Strings; xex header; SDK source. | Probable |
-| `TrackRoute%03d.xml`, `aiopenworld.zip` `route_NNN.owt` | same | routes and AI lines | Routes are numbered (about 750 free numbers below 1000). Street and Nemesis routes have no AI file; festival and plane routes have an `OWTM` racing line (46 files). | String scan; archive listing. | Confirmed |
-| `Events`, `Races`, `Tracks`, `EventParticipants`, `EventScoring`, `WristbandScoring` | same | event definition | An event's type, tier, unlocks, hub, prizes, AI, time of day, laps, route, opponents (7 per event, 8 start slots) and rewards are rows; event ids above 255 work (Rally used 247-274). | Database; Rally work. | Confirmed |
-| `CareerRaceModes.xml` mode 4, `CareerEventTypes` id 3 | same | unused elimination mode | "Festival Elimination" with `EndCondition Elimination`, mapped but used by no event; drag (mode 6), drift and autocross scoring also present. | Archive contents; strings. | Probable |
-| `speed_camera.xml`, `average_speed.xml`, `mission_*.xml`, `barnfinds.xml`, `Flyers.xml`, `FreeRoamDrivers` | same | free-roam activities | Speed traps (22), zones (9), PR and speed stunts (10 each), photo shoots (10), barn finds (9), discount signs (100), head-to-head drivers (91) are XML and rows. | Archive contents; database. | Confirmed |
-| `UpgradeTypes`, `List_Wheels`, `Combo_Colors` | same | parts, rims, colours | 46 part types fixed by a code enum; rims (736, 112 aftermarket) offered when priced and branded unless excluded; 1,281 factory colours. No horn table; plates are decals. | Database. | Confirmed |
-| Storefront (`CStorefront`, 40 web-service calls) | — | online only | Screens and downloaders are client-side; every listing, purchase and rating is a web-service call with encrypted and signed replies, none captured. Not worth emulating. | Strings. | Probable |
-
-## Hot guest CPU functions
-
-Found while porting hot recompiled functions to native code (#431,
-[PERFORMANCE_BACKLOG.md](PERFORMANCE_BACKLOG.md) PB-3.12). The ports live in
-`src/guest_native/`; each checks a hash of the guest code before it runs. v4
-addresses come from the same code shape in the v4 tree; for `pow`, the LZX
-decoder and the `SleepEx` wrapper a v4 build confirmed the code hash and
-the ports' results (0 mismatches on `fh1-race-sustained`).
-
-| Base | v4 | Name | What it is | Established by | Confidence |
-| --- | --- | --- | --- | --- | --- |
-| `sub_82438EA8` | `sub_82468E50` | CRT `pow` | The C runtime's double `pow`, 1,252 bytes: special cases, an integral-exponent path by repeated squaring, and a table-driven log2/exp2 path with sixteenth splits. Called about 11 million times in `fh1-race-retire`, almost all while loading. | Call sites and constants; a native port compared bit for bit on every call of a route (0 mismatches in 10.9 million). | Confirmed |
-| `sub_82A80B78` | `sub_82B3DF18` | CRT natural log helper | Used by `pow` when the table index lands next to 1. | Port compared through `pow`. | Confirmed |
-| `sub_8244A250` | `sub_82479910` | classify integral | Says whether a double is an integer, and if so odd or even; `pow` uses it for negative bases and zero. | Same. | Confirmed |
-| `sub_823EF7E8` | `sub_8241F8C0` | `frexp` | Splits a double into mantissa and exponent. | Same. | Confirmed |
-| `sub_82A84E48`, `sub_82A84EE8` | `sub_82B43BC0`, `sub_82B43C60` | exponent, `copysign` | Small CRT helpers of `pow`. | Same. | Confirmed |
-| `sub_82469188` | `sub_824989D0` | `ldexp` | Scales by a power of two with overflow and underflow handling. | Same. | Confirmed |
-| `sub_82A7F7B8` | `sub_82B3CD58` | CRT math error handler | Reached by `pow` for domain errors (negative base with a non-integral exponent); the port leaves those calls to the original. | Same. | Probable |
-| `sub_830F2210` | `sub_831B4090` | LZX block decoder | Decodes LZX symbols into a sliding window until the requested length is produced; one of the asset worker's three hot functions (about 20 % of `sub_82E4B2D0`'s time). Decoder state: `+0` window, `+8` window mask, `+12/16/20` repeated offsets R0-R2, `+24` main symbol table, `+2072` length table, `+2584` main code lengths, `+3256` length code lengths, `+3508` aligned table, `+3636` aligned lengths, `+3644` and `+9020` overflow trees, `+11012` input pointer, `+11016` input end, `+11952` bit buffer, `+11956` bits left (signed byte), `+11960` window position, `+12004` extra bits per position slot, `+12056` position slot bases. Copies of 16 or more bytes use 16-byte chunks that may write up to 16 bytes past the match; the last store keeps destination bytes through a select constant (`0x822D5360`, v4 `0x822E8480`). | Reading the generated code; a native port compared on every call of a route, window, state and return value (0 mismatches in 17,535 calls). | Confirmed |
-| `sub_8259F3E8` | `sub_826164D0` | render thread frame | Called in a loop by the render thread (guest `825A6320`). When the simulation has no new frame for it (its frame counter has not passed the one it drew), it takes an idle path: the gamma transition (`sub_82586CD8`), a time read, then `SleepEx(0, TRUE)` returning to `0x8259FBEC` (v4 `0x82616CD4`). The host returns from a zero alertable sleep at once, so this path runs back to back while the render thread waits. An optional spin earlier in the function (reading the timer until a delay from the field at +3244 passes) runs only when that field is non-zero. | Odin call-graph profile (`simpleperf --call-graph fp`) of a run where the render thread was 44 % of the process; reading the generated code. | Confirmed |
-| `sub_82A6D7D8` | `sub_82B2A848` | `SleepEx` wrapper | Takes milliseconds in r3 and alertable in r4, calls the `KeDelayExecutionThread` wrapper (`sub_82A6D748`, v4 `sub_82B2A7B8`) and maps `STATUS_USER_APC` to 192. Called about 5.4 million times in one desktop `fh1-race-retire` run. `SleepEx(0, TRUE)` also spins in `sub_82E2F0B0`, `sub_82BAC498`, `sub_82BB3E48`, `sub_82E386B8` and `sub_82D18588` (v4 `sub_82EF10C0`, `sub_82C6ACF0`, `sub_82C72708`, `sub_82EFA628`, `sub_82DDA4B8`). | Code shape matched across both trees; call counts from the native replacement's summary. | Confirmed |
-| `sub_82462050`, `sub_82462098`, `sub_823E6738` | — | guest time reads | Read the tick count through `QueryGuestTickCount` (a `clock_gettime` on Android); most of the render thread's clock reads in the idle loop come through them. | Call graph. | Confirmed |
-| `sub_82452358` | — | CRT printf format engine | 1,800 generated lines whose compares are format characters (`*`, `x`, `X`, `g`, `I32`/`I64`, flags `-+# `). The busiest leaf of the background thread `830C6918` (12 % of its busy samples, about 1 % of a core in a race). Not ported: a bit-exact port of the CRT output engine for that share is not worth the risk. | Compare constants in the generated code; thread sampler on the simulated low-spec run. | Probable |
-| `sub_82470CB0` | — | guest heap allocator | Takes a critical section and calls `NtAllocateVirtualMemory` and `KeBugCheckEx` on failure. 11 % of thread `830C6918`'s busy samples; not ported. In the Odin race it is 0.05 % inclusive and its neighbour `sub_8246F268` 0.52 %, so a native allocator is not pursued (#468). | Imports it calls; thread sampler; `simpleperf --call-graph fp` inclusive share. | Probable |
-| `sub_825A6208`, `sub_82450160` | — | render thread loop and a hot callee of its frame | In Odin race call graphs the render thread's time runs through `sub_825A6208`, then `sub_8259F3E8` (render thread frame), then `sub_82450160` (#469). Roles beyond that chain are not known. | `simpleperf --call-graph fp` inclusive report. | Guess |
-| `sub_823ED888`, `sub_823E40D8` | — | simulation thread loop and a hot callee | In Odin race call graphs the simulation thread's time runs through `sub_823ED888`, then `sub_823E40D8` (#469). Roles beyond that chain are not known. | `simpleperf --call-graph fp` inclusive report. | Guess |
-| `sub_8307EDA8` | — | large load-heavy routine, purpose unknown | 12,000 generated lines, mostly loads, stores and byte moves, with 16 calls to `sub_83048F00`. 11 % of thread `830C6918` and 4 % of the asset worker `82E4B478`; flat, not ported. | Thread sampler. | Guess |
-| `sub_82C0C8C8` | — | job worker thread entry | Eleven guest threads start here. In a race one runs in 1.3-3 G-cycle bursts through `sub_82D18D60` > `sub_82D35390` > `sub_82D18C90` > `sub_82B8D9C0` > `sub_82B8ED78`, spread over the `sub_82D2xxxx` and `sub_82CB6xxx` families with no leaf above 7 %. | Thread sampler, simulated low-spec run. | Probable |
-| `sub_83108C08` | — | inflate loop | One sample in about 1,160 across `fh1-race-sustained` on the simulated low-spec run, so not worth a port for gameplay; earlier desktop samples placed it at about 20 % of the asset worker during loading only. | Thread sampler. | Confirmed |
-| `sub_8300D580` | `sub_830CE6C0` | audio reverb | Same 2,230-line shape in v4; 12.3 % of the v4 audio thread on the 8 Elite. | Shape match and `simpleperf` on the Astra. | Probable |
-| `sub_82FC6CC0` | `sub_83087D70` | audio six-channel biquad | Fused multiply-add chain over float state; 8.9 % of the v4 audio thread on the 8 Elite. | Shape match and `simpleperf`. | Probable |
-| thread `82FB4AF8`, `825A6320`, `8255AE10`, `82C0C8C8` | `83075D18`, `8261E318`, `825CEC88`, `82CCC368` | audio, render, simulation and job-worker thread entries | Guest thread names in v4 profiles; the same roles by their hot functions and CPU shares. | `simpleperf` per-thread on the Astra. | Probable |
-| `sub_82A7F710` | — | CRT `_stricmp` | ASCII case-insensitive compare: lowers A-Z by or-ing 0x20 and returns the difference of the first unequal pair. 0.02 % of Odin race samples, so not mapped to a native (#465). | Instruction shape in the generated code, next to `memset` `0x82A7F140`; `simpleperf` share. | Probable |
-| `sub_82A7F940` | — | CRT `strstr` | Returns the first occurrence of the second string in the first, or 0. 0.02 % of Odin race samples; not mapped (#465). | Instruction shape; `simpleperf` share. | Probable |
-| 2,207 small byte-loop leaves | — | string-shaped leaf functions | Leaf functions under 120 instructions with byte or halfword loads in a loop. Together 1.98 % of Odin race samples, the largest 0.23 % (`sub_82CD08C8`); no CRT string routine is a hot spot, so a wider `[rexcrt]` table is not worth its risk on the race (#465). | Scan of the generated tree joined with four `simpleperf record` race profiles. | Confirmed (negative) |
+The table this file held until 2026-10-12 is at commit
+[`fc1751fe2a38`](https://github.com/arcanite24/pinyon-shift/blob/fc1751fe2a38/docs/REVERSE_ENGINEERING.md);
+every row of it is now a record.

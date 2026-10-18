@@ -37,6 +37,26 @@ class ConfigRepairTests(unittest.TestCase):
         self.assertIn("return false;", missing)
 
 
+class ConfigUnavailableTests(unittest.TestCase):
+    """A newer schema or an unreadable file exited 1306 as a crash (#536)."""
+
+    def test_a_newer_schema_is_kept(self):
+        app = read("src/pinyon_shift_app.cpp")
+        check = app[app.index("bool EnsureSupportedConfig("):]
+        newer = check[check.index("if (schema > kConfigSchema) {"):]
+        self.assertIn("return true;", newer[:newer.index("}")])
+
+    def test_the_watcher_does_not_file_a_crash_report(self):
+        launch = read("tools/launch-preview.ps1")
+        self.assertLess(launch.index("$exitCode -eq 1306"), launch.index("create-crash-report.ps1"))
+        self.assertIn("result = 'config-unavailable'", launch)
+
+    def test_the_launcher_explains_the_file(self):
+        window = read("launcher/PinyonShift.Launcher/MainWindow.xaml.cs")
+        handled = window.index('"config-unavailable"')
+        self.assertLess(handled, window.index("DetectPendingReport();", handled))
+
+
 class GraphicsUnavailableTests(unittest.TestCase):
     def test_the_game_explains_and_exits_1308(self):
         app = read("src/pinyon_shift_app.cpp")

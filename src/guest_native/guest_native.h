@@ -70,6 +70,11 @@ struct Replacement {
   bool (*native)(PPCContext& ctx, uint8_t* base);
   // Guest memory the body may write for this input; null when it writes none.
   size_t (*written)(const PPCContext& ctx, uint8_t* base, GuestRange* ranges);
+  // Optional verify mode for a body accepted within a tolerance instead of
+  // bit for bit (NN-4.3's DSP twins): it replaces the comparison above, must
+  // run `original` on the real registers and memory and leave its results, and
+  // updates `stats.verified`, `declined` and `mismatched` itself.
+  void (*verify)(Replacement& self, PPCFunc* original, PPCContext& ctx, uint8_t* base) = nullptr;
   Stats stats;
   // 0 unchecked, 1 guest code matches, -1 it does not (original only).
   std::atomic<int> code_state{0};
@@ -77,8 +82,27 @@ struct Replacement {
 
 void Dispatch(Replacement& replacement, PPCFunc* original, PPCContext& ctx, uint8_t* base);
 
+// Every replacement in the build, listed at static initialization so their
+// guest code can be checked before the code bytes are retired (NN-6.7).
+struct Declared {
+  explicit Declared(Replacement& replacement);
+};
+// Checks the guest code of every declared replacement now, as its first call
+// would; returns how many matched.
+size_t CheckAllGuestCode(uint8_t* base);
+
 // Writes one summary event per replacement that ran (route end, shutdown).
 void RecordSummary();
+
+// The registers a caller may read after a return, compared between a reference
+// run and the optimized run: empty when equal, otherwise what differed.
+std::string CompareReferenceRegisters(const PPCContext& reference, const PPCContext& optimized);
+
+// Lockstep verify of the generator's reference copies (NEXT_LEVEL_RESEARCH.md
+// NL-0.2, src/guest_native/reference_verify.cpp): one summary event at route end.
+namespace reference {
+void RecordSummary();
+}
 
 // FNV-1a 64 over guest code bytes, as stored in Replacement.
 uint64_t HashGuestCode(const uint8_t* code, uint32_t size);
@@ -96,6 +120,8 @@ uint64_t HashGuestCode(const uint8_t* code, uint32_t size);
 // Replaces guest function sub_<base_hex> (sub_<v4_hex> in a v4 build) with
 // `replacement`. Give the hex digits without 0x, e.g. 82438EA8.
 #define PINYON_GUEST_NATIVE(base_hex, v4_hex, replacement)                                   \
+  static ::pinyon_shift::guest_native::Declared PINYON_GUEST_NATIVE_JOIN(                    \
+      pinyon_guest_native_declared_, PINYON_GUEST_NATIVE_PICK(base_hex, v4_hex)){replacement}; \
   extern "C" REX_FUNC(PINYON_GUEST_NATIVE_JOIN(                                              \
       __imp__sub_, PINYON_GUEST_NATIVE_PICK(base_hex, v4_hex)));                             \
   extern "C" REX_FUNC(PINYON_GUEST_NATIVE_JOIN(sub_,                                         \

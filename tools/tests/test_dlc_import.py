@@ -15,6 +15,20 @@ SPEC.loader.exec_module(dlc)
 
 
 class DlcImportTests(unittest.TestCase):
+    def test_payload_digest_order_is_the_same_on_every_platform(self):
+        # The catalog digests were made on Windows, where paths sort without
+        # case; macOS and Linux must list the files in the same order.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("Media/audio/b.fsb", "Media/AnimatedObjects/a.pgeo", "Media/1.puboffer",
+                         "spa.bin", "Media/aIOpenWorld/r.owt"):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_bytes(name.encode())
+            files, _ = dlc.payload_catalog(root)
+        self.assertEqual([f["path"] for f in files],
+                         ["Media/1.puboffer", "Media/aIOpenWorld/r.owt",
+                          "Media/AnimatedObjects/a.pgeo", "Media/audio/b.fsb", "spa.bin"])
+
     def test_active_content_reverification_rejects_tampering_and_preserves_save(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -84,6 +98,113 @@ class DlcImportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsafe ZIP"):
                 dlc.stage_inputs(root / "bad.zip", root, manifest)
             self.assertFalse((root.parent / "escape").exists())
+
+    def test_unreadable_game_zips_in_a_folder_are_skipped(self):
+        # An installed package's Media/DLCZips use a method Python cannot
+        # inflate; choosing such a folder names the problem, not a traceback.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = self.fixture(root)
+            folder = root / "installed/Media/DLCZips"
+            folder.mkdir(parents=True)
+            archive_path = folder / "1300_pri_65.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("Media/cars/a.bin", b"LIVE game data")
+            data = bytearray(archive_path.read_bytes())
+            for signature, offset in ((b"PK\x03\x04", 8), (b"PK\x01\x02", 10)):
+                at = data.index(signature) + offset
+                data[at:at + 2] = (9).to_bytes(2, "little")  # Deflate64
+            archive_path.write_bytes(data)
+            with self.assertRaisesRegex(ValueError, "no FH1 DLC packages found"):
+                dlc.stage_inputs(root / "installed", root, manifest)
+            with self.assertRaisesRegex(ValueError, "cannot be read"):
+                dlc.stage_inputs(archive_path, root, manifest)
+
+    def xenia_folder(self, root, package, mask=1):
+        """Xenia's installed copy: <title>/00000002/<id> and its header."""
+        title = root / "xenia" / "content" / "0000000000000000" / "4D5309C9"
+        folder = title / "00000002" / package["package_id"]
+        folder.mkdir(parents=True)
+        (folder / "offer.puboffer").write_bytes(b"owned")
+        header = bytearray(332)
+        header[0:8] = bytes.fromhex("0000000100000002")
+        header[0x108:0x108 + 42] = package["package_id"].encode()
+        header[0x140:0x144] = bytes.fromhex("4D5309C9")
+        header[328:332] = mask.to_bytes(4, "little")
+        path = title / "Headers" / "00000002" / (package["package_id"] + ".header")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(header)
+        return title, folder, path
+
+    def test_imports_xenias_installed_package_folders(self):
+        # A player's DLC was already installed in Xenia: the unpacked folders
+        # and their headers import without the original packages (#596).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, package = self.fixture(root)
+            title, folder, _ = self.xenia_folder(root, package)
+            # A Deflate64 game ZIP inside the payload is not scanned.
+            (folder / "Media").mkdir()
+            (folder / "Media" / "DLCZips.zip").write_bytes(b"PK not readable")
+            _, manifest["packages"][0]["payload_sha256"] = dlc.payload_catalog(folder)
+            state = root / "state"
+            active, inactive, header = dlc.package_paths(state, package["package_id"])
+            with patch.object(dlc, "catalog", return_value=manifest),                     patch.object(dlc.subprocess, "check_output", return_value=b""),                     patch.object(dlc.subprocess, "run") as run:
+                for chosen in (title, title.parent, title / "00000002"):
+                    rows = dlc.import_content(chosen, state, root / "extractor")
+                    self.assertEqual(rows[0]["license_mask"], "00000001")
+                    self.assertFalse(rows[0]["enabled"])
+                run.assert_not_called()
+                self.assertTrue(inactive.is_dir())
+                self.assertEqual(int.from_bytes(header.read_bytes()[328:332], "little"), 1)
+                self.assertTrue(dlc.set_enabled(state, package["package_id"], True)[0]["enabled"])
+                dlc.verified_content(state, package["package_id"], require_enabled=True)
+            # Xenia's own copy is untouched.
+            self.assertEqual((folder / "offer.puboffer").read_bytes(), b"owned")
+
+    def test_xenia_folder_needs_its_header_and_a_verified_licence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, package = self.fixture(root)
+            title, folder, header = self.xenia_folder(root, package, mask=4)
+            with self.assertRaisesRegex(ValueError, "licence does not match"):
+                dlc.stage_inputs(title, root, manifest)
+            header.unlink()
+            with self.assertRaisesRegex(ValueError, "without its header"):
+                dlc.stage_inputs(folder, root, manifest)
+            (folder / "offer.puboffer").write_bytes(b"changed")
+            self.xenia_folder(root / "other", package)
+            changed = root / "other" / "xenia" / "content" / "0000000000000000" / "4D5309C9"
+            (changed / "00000002" / package["package_id"] / "offer.puboffer").write_bytes(b"changed")
+            state = root / "state"
+            with patch.object(dlc, "catalog", return_value=manifest),                     patch.object(dlc.subprocess, "check_output", return_value=b""):
+                with self.assertRaisesRegex(ValueError, "failed verification"):
+                    dlc.import_content(changed, state, root / "extractor")
+            self.assertFalse(any(dlc.package_paths(state, package["package_id"])[i].exists()
+                                 for i in range(3)))
+
+    def test_a_folder_with_a_package_and_a_deflate64_zip_imports_the_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, manifest, package = self.fixture(root)
+            folder = root / "downloads"
+            folder.mkdir()
+            (folder / "rally").write_bytes(source.read_bytes())
+            archive_path = folder / "big.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("LIVE", b"LIVE data")
+            data = bytearray(archive_path.read_bytes())
+            for signature, offset in ((b"PK", 8), (b"PK", 10)):
+                at = data.index(signature) + offset
+                data[at:at + 2] = (9).to_bytes(2, "little")
+            archive_path.write_bytes(data)
+            inputs = dlc.stage_inputs(folder, root, manifest)
+            self.assertEqual([i[1]["package_id"] for i in inputs], [package["package_id"]])
+            only = root / "only"
+            only.mkdir()
+            archive_path.rename(only / "big.zip")
+            with self.assertRaisesRegex(ValueError, r"big.zip \(it uses a compression method"):
+                dlc.stage_inputs(only, root, manifest)
 
     def test_failed_extraction_never_publishes_and_retry_preserves_save(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,132 @@
+# Game flow: the XML state graphs in gamemodes.zip, the States:: behaviours
+# they name, and the script actions found in the executable.
+
+# ---------------------------------------------------------------- Flow scripts
+
+[[finding]]
+group = """Flow scripts"""
+id = """state-groups"""
+base = """media/gamemodes.zip"""
+name = """flow scripts are XML state graphs"""
+what = """The game's top-level flow (start, free roam, every race type, pause, map, photo shoots, multiplayer and the rest) is data: 50 `StateGroup` XML files in `media/gamemodes.zip`, 44 distinct group ids. A group holds `State` elements; a state holds `Behaviour`, `Node`, `Entry`, `Exit` and `StateSubstitute` elements, a behaviour holds its `Attribute` (id, value) and `Transition` elements, and a node holds its own `Entry` and `Exit` elements. `Exit` and `Entry` name a `target`, and a `Node` with `state="group.state"` runs a state of another group (147 cross-group references; `global`, `Audio`, `UIShowScreens` and `InGameUI` are the most used). The free-roam flow has 908 elements; the race states file 461."""
+how = """Extracted `gamemodes.zip` with `pinyon_shift_fh1_archive_extract`; counted element and attribute names and the `state` references."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Flow scripts"""
+id = """behaviours-are-classes"""
+name = """behaviours are States:: classes"""
+what = """Every `Behaviour id` in the flow scripts names a C++ class in the `States` namespace: all 439 distinct ids match an RTTI name (for example `CSetRadioPlaylist`, `CPrepareCutscene`, `CSetTimeOfDay`). The executable registers them through `CConstructor0`/`CConstructor2` templates, so a flow creates behaviours by class name. 50 `States` classes are never named by a base-game flow. New flow logic can therefore be written in XML only from existing behaviours; a new behaviour needs code."""
+how = """Matched the extracted flow files against the RTTI census."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Flow scripts"""
+id = """gamemodes-roots"""
+base = """media/gamemodes.zip"""
+name = """other gamemodes.zip documents"""
+what = """Besides the 50 flow files, `gamemodes.zip` holds 134 `CutsceneManager` documents (camera cuts per track, hub and festival), 99 `ActivityManager` documents (speed traps, zones, stunts, barn finds, shops, per track), five `LeaderboardManager` and two `LeaderboardEntries` documents and one `ActivityCoordinator`. Folders per world (`Colorado`, `TestBed` and the UI scenes `UIAutoshow`, `UIPaintshop`, `UIWorkshop`, `UIThumbnail`, `UIThumBig`, `UIAuctionHouse`) hold that world's copies. 254 of 292 members are XMem compressed, 38 stored."""
+how = """Root element census of the extracted archive."""
+confidence = """confirmed"""
+
+[[finding]]
+group = """Flow scripts"""
+base = """Colorado/activities.xml"""
+name = """generic activities and career activation"""
+what = """Generic activity portals belong in `Colorado/activities.xml` and can load an event directly. An unknown event, or a generic portal placed in the career activation file, does not start the event. A generic portal suppresses a nearby existing trigger (the Gauntlet's)."""
+how = """Experiment with copied base game-flow data."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Base-disc solo stage probe"""
+
+# -------------------------------------------------------------- Script actions
+
+[[finding]]
+group = """Script actions"""
+base = """sub_825AD820"""
+name = """script actions are registered by name"""
+what = """Script actions are functors registered by name through factories whose create method builds the action, so following a factory's vtable leads from a name to its code. Found this way: the camera and wristband actions below, `CWristbandManager`, `CStartRewindReplayFunctor`, `CFinishRewindFunctor`, `CGivePlayerMoney` (`sub_825AD820`), `CStoreRestorePlayerCarPosition`, `CWaitForEndCondition` and `CDisableAIPlayerCarControls`."""
+how = """Registration calls and factory vtables in the generated code."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; src/pinyon_shift_runtime_hooks.cpp PinyonShiftApplyCredits"""
+
+[[finding]]
+group = """Script actions"""
+base = """sub_8291DD80, sub_8291DF68, 0x832E6364"""
+v4 = """sub_829D0D90, sub_829D0F78, 0x833D3F34"""
+name = """career event and free-roam loaders"""
+what = """`CLoadIntoCareerRace` loads a career event, also from a results branch, and keeps the player-car restoration and loading preparation; `CPlaceCar` places the car. The career event loader `sub_8291DD80` holds the event name as an inline std::string at +128 (length +144, capacity +148), read synchronously; native event menus leave it empty and select through the application's +896. `sub_8291DF68` is the free-roam loader, which returns to Colorado. The global `0x832E6364` points to the LoadGame loader, whose first word is its state; it accepts a load request only in its idle state, 22."""
+how = """Patched game-flow graphs on the base build; replacing each loader through the dispatcher (the base-disc Rally adapter chained stages with `CLoadIntoCareerRace("RALLY_NEXT")`); traces of the selected event while launching Rally events; the loader state read as a gate before entering activities from a host menu."""
+confidence = """confirmed"""
+note = """The LoadGame idle state is probable."""
+source = """src/pinyon_shift_runtime_hooks.cpp RallySeriesLoader; docs/DLC_BACKLOG.md Base-disc Rally investigation; docs/TITLE_UPDATE_V4_BACKLOG.md Review of the base-disc Rally adapter; src/pinyon_shift_runtime_hooks.cpp Rally comments, QueueRallyRaceTrace"""
+
+[[finding]]
+group = """Script actions"""
+base = """sub_82983A90"""
+v4 = """sub_82A37858"""
+name = """CStoreRestorePlayerCarPosition"""
+what = """Stores the player's free-roam return position, when the byte at +32 of its object is set, and restores it after an event. Called again between consecutive races, it overwrites the stored point with the last race's finish, so base post-race cleanup can leave the player at a race finish."""
+how = """Function replacement in the base-disc Rally adapter; native traces of the return position and the restore flag."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp RallyStoreRestorePosition; docs/DLC_BACKLOG.md Base-disc stage transition probe; Private four-stage director and resume"""
+
+[[finding]]
+group = """Script actions"""
+base = """sub_828F2DB0, sub_828F7180, sub_82486C40, sub_82486C70, sub_82858638"""
+v4 = """sub_824B68E0, sub_824B6910, sub_82908AC0"""
+name = """CChangeToFreeCamera"""
+what = """The script action `CChangeToFreeCamera` (`sub_828F2DB0`, its factory registered by `sub_828F7180`) sets each of the world's camera controllers (count `sub_82486C40`, controller `sub_82486C70`) to mode 6, the free camera, with `sub_82858638`. The free camera then flies with the left stick."""
+how = """Followed the registered functor's vtable; calling the same functions from a host guest task showed the free camera above the car (`fh1-free-camera`)."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4, NP-8.5; src/pinyon_shift_runtime_hooks.cpp PinyonShiftApplyFreeCamera"""
+
+[[finding]]
+group = """Script actions"""
+base = """sub_82937158, sub_82486B40, sub_825A86F8"""
+v4 = """sub_824B6758, sub_826207B0"""
+name = """CResetCameraToPlayer"""
+what = """The script action `CResetCameraToPlayer` (`sub_82937158`) returns each player camera (`sub_82486B40(world, index)`) to the player with `sub_825A86F8`."""
+how = """Functor vtable; used to switch the free camera back, after which the chase camera returns."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; src/pinyon_shift_runtime_hooks.cpp PinyonShiftApplyFreeCamera"""
+
+[[finding]]
+group = """Script actions"""
+base = """sub_82987978, sub_82989D10, 0x8208C858, sub_824CD660, sub_82407B20"""
+name = """CTriggerWristbandUpgrade"""
+what = """The wristband ceremony is the script action `CTriggerWristbandUpgrade` (registered by `sub_82987978`, factory vtable `0x8208C858`, execute `sub_82989D10`, `this` unused). It accepts game modes 17, 18 and 3, passes the player's current wristband to `sub_824CD660` to upgrade it, then assigns the `WristbandGet.wmv` video path to the UI flow's movie string through the string assign `sub_82407B20`. Calling the execute from a host task in free roam changes nothing visible."""
+how = """Followed the factory's create method to the action; host-task call experiment."""
+confidence = """confirmed"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-2.9, NP-8.4"""
+
+# ------------------------------------------------------- Rally behaviours (v4)
+
+[[finding]]
+group = """Rally behaviours (v4)"""
+v4 = """CLoadIntoRallyFreeRoam, CShowUIScreen_RallyHub"""
+name = """Rally entry and hub behaviours"""
+what = """v4 adds Rally entry and hub behaviours: `CLoadIntoRallyFreeRoam`, `CShowUIScreen_RallyHub`, `CShowRallyOutpostScreen`, `CShowMultiStageEventSelectionScreen`, `CRemovePlayerCarWhilePaused`, `CShowBackgroundMovie`, `CHasSeenInitialRallyTicket` and `CSetRestrictionsForFirstRallyAutoshow`. It also adds Rally attributes to base behaviours: `onRally` on the pause screen and Race Central, `rallyFreeRoam`, and `applyRallyFilterByDefault` on car registration."""
+how = """String comparison of the base and v4 images; v4 Rally flow files."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds"""
+
+[[finding]]
+group = """Rally behaviours (v4)"""
+v4 = """CLoadIntoRallyRace, CRallyStageIntro"""
+name = """Rally race, scoring and progression behaviours"""
+what = """Race and scoring: `CLoadIntoRallyRace`, `CRallyStageIntro`, `CRallyAIState`, `CRallyDriverState`, `CShowNextMultiStageLoadingScreen`, `CShowRallyStageScoreboard`, `CShowRallyRollupScoreboard`, `CHudStatusSplitTime` and `COMPONENT_CO_DRIVER`. Progression: `CInitialiseEventUnlocksRally`, `CTriggerRallyEventUnlocks`, `CCollectRallyUnlocks`, `CIsRallyXPEvent`, `CShowPostRaceRallyPointsScreen`, `CHasCompletedRallyInitialFlow`, end-sequence and post-championship map behaviours, and `ACHIEVEMENT_RALLYCHAMPION`."""
+how = """String comparison of the base and v4 images; v4 Rally flow files."""
+confidence = """confirmed"""
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md What v4 adds"""
+
+[[finding]]
+group = """Rally behaviours (v4)"""
+v4 = """Rally free roam"""
+name = """Rally free roam is a menu hub"""
+what = """In v4, Rally free roam is a menu hub, not a drivable area: world presentation is off, the player car is removed and a background movie plays. The seven Rally activation coordinates look like map pins for the unlock flow, not places to drive to, so a physical Rally entry point is the wrong thing to look for."""
+how = """Reading v4's Rally flow behaviours; native Rally entry runs from the pause menu."""
+confidence = """probable"""
+note = """The map-pin reading of the coordinates is a guess."""
+negative = true
+source = """docs/TITLE_UPDATE_V4_BACKLOG.md Review of the base-disc Rally adapter"""

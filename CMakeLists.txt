@@ -31,12 +31,24 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/save_backups.cpp
     src/cheats.cpp
     src/cheats_map.cpp
+    src/audio_mix.cpp
+    src/dev_options.cpp
+    src/telemetry/forza_dash.cpp
+    src/telemetry/telemetry_out.cpp
     src/dlc_token_unlocks.cpp
     src/dlc_treasure_map.cpp
+    src/hud_toggle.cpp
+    src/auto_start.cpp
     src/guest_native/guest_native.cpp
     src/guest_native/crt_math.cpp
     src/guest_native/lzx_decoder.cpp
     src/guest_native/title_waits.cpp
+    src/guest_native/voice_chat.cpp
+    src/guest_native/retire_code.cpp
+    src/guest_native/fmod_stereo.cpp
+    src/guest_native/fmod_dsp.cpp
+    src/guest_native/fmod_output.cpp
+    src/guest_native/reference_verify.cpp
     src/dlc/rally_progress.cpp
     src/dlc/rally_pace_notes.cpp
     src/dlc/rally_audio_probe.cpp
@@ -53,6 +65,7 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/ui/hostui/glyph_atlas.cpp
     src/ui/hostui/host_ui.cpp
     src/ui/hostui/menu.cpp
+    src/ui/hostui/pad_glyphs.cpp
     src/ui/hostui/vector_font.cpp
     src/ui/hostui/xds_texture.cpp
     src/ui/settings_menu.cpp
@@ -66,6 +79,8 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/platform/host_platform.cpp
     src/platform/sha256.cpp
     ${REXSDK_DIR}/thirdparty/crypto/sha256.cpp
+    src/native_renderer/d3d_census.cpp
+    src/native_renderer/d3d_draw.cpp
     src/native_renderer/graphics_hooks.cpp
     src/native_renderer/guest_output_renderer.cpp
     src/native_renderer/shader_capture.cpp
@@ -77,6 +92,7 @@ elseif(WIN32)
     add_executable(pinyon_shift WIN32
         ${PINYON_SHIFT_HOST_SOURCES}
         src/crash_reporter_win.cpp
+        src/hitch_sampler_win.cpp
     )
 elseif(ANDROID)
     # SDL's activity loads the game as libmain.so and calls its SDL_main; the
@@ -92,6 +108,25 @@ elseif(ANDROID)
     # here; native replacements are strong definitions in this library and
     # still win at link time.
     target_link_options(pinyon_shift PRIVATE -Wl,-Bsymbolic-functions)
+    # NN-1.9: an lld symbol ordering file from a probe build's call counts
+    # (tools/make-symbol-order.py) puts the hot generated functions together:
+    # on the Odin race, libmain's resident pages fell from 52 to 34-36 MB.
+    # The tracked file comes from the base image's boot-to-race route, so v4
+    # builds go without one.
+    if(PINYON_SHIFT_TITLE_UPDATE_V4)
+        set(_pinyon_symbol_order_default "")
+    else()
+        set(_pinyon_symbol_order_default "${CMAKE_CURRENT_SOURCE_DIR}/config/performance/symbol-order-base.txt")
+    endif()
+    set(PINYON_SHIFT_SYMBOL_ORDER_FILE "${_pinyon_symbol_order_default}" CACHE FILEPATH
+        "lld symbol ordering file for libmain (tools/make-symbol-order.py); empty for none")
+    if(PINYON_SHIFT_SYMBOL_ORDER_FILE)
+        target_link_options(pinyon_shift PRIVATE
+            "-Wl,--symbol-ordering-file=${PINYON_SHIFT_SYMBOL_ORDER_FILE}"
+            -Wl,--no-warn-symbol-ordering)
+        set_property(TARGET pinyon_shift APPEND PROPERTY LINK_DEPENDS
+            "${PINYON_SHIFT_SYMBOL_ORDER_FILE}")
+    endif()
 else()
     add_executable(pinyon_shift
         ${PINYON_SHIFT_HOST_SOURCES}
@@ -122,6 +157,7 @@ add_executable(pinyon_shift_hostui_tests EXCLUDE_FROM_ALL
     src/ui/hostui/fh1_archive.cpp
     src/ui/hostui/glyph_atlas.cpp
     src/ui/hostui/menu.cpp
+    src/ui/hostui/pad_glyphs.cpp
     src/ui/hostui/vector_font.cpp
     src/ui/hostui/xds_texture.cpp
 )
@@ -166,6 +202,10 @@ add_executable(pinyon_shift_save_backups_tests EXCLUDE_FROM_ALL
 target_include_directories(pinyon_shift_save_backups_tests PRIVATE src)
 target_link_libraries(pinyon_shift_save_backups_tests PRIVATE rex::runtime)
 
+add_executable(pinyon_shift_telemetry_tests EXCLUDE_FROM_ALL
+    tests/telemetry/forza_dash_test.cpp src/telemetry/forza_dash.cpp)
+target_include_directories(pinyon_shift_telemetry_tests PRIVATE src)
+
 add_executable(pinyon_shift_content_roots_tests EXCLUDE_FROM_ALL
     tests/dlc/content_roots_test.cpp)
 target_link_libraries(pinyon_shift_content_roots_tests PRIVATE rex::runtime)
@@ -194,6 +234,7 @@ add_dependencies(pinyon_shift_host_tests
     pinyon_shift_car_cards_tests
     pinyon_shift_save_backups_tests
     pinyon_shift_content_roots_tests
+    pinyon_shift_telemetry_tests
     pinyon_shift_overlay_device_tests
     pinyon_shift_fh1_edram_tiles_tests
     pinyon_shift_mod_hello_telemetry)
@@ -222,6 +263,14 @@ target_include_directories(pinyon_shift_fh1_texture_import PRIVATE
 target_include_directories(pinyon_shift_fh1_archive_extract PRIVATE
     src ${REXSDK_DIR}/include)
 target_link_libraries(pinyon_shift_fh1_archive_extract PRIVATE rex::runtime)
+if(UNIX AND NOT APPLE)
+    # As the game: find librexruntime.so beside the extractor (or in the
+    # build's artifacts) instead of by this build tree's absolute path, so a
+    # copied build (tools/pinyon_deck.py, a Steam Deck) can still import DLC.
+    set_target_properties(pinyon_shift_fh1_archive_extract PROPERTIES
+        INSTALL_RPATH "$ORIGIN:$ORIGIN/rexglue-artifacts"
+        BUILD_WITH_INSTALL_RPATH ON)
+endif()
 
 # FSB4 banks to WAV for the asset export (#446), with the SDK's FFmpeg (MP3
 # and the XMA frame decoder the game's audio runs on).
@@ -279,7 +328,7 @@ if(WIN32 AND PINYON_SHIFT_VC_REDIST_DIR)
 endif()
 
 if(WIN32)
-    target_link_libraries(pinyon_shift PRIVATE bcrypt d3d12 dbghelp dxgi rex::gpu-fh1)
+    target_link_libraries(pinyon_shift PRIVATE bcrypt d3d12 dbghelp dxgi ws2_32 rex::gpu-fh1)
 else()
     find_package(Threads REQUIRED)
     target_link_libraries(pinyon_shift PRIVATE Threads::Threads ${CMAKE_DL_LIBS} rex::gpu-fh1)

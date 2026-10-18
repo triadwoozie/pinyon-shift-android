@@ -1,0 +1,103 @@
+pinyon-shift-fh1-render-test-v1
+# #484 gate: drive a car the hidden_cars mod lists. Run on a seed whose
+# modded profile owns the car and has it selected (bought there with
+# fh1-buy-car). The fh1-race inputs open the Gauntlet with the current car;
+# A at the start menu starts the race (the Kenworth T440) or returns the
+# car to free roam (the tour bus, game mode 17), and
+# it drives for about two and a half minutes with throttle, alternating
+# steering and occasional braking, captured every 1,800 frames. Check the
+# capture events' vehicle_x/vehicle_z: the tour bus covered about 1 km
+# (2042,931 to 2186,30) with no crash. The route checks stability and
+# rendering, not the driving line.
+# clock-hz 60
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+capture 1560 event-ready
+input 1680 4000 0 0 0 0 0 0
+input 1686 0000 0 0 0 0 0 0
+capture 1860 event-entered
+input 2040 1000 0 0 0 0 0 0
+input 2046 0000 0 0 0 0 0 0
+capture 2220 event-step-1
+input 2400 1000 0 0 0 0 0 0
+input 2406 0000 0 0 0 0 0 0
+input 2760 1000 0 0 0 0 0 0
+input 2766 0000 0 0 0 0 0 0
+capture 2940 event-step-3
+input 3120 1000 0 0 0 0 0 0
+input 3126 0000 0 0 0 0 0 0
+input 3480 1000 0 0 0 0 0 0
+input 3486 0000 0 0 0 0 0 0
+input 3600 1000 0 0 0 0 0 0
+input 3606 0000 0 0 0 0 0 0
+input 3720 1000 0 0 0 0 0 0
+input 3726 0000 0 0 0 0 0 0
+input 3840 1000 0 0 0 0 0 0
+input 3846 0000 0 0 0 0 0 0
+input 3960 1000 0 0 0 0 0 0
+input 3966 0000 0 0 0 0 0 0
+input 4080 1000 0 0 0 0 0 0
+input 4086 0000 0 0 0 0 0 0
+capture 4300 start-menu
+input 4400 1000 0 0 0 0 0 0
+input 4406 0000 0 0 0 0 0 0
+input 4600 1000 0 0 0 0 0 0
+input 4606 0000 0 0 0 0 0 0
+input 4800 1000 0 0 0 0 0 0
+input 4806 0000 0 0 0 0 0 0
+input 5000 1000 0 0 0 0 0 0
+input 5006 0000 0 0 0 0 0 0
+input 5200 1000 0 0 0 0 0 0
+input 5206 0000 0 0 0 0 0 0
+capture 5500 race-ready
+input 5520 0000 0 255 0 0 0 0
+capture 5760 race-moving
+input 5820 0000 0 255 6000 0 0 0
+input 6120 0000 0 255 0 0 0 0
+input 6420 0000 0 255 -6000 0 0 0
+input 6720 0000 0 255 0 0 0 0
+input 7020 0000 0 255 6000 0 0 0
+input 7320 0000 0 255 0 0 0 0
+capture 7330 drive-1
+input 7620 0000 0 255 -6000 0 0 0
+input 7920 0000 255 0 0 0 0 0
+input 8220 0000 0 255 6000 0 0 0
+input 8520 0000 0 255 0 0 0 0
+input 8820 0000 0 255 -6000 0 0 0
+input 9120 0000 0 255 0 0 0 0
+capture 9130 drive-2
+input 9420 0000 0 255 6000 0 0 0
+input 9720 0000 0 255 0 0 0 0
+input 10020 0000 0 255 -6000 0 0 0
+input 10320 0000 0 255 0 0 0 0
+input 10620 0000 255 0 6000 0 0 0
+input 10920 0000 0 255 0 0 0 0
+capture 10930 drive-3
+input 11220 0000 0 255 -6000 0 0 0
+input 11520 0000 0 255 0 0 0 0
+input 11820 0000 0 255 6000 0 0 0
+input 12120 0000 0 255 0 0 0 0
+input 12420 0000 0 255 -6000 0 0 0
+input 12720 0000 0 255 0 0 0 0
+capture 12730 drive-4
+input 13020 0000 0 255 6000 0 0 0
+input 13320 0000 255 0 0 0 0 0
+input 13620 0000 0 255 -6000 0 0 0
+input 13920 0000 0 255 0 0 0 0
+input 14220 0000 0 255 6000 0 0 0
+input 14520 0000 0 255 0 0 0 0
+capture 14530 drive-5
+input 14820 0000 0 255 -6000 0 0 0
+input 15120 0000 0 255 0 0 0 0
+input 15420 0000 0 255 6000 0 0 0
+input 15720 0000 0 255 0 0 0 0
+input 16020 0000 255 0 -6000 0 0 0
+input 16320 0000 0 0 0 0 0 0
+stop 16380

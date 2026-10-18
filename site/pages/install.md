@@ -34,7 +34,7 @@ Administrator permission is requested only when Visual Studio 2022 C++ Build Too
 
 ## Updating
 
-Choose **Update to <version>** in the launcher's footer when it appears. The launcher downloads the release from GitHub, checks its SHA-256, replaces itself and restarts. Saves, settings and game files stay where they are; choose your disc image to build the new version, which takes a while. Downloading the new `PinyonShift-Launcher.zip` and running it still works too.
+Choose **Update to <version>** in the launcher's footer when it appears. The launcher downloads the release from GitHub, checks its SHA-256, replaces itself and restarts. Saves, settings and game files stay where they are; choose your disc image to build the new version, which takes a while. Downloading the new `PinyonShift-Launcher.zip` and running it still works too. On Android, rebuild the APK on the PC and share it again: the app offers the newer build.
 
 ## Use an extracted folder
 
@@ -64,7 +64,7 @@ PinyonShift\
 
 ![The launcher's Settings panel: Vulkan, internal resolution, output scaling and the Treasure Map toggle](img/launcher-settings.png)
 
-**Settings** sets the internal resolution and the output scaling (bilinear, CAS or FSR 1), and shows the resulting resolutions. It also has the Treasure Map toggle. **This PC** lists the GPU, its memory, the CPU cores and the display's refresh rate, and recommends an in-game preset. Everything else is in the [in-game settings](playing.md).
+**Settings** sets the internal resolution and the output scaling (bilinear, CAS, FSR 1, or FSR 2 and FSR 3 when their runtime is installed; Linux, macOS and Android builds include it), and shows the resulting resolutions. It also has the Treasure Map toggle. **This PC** lists the GPU, its memory, the CPU cores and the display's refresh rate, and recommends an in-game preset. Everything else is in the [in-game settings](playing.md).
 
 ## Uninstall
 

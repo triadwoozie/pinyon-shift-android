@@ -24,7 +24,7 @@ constexpr const char* kRestoreFile = "restore-pending.txt";
 // snapshots and preserve the current installation when restoring an old save.
 bool IsMarketplacePath(const fs::path& relative) {
   std::vector<std::string> parts;
-  for (const auto& part : relative) parts.push_back(part.string());
+  for (const auto& part : relative) parts.push_back(rex::path_to_utf8(part));
   return parts.size() >= 3 && parts[0] == "0000000000000000" &&
          (parts[2] == "00000002" || parts[2] == "Disabled" ||
           (parts[2] == "Headers" && parts.size() >= 4 && parts[3] == "00000002"));
@@ -161,7 +161,7 @@ std::vector<SaveBackups::Slot> SaveBackups::List() const {
       continue;
     }
     const Signature signature = Scan(it->path() / "user");
-    slots.push_back({it->path().filename().string(), it->path(), signature.files,
+    slots.push_back({rex::path_to_utf8(it->path().filename()), it->path(), signature.files,
                      signature.bytes});
   }
   std::sort(slots.begin(), slots.end(),

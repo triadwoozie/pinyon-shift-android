@@ -68,12 +68,19 @@ and check that new links and anchors resolve in `site/_build`.
 
 When an AppData-backed gameplay run is needed, launch the locally built preview
 through `tools/launch-preview.ps1` and pass the installed preview state directory
-as `-StateRoot`. The current save is under:
+as `-StateRoot`. This is the reference save on multivac: every discount sign
+found, all 21 DLC packages installed, the v4 title update installed and on
+(offline 1000 Club too). Launch it with the v4 build (`tools/build-v4.ps1
+-StateRoot $stateRoot` first when the code changed):
 
 ```powershell
 $stateRoot = Join-Path $env:LOCALAPPDATA 'PinyonShift\source\0.1.0\.local\preview'
-.\tools\launch-preview.ps1 -StateRoot $stateRoot
+.\tools\launch-preview.ps1 -StateRoot $stateRoot -TitleUpdateV4
 ```
+
+The first v4 launch makes the profile v4-only; launch-preview backs up the
+base profile to `$stateRoot\backups\pre-v4` before it. Older player saves
+from other folders are archived in `D:\pinyon-save-archive`.
 
 Before launching, verify that `$stateRoot\user` contains a
 `ForzaProfile\ForzaProfile` file and that no `pinyon_shift` process is already
@@ -106,14 +113,23 @@ address mapping), write it down in the same change, before moving on:
 - Name it in the repository's records, not only in a code comment or a
   commit message: semantic symbols and offsets mod code uses go in
   `config/mod/fh1-symbols.toml` (v4 offsets in
-  `config/mod/fh1-offsets-v4.toml`); everything else gets a row in
-  `docs/REVERSE_ENGINEERING.md` (create it if it does not exist yet; see
-  issue #448).
+  `config/mod/fh1-offsets-v4.toml`); everything else gets a `[[finding]]`
+  record in `site/findings/<topic>.toml`, under the group (page section)
+  it belongs to. The docs site renders these on the Reverse engineering
+  pages (`site/pages/game-*.md`) and in the address index; a new group
+  needs a `{{findings:<topic>/<group>}}` line on its page, or the build
+  fails. `docs/REVERSE_ENGINEERING.md` only points there now (issue #448).
 - Record the base address (and v4 address when known), a short name, what
   it does, how it was established (hook, trace, xref, string, experiment)
-  and a confidence: confirmed, probable or guess.
+  and a confidence: confirmed, probable or guess. Fill `source` with the
+  doc, backlog item or code that holds the detail.
 - Findings that explain a subsystem (a file format, a render pass, a save
-  layout) also go in that subsystem's doc or backlog, linked from the row.
+  layout) also get prose, a diagram or example code on that topic's page,
+  and the subsystem's doc or backlog keeps the detail, linked from the
+  record.
+- Before adding a record, search `site/findings` for the address or name:
+  extend the existing record rather than adding a second one on another
+  page.
 - Negative results count too: record what an address or option was found
   not to do, so the next investigation does not repeat it.
 - Write only our own analysis: no disassembly listings, decompiled code or

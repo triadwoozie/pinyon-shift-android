@@ -11,7 +11,7 @@ param(
     [int]$ResolutionScale = 1,
     [ValidateSet('vulkan')]
     [string]$GraphicsApi = 'vulkan',
-    [ValidateSet('bilinear', 'cas', 'fsr')]
+    [ValidateSet('bilinear', 'cas', 'fsr', 'fsr2', 'fsr3', 'dlss')]
     [string]$OutputScaling = 'bilinear',
     [ValidateSet('true', 'false')]
     [string]$TreasureMap = 'true',
@@ -19,7 +19,7 @@ param(
     [string]$Preset = 'custom',
     # The in-game GRAPHICS PRESET rows (src/ui/settings_menu.cpp); applied
     # after the other choices, which it overrides.
-    [ValidateSet('low_spec_60', 'balanced_40', 'performance_120', 'quality_60')]
+    [ValidateSet('ultra_low_30', 'low_spec_60', 'balanced_40', 'performance_120', 'quality_60')]
     [string]$GamePreset,
     [ValidateSet(0, 30, 60, 120, 240)]
     [int]$PresentationFps = 0,
@@ -205,26 +205,42 @@ $retiredSettings = @(
 
 # The values of each in-game preset, as its row in the settings screen sets
 # them (Vulkan and the recorder thread are always set by Apply).
+# Every preset sets shadows, the reflection rate and single-pass scene
+# back to the desktop defaults that ULTRA LOW 30 turns down, as the game does.
 $gamePresets = [ordered]@{
+    ultra_low_30 = [ordered]@{ draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
+        present_effect = '"bilinear"'; fh1_msaa_single_sample = 'true'; host_present_fps_limit = '0'
+        pinyon_shift_fh1_render_fps_limit = '30'; anisotropic_override = '-1'; swap_post_effect = '"none"'
+        pinyon_shift_fh1_shadows = 'false'; pinyon_shift_fh1_env_map_rate = '0.25'
+        fh1_untile_predicated_tiling = 'true' }
     low_spec_60 = [ordered]@{ draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
         present_effect = '"bilinear"'; fh1_msaa_single_sample = 'true'; host_present_fps_limit = '0'
-        pinyon_shift_fh1_render_fps_limit = '60'; anisotropic_override = '-1'; swap_post_effect = '"none"' }
+        pinyon_shift_fh1_render_fps_limit = '60'; anisotropic_override = '-1'; swap_post_effect = '"none"'
+        pinyon_shift_fh1_shadows = 'true'; pinyon_shift_fh1_env_map_rate = '1'
+        fh1_untile_predicated_tiling = 'false' }
     balanced_40 = [ordered]@{ draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
         present_effect = '"bilinear"'; fh1_msaa_single_sample = 'true'; host_present_fps_limit = '0'
-        pinyon_shift_fh1_render_fps_limit = '40'; anisotropic_override = '-1'; swap_post_effect = '"none"' }
+        pinyon_shift_fh1_render_fps_limit = '40'; anisotropic_override = '-1'; swap_post_effect = '"none"'
+        pinyon_shift_fh1_shadows = 'true'; pinyon_shift_fh1_env_map_rate = '1'
+        fh1_untile_predicated_tiling = 'false' }
     performance_120 = [ordered]@{ draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
         present_effect = '"fsr"'; fh1_msaa_single_sample = 'true'; host_present_fps_limit = '0'
-        pinyon_shift_fh1_render_fps_limit = '120' }
+        pinyon_shift_fh1_render_fps_limit = '120'
+        pinyon_shift_fh1_shadows = 'true'; pinyon_shift_fh1_env_map_rate = '1'
+        fh1_untile_predicated_tiling = 'false' }
     quality_60 = [ordered]@{ draw_resolution_scale_x = '2'; draw_resolution_scale_y = '2'
         present_effect = '"bilinear"'; fh1_msaa_single_sample = 'false'; host_present_fps_limit = '0'
-        pinyon_shift_fh1_render_fps_limit = '60' }
+        pinyon_shift_fh1_render_fps_limit = '60'
+        pinyon_shift_fh1_shadows = 'true'; pinyon_shift_fh1_env_map_rate = '1'
+        fh1_untile_predicated_tiling = 'false' }
 }
 
 # The in-game preset the file matches, as the settings screen shows it.
 function Get-GamePreset([string]$Text) {
     $defaults = @{ present_effect = '"bilinear"'; fh1_msaa_single_sample = 'false'
         host_present_fps_limit = '0'; anisotropic_override = '-1'; swap_post_effect = '"none"'
-        pinyon_shift_fh1_render_fps_limit = '0'; draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1' }
+        pinyon_shift_fh1_render_fps_limit = '0'; draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
+        pinyon_shift_fh1_shadows = 'true'; pinyon_shift_fh1_env_map_rate = '1'; fh1_untile_predicated_tiling = 'false' }
     foreach ($name in $gamePresets.Keys) {
         $all = $true
         foreach ($setting in $gamePresets[$name].GetEnumerator()) {

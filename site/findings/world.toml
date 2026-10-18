@@ -1,0 +1,321 @@
+# World and tracks: track data, scenery visibility, draw distance and level
+# of detail, placement, crowds and activities, time and weather. Rendered on
+# site/pages/game-world.md.
+
+# --- Track data and scenery visibility ---------------------------------------
+
+[[finding]]
+group = """Track data and scenery visibility"""
+id = """pvs-zones"""
+base = '''media/tracks/colorado/bin.zip, Ribbon_00/FilenameMap_00.dat, Colorado_00.pvs, PVSZLookup_00.dat, PVSZoneSpeeds.dat, tracks\%s\Ribbon_%02d\*.pvs, CTrackPVSZoneResource'''
+v4 = """same"""
+name = """PVS zones"""
+what = """Track scenery is culled through precomputed visibility (PVS) zones, not by a distance. Colorado's scenery is about 230,000 `_0x........_B.bix` model files in `bin.zip`, named through the ribbon's filename map and made visible per zone through `PVSZLookup` and the ribbon's `.pvs` data. What is drawn from where is baked into that data, so there is no scenery draw distance setting to raise: it would take changing the PVS data or the code that reads it."""
+how = """Strings and class names in the executable (`CTrackPVSZoneResource`, the `Ribbon_%02d` path pattern); archive listing and file names."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Track data and scenery visibility"""
+base = """sub_8251D628, sub_824878E0"""
+name = """session track descriptors"""
+what = """`sub_8251D628` fills the live session's track ID at +60 and its media name at +64 (an MSVC `std::string`: length at +80, capacity at +84). `sub_824878E0` reaches those descriptors from `[world + 124]`."""
+how = """Read-only trace logging mode, track ID and media name on each change."""
+confidence = """confirmed"""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace"""
+
+[[finding]]
+group = """Track data and scenery visibility"""
+base = """0x82237FE4 (CCullingGroupTable), 0x82243414 (CTrackRenderModel), 0x82243464 (CTrackRenderModelInstance), 0x82001474 (CTrackSubModel), 0x820016B4 (CTrackModel)"""
+name = """track class vtables"""
+what = """The vtables of the track model classes. The render model instance's methods are short thunks, so the LOD or cull decision is not in them. No executable string names a scenery LOD scale, bias or distance."""
+how = """RTTI type descriptors and complete-object locators."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Track data and scenery visibility"""
+name = """static world draw routes"""
+what = """In the tested festival scene the track's world geometry came through indirect track scopes, while the direct unified-mesh route was dormant, and the `SimpleModel` static population carried null resources. Draw constants and transforms did not match the 24,025-entry authored spatial catalog under any bounded interpretation tried."""
+how = """Track and static-world draw traces joined to prepared draws; transform matching experiments."""
+confidence = """probable"""
+note = """One scene; not checked on other routes."""
+negative = true
+source = """docs/native-renderer/RESEARCH.md Terrain, track and static-world leads"""
+
+[[finding]]
+group = """Track data and scenery visibility"""
+base = """sub_82D3CD48, sub_82D3DA48, sub_82D3DB00"""
+name = """serialized geometry blob"""
+what = """`sub_82D3DA48` relocates a geometry blob's 12-byte entries in place: each has a byte-index list at +4 with its count at +9 and a second list at +0 with its count at +8. `sub_82D3DB00` reserves eight 544-byte result slots in a 4,544-byte frame; `sub_82D3CD48` reads at least three byte indices from entry+0 before the count at entry+4, and its result fits a 544-byte slot only for counts up to 19. Replays of existing saves reached these loops with stale relocated pointers and oversized counts."""
+how = """Crash reports and validation hooks at `0x82D3CD58`, `0x82D3CD80`, `0x82D3DB54`, `0x82D3DBF4` and `0x82D3DB6C` (v4 `0x82DFEE38`, `0x82DFEE60`, `0x82DFFC9C`, `0x82DFFD3C`, `0x82DFFCB4`); long-play soak test."""
+confidence = """confirmed"""
+note = """what the geometry is used for is not established"""
+source = """src/pinyon_shift_runtime_hooks.cpp PinyonShiftValidateGeometry*"""
+
+# --- Draw distance -----------------------------------------------------------
+
+[[finding]]
+group = """Draw distance"""
+base = """sub_82D505C0"""
+name = """track render settings"""
+what = """Serializes the per-track render settings that `media/tracks/<track>/TrackSettings.xml` sets, plain XML read in free roam. Field offsets: `GrassLODDist` +712, `GrassLODFadeRange` +716, `GrassMinNumShells` +720, `GrassFadeStartDistance` +728, `GrassFadeEndDistance` +732, `Crowds` +832, `CollidableDropDistance` +656, `wholeTrackLightmapRadius` +1248, `depthPassRadius` +1252, `screenAreaDistances` +1260, `Performance` +1378, `MipMapLodBiasModifier` +1404, besides lighting, tone map and wind fields."""
+how = """Key strings mapped to the serializer's field arguments; a mod replacing the file was read in free roam."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Draw distance"""
+base = """TrackSettings.xml (Colorado)"""
+v4 = """same"""
+name = """track settings distances give no visible gain"""
+what = """Doubling the grass fade distances, the crowd LOD and sprite distances and `screenAreaDistances mainScene` changed nothing visible in free-roam views; the only differences were moving cars. Cutting them does not pay either: `GrassMinNumShells` 0, grass fading from 20 to 40 m (stock 250 to 280 m), every crowd LOD and sprite distance 0, `Performance CrowdSize` 0 and `NonFocusCarProjectedShadows` 0 left the grass beside the road drawn and changed neither GPU time (7.31 and 7.36 ms median against 7.91 and 6.88 ms stock) nor draws in a way that stood out from run-to-run spread, on an RTX 4080 at 1x."""
+how = """A/B captures of the same free-roam views from one seed; for the cuts, two A/B pairs of a free-roam drive route from a pinned seed with a loose-file mod replacing `TrackSettings.xml` (#515)."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Draw distance"""
+base = """0x820744F0 (CamFarClip), sub_8284DAE0, sub_8284CB30, sub_8284C5D0, sub_8284C410"""
+name = """camera far plane"""
+what = """`CamFarClip` is read by the camera functions `sub_8284DAE0`, `sub_8284CB30`, `sub_8284C5D0` and `sub_8284C410`. `camera.zip` sets only near planes (`CameraSettings.ini`), so the far plane is a code default. The scene projection measured in free roam has a far plane of about 20,000 and a near plane of 0.3 (see "scene world-view-projection constants")."""
+how = """String xref; reading the camera archive."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Draw distance"""
+base = """0x8207AA58 (draw_distance), sub_828C6E68"""
+name = """map draw distance"""
+what = """The executable's `draw_distance` string belongs to the map and minimap profiles (`MapProfileFullscreen.xml`, `MapProfileMinimap.xml`), not to the 3D world."""
+how = """String xref."""
+confidence = """probable"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Draw distance"""
+base = """sub_82DB8AE8, sub_82DC1CB0, sub_82D65608"""
+name = """scene draw on the render thread"""
+what = """In free roam the render thread (guest `825A6320`) spends most of its busy time in `sub_82DB8AE8` > `sub_82DC1CB0` > `sub_82D65608`, and below `sub_82D65608` only in draw submission (`sub_82440CF8`). The main thread (guest `8255AE10`, also `82C0C8C8`) walks the scene through `sub_82D4E2E0` > `sub_82D4DE30`, into `sub_82D46EF8` > `sub_82D3A528` and `sub_82D4DCC8` > `sub_82D43818` > `sub_82D41A30` next to the culling-group table's method: the next place to look for where a model LOD is chosen."""
+how = """A sampling profiler over every guest thread during a free-roam drive."""
+confidence = """probable"""
+note = """`sub_82D4E2E0` was later found to be `CPhysicsWorld` vtable slot 22, the physics-world step (see "job worker threads" on the threads page). Its subtree is mostly collision and broadphase (`CRigidBodyColl`, `CCullingGroupTable`, `CWCStreamWorldGame`), so this main-thread chain is probably physics rather than where a model LOD is chosen."""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail; docs/NEAR_NATIVE_RESEARCH.md NN-5.1"""
+
+[[finding]]
+group = """Draw distance"""
+base = """Xenia 4D5309C9 game patches"""
+name = """no LOD patch exists"""
+what = """Xenia Canary's FH1 patches cover motion blur, depth of field, shadows and hash checks; none raises LOD or draw distance."""
+how = """Reading the patch file."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+# --- Render scenarios and car level of detail --------------------------------
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """sub_82D86268"""
+name = """dynamic render settings"""
+what = """Constructor of the per-scenario render settings that `media/renderscenarios.zip` fills (`CDynamicRenderControl` entries: `FrameRate`, `TilingScenario`, car LOD, crowds, particles and more). Every scenario file is parsed into its own object at boot, through one XML reader archive (vtable `0x8222B154`, v4 `0x8223DEC4`). Each control's vtable holds a name getter, a serialize (a visitor binding attribute names to fields) and a reset."""
+how = """Probe hooks on the visitors logged every read with the archive's vtable."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """sub_82D7E2A8, sub_82D7E1F8, sub_82D7E290"""
+v4 = """sub_82E404D0, sub_82E40420"""
+name = """CarLODTransDist"""
+what = """Three floats (`near`, `far`, `veryfar`) at +168/+172/+176 of the render settings (control at +164); compiled defaults 15/25/50 m, the same as every race file. `sub_82D7E2A8` is the reset, `sub_82D7E1F8` the XML visitor and `sub_82D7E290` the name getter."""
+how = """Hooks on every writer: reset, constructor and XML visitor."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """sub_82D7E4B0, sub_82D7E2E8, sub_82D7E390, sub_82D7E498"""
+v4 = """sub_82E406B0, sub_82E40510, sub_82E405B8"""
+name = """CarLODTransDistTraffic"""
+what = """Six floats (`LOD2`..`LOD5`, `LOD4_closest`, `LOD5_closest`); defaults 15/25/50/100/20/80 m, and `Horizon_Race.xml` sets 22/40/75/100/30/80. `sub_82D7E4B0` is the reset, `sub_82D7E2E8` the constructor, `sub_82D7E390` the XML visitor and `sub_82D7E498` the name getter."""
+how = """Hooks on every writer: reset, constructor and XML visitor."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """CarLODTransDist, CarLODTransDistTraffic"""
+v4 = """same"""
+name = """car LOD distances do not pick the visible model"""
+what = """Scaling both distance tables by 0.01 at every writer left the cars' models unchanged, in free roam and in a race (frames aligned within 5 % of pixels). They do not select the model LOD the player sees."""
+how = """Deterministic A/B captures on the race-start route with scale hooks (not kept)."""
+confidence = """confirmed"""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """CarLODThresholds"""
+v4 = """same"""
+name = """CarLODThresholds"""
+what = """Setting `lod1`, `lod2` and `count` to 0 in all 19 scenarios that set them left the race grid cars unchanged. An earlier probe that saw `Horizon_Race.xml` change race cars was not reproduced and was probably run-to-run variance."""
+how = """Member-replacing mod, A/B grid captures."""
+confidence = """confirmed"""
+note = """Confirmed for the grid view."""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """CarFocusLODMinMax"""
+v4 = """same"""
+name = """player car held at LOD0"""
+what = """Seven scenarios set `CarFocusLODMinMax` to `min=0 max=0`, clamping the focused car's LOD to 0, which is why the player's car never changes detail."""
+how = """Reading the scenario files; the player car stayed identical in every probe."""
+confidence = """probable"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """PhotoMode.xml (CarMinWheelLOD, CollidableShadows, SoftParticles)"""
+v4 = """same"""
+name = """photo mode quality keys in races"""
+what = """Merging photo mode's `CarMinWheelLOD 0`, `CollidableShadows 1` and `SoftParticles 1` into all 28 gameplay scenarios (every race, pre-race, post-race and replay file) applied, but race captures at 1x showed no visible difference in wheels, shadows or particles."""
+how = """Key merges through a test mod; A/B captures on the race-start route."""
+confidence = """confirmed"""
+note = """Confirmed at 1x."""
+negative = true
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+[[finding]]
+group = """Render scenarios and car level of detail"""
+base = """0x8201BA00 (SLod.xml), sub_82548C20, sub_82548E78"""
+name = """car super-LOD shader settings"""
+what = """`cars/Shared.zip` `ShaderSettings/Slod.xml` (and `Tire/Slod.xml`) configure the distant-car "super LOD" shader, not world LOD."""
+how = """String xref; archive listing."""
+confidence = """confirmed"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 World detail"""
+
+# --- Collision and cameras ---------------------------------------------------
+
+[[finding]]
+group = """Collision and cameras"""
+base = """sub_824893B0, sub_82D10198, sub_8247FC10"""
+v4 = """sub_824B9140, sub_82DD2000"""
+name = """ground collision query"""
+what = """The query the `snapToGround` camera node uses: `sub_8247FC10(game, 0)` gives a handle, `sub_824893B0(out, [handle])` the scene, the scene's vtable +164 its collision object, and `sub_82D10198(collision, from, to)` casts between two float4 points (with f1 and f2 loaded from `0x82000D48` and `0x82000D68`), returning a hit and the ground height."""
+how = """Read-only diagnostic calls at Rally entry positions, logging hits and heights."""
+confidence = """probable"""
+note = """Used only for diagnostics so far."""
+source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace"""
+
+[[finding]]
+group = """Collision and cameras"""
+base = """sub_82857B00, 0x82857C98"""
+v4 = """sub_82907F88, 0x82908120"""
+name = """camera physics layer"""
+what = """`sub_82857B00` updates one camera physics layer (r31) and stores the factor for its `Param` at r1+96 after running the input through the layer's curve and noise. A layer is sprung when its byte at +248 (`Sprung`) is set, with `SpringK` at +252; noise layers have `NoiseSeed` at +156."""
+how = """Midasm hook at `0x82857C98` reading the stored factor, and scaling it for tagged layers of a built-in immersive camera."""
+confidence = """confirmed"""
+issue = """#443"""
+source = """config/rexglue/analysis/main-xex.toml midasm_hook 0x82857C98; src/pinyon_shift_runtime_hooks.cpp PinyonShiftImmersiveCameraLayer"""
+
+[[finding]]
+group = """Collision and cameras"""
+base = """media/camera.zip CameraPhysics.xml"""
+v4 = """media.zip camera/cameraphysics.xml"""
+name = """camera physics settings file"""
+what = """`CameraPhysics.xml` in `media/camera.zip` holds the camera physics layers. They have no key attribute and are matched by position; each has `SpringK` and `NoiseSeed` values and is updated every frame. The v4 title update carries its own copy in its `media.zip`, which the game reads instead of the disc's."""
+how = """Experiment: layers appended by a mod load on the base game and are ignored on v4."""
+confidence = """confirmed"""
+issue = """#419 #443"""
+source = """docs/MODDING.md Built-in mods; Settings merged by key"""
+
+[[finding]]
+group = """Collision and cameras"""
+base = """postrace_finishline_RALLY_* camera files"""
+v4 = """same"""
+name = """Rally finish cameras sink below the terrain"""
+what = """Rally finish sequences aim at authored camera target nodes (`CameraTargetNode_0`) whose ground snapping is off. On the base track the target sits about 12.5 m below the terrain, so the results background shows the underside of the ground. Turning on the existing `snapToGround` flag on the 92 finish-referenced nodes in the 29 camera files puts it back on the surface."""
+how = """Read-only camera snapshots, a terrain query on a copy of the node, and a run with the fixed data."""
+confidence = """confirmed"""
+source = """docs/DLC_BACKLOG.md Rally finish-camera height"""
+
+# --- Placements and routes ---------------------------------------------------
+
+[[finding]]
+group = """Placements and routes"""
+base = """Ribbon_00/CollObjs.xml, GameObjs.xml, TrackRoute*.xml"""
+v4 = """same"""
+name = """world placements"""
+what = """Plain XML. `CollObjs.xml` places 21,877 collidable objects, each a physics type (`CO_*.rmb`: festival signs, fence parts, picnic tables, marker poles, speed signs, barriers and others) with a position and orientation. `GameObjs.xml` places 2,148 gameplay objects by `GameplayID` (barn finds and others). The 243 `TrackRoute*.xml` files hold each route's start locations, waypoints, checkpoints with a width, checkpoint indicators, boundaries, finish and post-race locations, and the start and end points of stunts and photo missions. The editable base for a world editor."""
+how = """Reading the files (an earlier reading of one route file saw only start locations; corrected in the custom content analysis)."""
+confidence = """confirmed"""
+issue = """#497"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Placements and routes"""
+base = """media/tracks/colorado/SmashableObjectTypes.xml"""
+v4 = """same"""
+name = """smashable types"""
+what = """Loose XML listing the object types the track lets the car smash: `Fence`, `Flyer`, `Mailbox`, `RaceActivation`. A candidate data path for breakable barriers; how a physics type maps to these types is not traced."""
+how = """Reading the file."""
+confidence = """confirmed"""
+note = """Confirmed that the file lists them; the effect of adding types is unknown."""
+issue = """#495"""
+source = """docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""
+
+[[finding]]
+group = """Placements and routes"""
+name = """trigger parser ignores explicit X/Z"""
+what = """The base game's activity trigger parser takes positions only from named world objects; explicit X/Z attributes on a trigger (as in Rally's activation XML) are ignored."""
+how = """A hook inside the native XML reader recovered the seven coordinates that the stock parser dropped."""
+confidence = """confirmed"""
+negative = true
+source = """docs/DLC_BACKLOG.md Normal activity-entry follow-up"""
+
+[[finding]]
+group = """Placements and routes"""
+name = """Rally activation points are hub positions"""
+what = """The seven authored Rally activation coordinates belong to `ColoradoDirt` and the paused Rally hub, not to normal Colorado driving: a car placed at them in Colorado falls through or resets hundreds of metres away, and the ground collision query misses there while it hits beneath a normal spawn. Switching the world name alone gives unloaded grey terrain."""
+how = """Placement experiments with road snapping, collision reset and streaming waits; read-only ground-query diagnostic."""
+confidence = """probable"""
+note = """Misses at remote coordinates do not prove the terrain is absent everywhere."""
+negative = true
+source = """docs/DLC_BACKLOG.md Normal activity-entry follow-up; Hub selection and player-menu entry; Physical placement and native ground controls"""
+
+[[finding]]
+group = """Placements and routes"""
+name = """Rally route start position"""
+what = """A saved Colorado position is not a valid Rally start: the car falls through the ground there. Rally route 001 starts near (-4820.71, 36.15, -2617.82), where road, terrain and collision load correctly on the base build with Rally's assets."""
+how = """Placing the car at the route start (`CPlaceCar`) on the base build with Rally assets; Vulkan and D3D12 captures."""
+confidence = """confirmed"""
+note = """One starting area tested."""
+source = """docs/DLC_BACKLOG.md Base-disc Rally investigation"""
+
+# --- Time and weather --------------------------------------------------------
+
+[[finding]]
+group = """Time and weather"""
+name = """sky clock is not a day fraction or hour"""
+what = """Free roam's sky clock is not stored as a day fraction in [0, 1] or an hour count in [0, 24]. Steadily rising floats in those ranges were rotation-matrix elements of a turning object or position triples 16 bytes apart (moving the car and traffic when poked); none changed the lighting, and poking all 402 risers in [0, 1] or 238 in [0, 24] crashed the title."""
+how = """Snapshots of the title's virtual heaps (about 110 MB) 10 s apart, scanned for rising floats and poked (`tools/scan-guest-snapshots.py`)."""
+confidence = """confirmed"""
+note = """The real clock is seconds since midnight (see the time-of-day object)."""
+negative = true
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4"""
+
+[[finding]]
+group = """Time and weather"""
+base = """tyre WetFriction*, realtimesky.zip"""
+v4 = """same"""
+name = """no weather system"""
+what = """The executable's only "weather" string is `weatherstrip`, and the only wet strings are the tyre friction scales (`WetFriction*`); the sky's clouds are fixed maps in `realtimesky.zip` (`CloudDefs.xml`, `*Cloud*.xds`). The post-processing code carries a per-frame "weather" bloom scale and persistent weather settings, but these are rendering presets, not weather."""
+how = """String scan and archive listing; the bloom-scale hook site."""
+confidence = """confirmed"""
+negative = true
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.4; src/pinyon_shift_runtime_hooks.cpp PinyonShiftBloomScale; docs/REVERSE_ENGINEERING.md@a72a92a5f215 Developer options and leftover systems"""

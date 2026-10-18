@@ -7,7 +7,9 @@ param(
     [switch]$CleanGenerated,
     # NP-3.5: 'auto' builds with FMA3 when this CPU has it (a faster build of
     # the same results); the build only runs on CPUs with the chosen baseline.
-    [ValidateSet('auto', 'sse4.1', 'fma')]
+    # 'v3' (NEXT_LEVEL_RESEARCH.md NL-1.8) adds AVX2, BMI and MOVBE on top,
+    # for Haswell, Zen and later CPUs; same results again.
+    [ValidateSet('auto', 'sse4.1', 'fma', 'v3')]
     [string]$CpuBaseline = 'auto',
     [switch]$JsonEvents
 )
@@ -44,7 +46,11 @@ public static extern bool IsProcessorFeaturePresent(uint feature);
 }
 $cpuBaseline = if ($CpuBaseline -ne 'auto') { $CpuBaseline }
     elseif (Test-PinyonCpuFma) { 'fma' } else { 'sse4.1' }
-$cpuFlags = if ($cpuBaseline -eq 'fma') { '-msse4.1 -mfma -ffp-contract=off' } else { '-msse4.1' }
+$cpuFlags = switch ($cpuBaseline) {
+    'v3' { '-msse4.1 -mfma -ffp-contract=off -march=x86-64-v3' }
+    'fma' { '-msse4.1 -mfma -ffp-contract=off' }
+    default { '-msse4.1' }
+}
 
 $supportedDumps = Get-Content -LiteralPath (Join-Path $root 'config/supported-dumps.json') -Raw |
     ConvertFrom-Json
