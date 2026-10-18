@@ -1,19 +1,11 @@
 package studio.deimos.pinyonshift;
 
-import android.app.Activity;
-import android.app.Dialog;
-import android.graphics.drawable.ColorDrawable;
-import android.view.Window;
-import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.SharedPreferences;
+import android.app.*;
+import android.content.*;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
+import android.graphics.*;
+import android.graphics.drawable.*;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -21,48 +13,13 @@ import android.provider.DocumentsContract;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.HapticFeedbackConstants;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.CheckBox;
-import android.widget.CompoundButton;
-import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ProgressBar;
-import android.widget.ScrollView;
-import android.widget.Switch;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.SocketTimeoutException;
-import java.net.URL;
+import android.view.*;
+import android.widget.*;
+import org.json.*;
+import java.io.*;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 public class SetupActivity extends Activity implements View.OnClickListener, CompoundButton.OnCheckedChangeListener {
     private static final int HTTP_PORT = 47615, DISCOVERY_PORT = 47616, REQUEST_FOLDER = 0x5055, REQUEST_DRIVER_ZIP = 0x5056;
@@ -422,7 +379,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
         activeDriverText.setText("Active: " + ("system".equals(selected) ? "System" : selected) + ("auto".equals(selected) ? (rec != null ? " (" + rec + ")" : " (System)") : ""));
 
         addDriverItem("System Default Driver", "system", "System Vulkan stack (Qualcomm stock driver)", "system".equals(selected) || ("auto".equals(selected) && rec == null));
-        addDriverItem("Auto Recommend", "auto", "Auto picks Turnip V37 on 7xx/8xx or System on 6xx", "auto".equals(selected));
+        addDriverItem("Auto Recommend", "auto", "Auto picks Turnip V37 on 6xx/7xx/8xx", "auto".equals(selected));
 
         File[] dirs = driversDir.listFiles();
         if (dirs != null) {
@@ -797,7 +754,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
 
         String preset = prefs.getString(PREF_GRAPHICS_PRESET, "balanced");
         boolean potato = "potato".equals(preset);
-        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : "1.0"));
+        args.add("--pinyon_shift_fh1_env_map_rate=" + (potato ? "0.0" : "0.25"));
         args.add("--pinyon_shift_fh1_shadows=" + (!potato));
         args.add("--disable_depth_of_field=true");
         args.add("--anisotropic_override=-1");
@@ -813,6 +770,15 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             args.add("--pinyon_shift_car_challenge_gate_probe=true");
             args.add("--xam_report_live_signin=true");
         }
+        args.add("--texture_cache_memory_limit_soft=192");
+        args.add("--texture_cache_memory_limit_hard=384");
+        args.add("--texture_cache_memory_limit_soft_lifetime=5");
+        args.add("--vulkan_texture_max_size=1024");
+        args.add("--vulkan_bindless_textures=false");
+        args.add("--fh1_direct_resolve_outdated_partial=true");
+        args.add("--force_convert_quad_lists_to_triangle_lists=true");
+        args.add("--fh1_surface_rows_on_demand=true");
+        args.add("--vulkan_shader_overrides=true");
         return args.toArray(new String[0]);
     }
 

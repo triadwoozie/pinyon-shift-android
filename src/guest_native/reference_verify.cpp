@@ -267,4 +267,6 @@ void RecordSummary() {
                                                       ctx, base);                              \
   }
 
+#if __has_include("pinyon_shift_reference.h")
 #include "pinyon_shift_reference.h"  // generated beside the recompiled code
+#endif

@@ -97,6 +97,7 @@
         <activity
             android:name="studio.deimos.pinyonshift.PinyonShiftActivity"
             android:label="Pinyon Shift"
+            android:process=":game"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
             android:screenOrientation="sensorLandscape"
             android:resizeableActivity="true"
