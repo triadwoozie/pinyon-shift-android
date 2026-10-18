@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
-#include <thread>
 #include <vector>
 
 #include <rex/cvar.h>
@@ -45,13 +44,6 @@ REXCVAR_DEFINE_BOOL(pinyon_shift_fh1_shadows, !REX_PLATFORM_ANDROID, "Pinyon Shi
                     "screen's shadow mask lit; needs the Vulkan FH1 executor. Off applies only "
                     "while the cars' lights are off (08:02 to 18:50), since it also "
                     "removes the headlights' light on the road")
-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
-REXCVAR_DEFINE_BOOL(pinyon_shift_mobile_perf_mode, REX_PLATFORM_ANDROID, "Pinyon Shift",
-                    "Enables mobile fast-path optimizations for TBDR mobile GPUs (temporal cubemap "
-                    "interleaving and secondary pass culling)")
-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
-REXCVAR_DEFINE_INT32(pinyon_shift_fh1_render_fps_limit, 0, "Pinyon Shift",
-                     "Monotonic presentation frame rate limiter (0: uncapped/VSync, 30, 45, 60, 120)")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(pinyon_shift_reuse_gamma_ramp, true, "Pinyon Shift",
                     "Reuse the title's gamma ramp when it is rebuilt from the same settings. "
@@ -202,22 +194,6 @@ void ApplyRenderSettings() {
 
 }  // namespace
 
-std::atomic<int> g_mobile_target_fps{0};
-std::atomic<float> g_real_frame_time_ms{16.6f};
-
-void SetMobileTargetFps(int fps) {
-  g_mobile_target_fps.store(fps, std::memory_order_relaxed);
-  if (fps > 0) {
-    std::string limit = std::to_string(fps);
-    rex::cvar::SetFlagByName("host_present_fps_limit", limit.c_str());
-    rex::cvar::SetFlagByName("pinyon_shift_fh1_render_fps_limit", limit.c_str());
-  }
-}
-
-float GetMobileFrameTimeMs() {
-  return g_real_frame_time_ms.load(std::memory_order_relaxed);
-}
-
 }  // namespace pinyon_shift::native_renderer
 
 using pinyon_shift::native_renderer::Clock;
@@ -226,46 +202,6 @@ using namespace pinyon_shift::native_renderer;
 // FH1's sole VdSwap call is the source-frame boundary used by the real-frame
 // presentation and performance gates. It intentionally changes no guest state.
 void PinyonShiftObserveGraphicsFrame() {
-  // Mobile monotonic frame rate limiter
-  static auto s_next_frame_time = std::chrono::steady_clock::now();
-  static auto s_last_frame_stamp = std::chrono::steady_clock::now();
-
-  int target_fps = g_mobile_target_fps.load(std::memory_order_relaxed);
-  if (target_fps == 0) {
-    int cvar_limit = int(REXCVAR_GET(pinyon_shift_fh1_render_fps_limit));
-    if (cvar_limit > 0) {
-      g_mobile_target_fps.store(cvar_limit, std::memory_order_relaxed);
-      target_fps = cvar_limit;
-    }
-  }
-
-  if (target_fps > 0) {
-    const auto frame_duration = std::chrono::nanoseconds(1000000000LL / target_fps);
-    auto now = std::chrono::steady_clock::now();
-    if (now < s_next_frame_time) {
-      auto sleep_target = s_next_frame_time - std::chrono::microseconds(1500);
-      if (now < sleep_target) {
-        std::this_thread::sleep_until(sleep_target);
-      }
-      while (std::chrono::steady_clock::now() < s_next_frame_time) {
-        std::this_thread::yield();
-      }
-    }
-    auto after = std::chrono::steady_clock::now();
-    s_next_frame_time = (after > s_next_frame_time + frame_duration)
-                            ? after + frame_duration
-                            : s_next_frame_time + frame_duration;
-  }
-
-  const auto current_stamp = std::chrono::steady_clock::now();
-  const float dt_ms =
-      std::chrono::duration<float, std::milli>(current_stamp - s_last_frame_stamp).count();
-  s_last_frame_stamp = current_stamp;
-  if (dt_ms > 0.1f && dt_ms < 500.0f) {
-    float cur = g_real_frame_time_ms.load(std::memory_order_relaxed);
-    g_real_frame_time_ms.store(cur * 0.85f + dt_ms * 0.15f, std::memory_order_relaxed);
-  }
-
   if (rex::perf::CriticalPathTraceEnabled() &&
       (title_emitter_calls || title_packet_count)) {
     rex::perf::TraceCriticalPath("title_emitter", int64_t(title_emitter_frame),

@@ -770,15 +770,7 @@ public class SetupActivity extends Activity implements View.OnClickListener, Com
             args.add("--pinyon_shift_car_challenge_gate_probe=true");
             args.add("--xam_report_live_signin=true");
         }
-        args.add("--texture_cache_memory_limit_soft=192");
-        args.add("--texture_cache_memory_limit_hard=384");
-        args.add("--texture_cache_memory_limit_soft_lifetime=5");
-        args.add("--vulkan_texture_max_size=1024");
-        args.add("--vulkan_bindless_textures=false");
-        args.add("--fh1_direct_resolve_outdated_partial=true");
-        args.add("--force_convert_quad_lists_to_triangle_lists=true");
-        args.add("--fh1_surface_rows_on_demand=true");
-        args.add("--vulkan_shader_overrides=true");
+        args.add("--vulkan_shader_overrides=false");
         return args.toArray(new String[0]);
     }
 
