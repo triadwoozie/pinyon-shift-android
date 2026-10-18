@@ -1,3 +1,4 @@
+#include <rex/cs_scheduler.h>
 #include "pinyon_shift_app.h"
 #include "auto_start.h"
 #include "pinyon_shift_init.h"
@@ -1341,6 +1342,7 @@ std::unique_ptr<rex::ui::ImGuiDialog> PinyonShiftApp::CreateAchievementsOverlay(
 }
 
 void PinyonShiftApp::OnPreLaunchModule() {
+  rex::cs_scheduler::Actor scheduled(rex::cs_scheduler::kMain);
   pinyon_shift::diagnostics::RefreshCrashReporter();
   pinyon_shift::diagnostics::RecordEvent("guest.launch.begin");
   pinyon_shift::mod::NotifyModuleLaunched();
@@ -1369,6 +1371,7 @@ void PinyonShiftApp::OnPreLaunchModule() {
 }
 
 void PinyonShiftApp::OnPostLaunchModule(rex::system::XThread* thread) {
+  rex::cs_scheduler::Actor scheduled(rex::cs_scheduler::kMain);
   const std::string thread_id = thread ? std::to_string(thread->thread_id()) : "none";
   pinyon_shift::diagnostics::RecordEvent("guest.thread.prepared", {{"thread_id", thread_id}});
   pinyon_shift::fh1_render_test::Start(

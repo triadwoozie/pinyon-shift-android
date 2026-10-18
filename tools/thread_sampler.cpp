@@ -28,6 +28,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -259,9 +260,9 @@ void WalkStack(HANDLE process, HANDLE thread, CONTEXT context, std::vector<DWORD
 
 int Usage() {
   std::fprintf(stderr,
-               "usage: pinyon_shift_thread_sampler --process <exe name> --thread <description> "
+               "usage: pinyon_shift_thread_sampler (--process <exe name> | --pid <pid>) --thread <description> "
                "[--thread <description>...] [--interval-us N] [--lines 1] "
-               "[--output <directory>]\n");
+               "[--output <directory>] [--ips 1]\n");
   return 2;
 }
 
@@ -269,10 +270,12 @@ int Usage() {
 
 int wmain(int argc, wchar_t** argv) {
   std::wstring process_name;
+  DWORD target_process_id = 0;
   std::vector<std::wstring> thread_names;
   uint32_t interval_us = 2000;
   std::filesystem::path output = L".";
   bool lines = false;
+  bool ips = false;
   for (int i = 1; i < argc; ++i) {
     const std::wstring arg = argv[i];
     if (i + 1 >= argc) {
@@ -280,19 +283,25 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (arg == L"--process") {
       process_name = argv[++i];
+    } else if (arg == L"--pid") {
+      target_process_id = DWORD(std::wcstoul(argv[++i], nullptr, 10));
     } else if (arg == L"--thread") {
       thread_names.push_back(argv[++i]);
     } else if (arg == L"--interval-us") {
       interval_us = uint32_t(std::wcstoul(argv[++i], nullptr, 10));
     } else if (arg == L"--lines") {
       lines = std::wcstoul(argv[++i], nullptr, 10) != 0;
+    } else if (arg == L"--ips") {
+      ips = std::wcstoul(argv[++i], nullptr, 10) != 0;
     } else if (arg == L"--output") {
       output = argv[++i];
     } else {
       return Usage();
     }
   }
-  if (process_name.empty() || thread_names.empty() || interval_us < 100) {
+  const bool select_by_name = !process_name.empty();
+  const bool select_by_pid = target_process_id != 0;
+  if (select_by_name == select_by_pid || thread_names.empty() || interval_us < 100) {
     return Usage();
   }
 
@@ -309,10 +318,14 @@ int wmain(int argc, wchar_t** argv) {
     if (process && WaitForSingleObject(process, 0) == WAIT_OBJECT_0) {
       CloseHandle(process);
       process = nullptr;
+      if (target_process_id) {
+        std::fprintf(stderr, "target process exited before the requested threads were ready\n");
+        return 1;
+      }
       Sleep(500);
     }
     if (!process) {
-      while (!(process_id = FindProcess(process_name))) {
+      while (!(process_id = target_process_id ? target_process_id : FindProcess(process_name))) {
         Sleep(50);
       }
       process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE,
@@ -340,12 +353,23 @@ int wmain(int argc, wchar_t** argv) {
   std::filesystem::create_directories(output);
   std::ofstream samples(output / "samples.csv", std::ios::binary);
   samples << "t_ms,thread,cycles,stack_id\n";
+  std::ofstream instructions;
+  if (ips) {
+    instructions.open(output / "instructions.csv", std::ios::binary);
+    instructions << "t_ms,thread,cycles,rva,function_rva,function_size,module,symbol,"
+                    "rax,rbx,rcx,rdx,rsi,rdi,rbp,rsp,r8,r9,r10,r11,r12,r13,r14,r15\n";
+  }
   std::unordered_map<std::string, uint32_t> stack_ids;
   std::vector<const std::string*> stacks;
 
   HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
                                         TIMER_ALL_ACCESS);
   const auto start = std::chrono::steady_clock::now();
+  if (ips) {
+    std::ofstream epoch(output / "instructions-epoch-ms.txt");
+    epoch << std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::system_clock::now().time_since_epoch()).count() << '\n';
+  }
   std::vector<DWORD64> frames;
   std::string stack;
   uint64_t sample_count = 0;
@@ -387,7 +411,8 @@ int wmain(int argc, wchar_t** argv) {
       const ULONG64 used = cycles - thread.cycles;
       thread.cycles = cycles;
       if (frames.empty()) {
-        continue;
+        if (ips && captured) frames.push_back(context.Rip);
+        else continue;
       }
       stack.clear();
       for (size_t i = frames.size(); i-- > 0;) {
@@ -405,6 +430,28 @@ int wmain(int argc, wchar_t** argv) {
       const double t_ms =
           std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
               .count();
+      if (ips) {
+        IMAGEHLP_MODULEW64 module{sizeof(module)};
+        alignas(SYMBOL_INFO) char storage[sizeof(SYMBOL_INFO) + MAX_SYM_NAME]{};
+        auto* symbol = reinterpret_cast<SYMBOL_INFO*>(storage);
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = MAX_SYM_NAME;
+        DWORD64 displacement = 0;
+        const bool found_module = SymGetModuleInfoW64(process, context.Rip, &module);
+        const bool found_symbol = SymFromAddr(process, context.Rip, &displacement, symbol);
+        instructions << t_ms << ',' << thread.id << ',' << used << ',' << std::hex
+                     << (found_module ? context.Rip - module.BaseOfImage : 0) << ','
+                     << (found_module && found_symbol ? symbol->Address - module.BaseOfImage : 0)
+                     << ',' << symbol->Size << std::dec << ','
+                     << (found_module ? Narrow(module.ModuleName) : "?") << ','
+                     << std::quoted(found_symbol ? std::string(symbol->Name, symbol->NameLen) : "?", '"', '"');
+        for (DWORD64 reg : {context.Rax, context.Rbx, context.Rcx, context.Rdx,
+                            context.Rsi, context.Rdi, context.Rbp, context.Rsp,
+                            context.R8, context.R9, context.R10, context.R11,
+                            context.R12, context.R13, context.R14, context.R15})
+          instructions << ',' << std::hex << reg;
+        instructions << std::dec << '\n';
+      }
       char line[96];
       std::snprintf(line, sizeof(line), "%.3f,%lu,%llu,%u\n", t_ms, thread.id,
                     (unsigned long long)used, it->second);

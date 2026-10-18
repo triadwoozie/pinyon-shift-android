@@ -1,3 +1,9 @@
+#include <rex/cs_scheduler.h>
+#include <rex/session_probe.h>
+#include <rex/logging.h>
+#if defined(_WIN32) && defined(REXGLUE_ENABLE_CS_PROBES)
+#include <windows.h>
+#endif
 #include "fh1_render_test.h"
 
 #include <algorithm>
@@ -53,6 +59,11 @@ REXCVAR_DEFINE_BOOL(fh1_render_test_physical_pads, false, "Pinyon Shift",
                     "Render tests: real controllers join the scripted pad on user 0 (hardware "
                     "checks such as DualSense trigger effects)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+REXCVAR_DEFINE_BOOL(cs_schedule_auto_confirm, false, "Diagnostics",
+                    "Serialized route: repeat A while a throttled movement anchor waits")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+#endif
 
 REXCVAR_DEFINE_BOOL(fh1_render_test_memory_ledger, false, "Pinyon Shift",
                     "Render tests on Linux and Android: at every capture, copy the process's "
@@ -191,7 +202,7 @@ struct TestState {
   };
   std::vector<std::vector<MarkRegion>> marks;
   size_t next_host_key = 0;
-  // Output frames spent in completed and active waits.
+  // Script-clock ticks spent in completed and active waits.
   uint64_t wait_offset = 0;
   bool wait_active = false;
   uint64_t wait_start_output = 0;
@@ -204,6 +215,9 @@ struct TestState {
   std::vector<Capture> captures;
   uint64_t stop_frame = 0;
   uint32_t clock_hz = 0;
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+  uint64_t logical_origin_ns = 0;
+#endif
   std::atomic<uint64_t> frame{};
   std::atomic<uint64_t> output_frame{};
   std::chrono::steady_clock::time_point clock_origin{};
@@ -359,7 +373,6 @@ void LoadScript(const std::filesystem::path& path) {
       previous_input_frame = step.frame;
       have_input = true;
     } else if (command == "wait") {
-      if (g_test.clock_hz) Fail("script_wait_needs_output_clock");
       std::string frame, max_frames, condition, argument, extra;
       if (!(row >> frame >> max_frames >> condition)) Fail("script_wait_columns");
       WaitStep wait;
@@ -553,6 +566,16 @@ class ScriptedInputDriver final : public rex::input::InputDriver {
           });
       out->gamepad = std::prev(next)->state;
       out->packet_number = uint32_t(frame);
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+      if (rex::cs_scheduler::InActor() && g_test.wait_active &&
+          g_test.waits[g_test.next_wait].condition == WaitStep::Condition::kVehicleMoved &&
+          out->gamepad.right_trigger && REXCVAR_GET(cs_schedule_auto_confirm)) {
+        const auto ms=rex::cs_scheduler::Now()/1000000;
+        out->gamepad.buttons = (out->gamepad.buttons & ~uint16_t(0x1000)) |
+                              (ms/1000%2==0 ? uint16_t(0x1000) : uint16_t(0));
+        out->packet_number=uint32_t(ms)|0x80000000u;
+      }
+#endif
       const size_t index = size_t(std::prev(next) - g_test.inputs.begin());
       size_t previous = last_input_step_.load(std::memory_order_relaxed);
       while (previous == SIZE_MAX || index > previous) {
@@ -723,6 +746,9 @@ void RecordCaptureEvent(const Capture& capture, uint32_t width, uint32_t height,
        // an earlier published resource, so this is not its source-frame ID.
        {"trigger_output_frame", std::to_string(capture.trigger_output_frame)},
        {"trigger_elapsed_us", std::to_string(capture.trigger_elapsed_us)},
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+       {"logical_ns", std::to_string(rex::cs_scheduler::Now())},
+#endif
        {"capture_begin_elapsed_us", std::to_string(capture.capture_begin_elapsed_us)},
        {"capture_end_elapsed_us", std::to_string(
            std::chrono::duration_cast<std::chrono::microseconds>(
@@ -797,8 +823,8 @@ bool WaitSatisfied(const WaitStep& wait) {
 
 // Returns the script frame for an output frame, holding it at an active
 // wait's frame until the wait's condition holds.
-uint64_t ApplyWaits(uint64_t output_frame) {
-  uint64_t script = output_frame - g_test.wait_offset;
+uint64_t ApplyWaits(uint64_t clock_frame, uint64_t output_frame) {
+  uint64_t script = clock_frame - g_test.wait_offset;
   while (g_test.next_wait < g_test.waits.size() &&
          script >= g_test.waits[g_test.next_wait].frame) {
     const WaitStep& wait = g_test.waits[g_test.next_wait];
@@ -812,6 +838,10 @@ uint64_t ApplyWaits(uint64_t output_frame) {
       g_test.wait_pose_valid = false;
     }
     if (WaitSatisfied(wait)) {
+      if (g_test.clock_hz) {
+        g_test.wait_offset = clock_frame - wait.frame;
+        script = wait.frame;
+      }
       diagnostics::RecordEvent(
           "fh1.render_test.wait",
           {{"frame", std::to_string(wait.frame)},
@@ -851,7 +881,7 @@ uint64_t ApplyWaits(uint64_t output_frame) {
         RequestClose();
       }
     }
-    g_test.wait_offset = output_frame - wait.frame;
+    g_test.wait_offset = clock_frame - wait.frame;
     return wait.frame;
   }
   return script;
@@ -943,7 +973,7 @@ void Configure(rex::RuntimeConfig& config) {
        {"input_steps", std::to_string(g_test.inputs.size())},
        {"captures", std::to_string(g_test.captures.size())},
        {"stop_frame", std::to_string(g_test.stop_frame)},
-       {"clock", g_test.clock_hz ? "wall_time" : "fh1_guest_output_frame"},
+       {"clock", g_test.clock_hz ? (rex::cs_scheduler::Enabled() ? "logical_time" : "wall_time") : "fh1_guest_output_frame"},
        {"clock_hz", std::to_string(g_test.clock_hz)},
        {"input", "synthetic_only"},
        {"capture_source", "guest_output"}});
@@ -964,14 +994,21 @@ bool ObserveOutput(
   }
   g_test.output_frame.store(context.frame_sequence, std::memory_order_release);
   if (g_test.audio_capture) rally::FlushAudioProbeCapture();
-  // Script frame: the output frame less the frames spent waiting.
-  const uint64_t sequence = ApplyWaits(context.frame_sequence);
-  if (g_test.stopping) return false;
-  uint64_t frame = sequence;
+  uint64_t frame = context.frame_sequence;
   const auto now = std::chrono::steady_clock::now();
   if (g_test.clock_origin == std::chrono::steady_clock::time_point{}) {
     g_test.clock_origin = now;
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+    g_test.logical_origin_ns = rex::cs_scheduler::Now();
+    if (rex::cs_scheduler::Enabled()) diagnostics::RecordEvent(
+        "fh1.render_test.logical_clock",{{"origin_ns",std::to_string(g_test.logical_origin_ns)}});
+#endif
   }
+#if defined(REXGLUE_ENABLE_CS_PROBES)
+  if (g_test.clock_hz && rex::cs_scheduler::Enabled()) {
+    frame = (rex::cs_scheduler::Now() - g_test.logical_origin_ns) * g_test.clock_hz / 1000000000;
+  } else
+#endif
   if (g_test.clock_hz) {
     frame = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -979,6 +1016,9 @@ bool ObserveOutput(
             .count()) *
         g_test.clock_hz / 1000;
   }
+  frame = ApplyWaits(frame, context.frame_sequence);
+  const uint64_t sequence = frame;
+  if (g_test.stopping) return false;
   g_test.frame.store(frame, std::memory_order_release);
   while (g_test.next_host_key < g_test.host_keys.size() &&
          frame >= g_test.host_keys[g_test.next_host_key].frame) {
@@ -1258,6 +1298,16 @@ bool ObserveOutput(
                              {{"result", std::to_string(__llvm_profile_dump())}});
 #endif
     g_test.condition.notify_all();
+#if defined(_WIN32) && defined(REXGLUE_ENABLE_CS_PROBES)
+    if (rex::cs_scheduler::Enabled()) {
+      // Bound the verification capture before nondeterministic UI teardown.
+      rex::session_probe::Flush();
+      rex::cs_scheduler::Complete();
+      rex::perf::FlushCsv();
+      rex::FlushLogging();
+      TerminateProcess(GetCurrentProcess(),0);
+    }
+#endif
     RequestClose();
   }
   return false;

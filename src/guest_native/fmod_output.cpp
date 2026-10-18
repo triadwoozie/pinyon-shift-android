@@ -1,3 +1,4 @@
+#include <rex/cs_scheduler.h>
 // FMOD's output played from its ring on the host (NEAR_NATIVE_RESEARCH NN-4.4).
 //
 // FMOD Ex's Xenon output creates the title's one XAudio2 engine and one float
@@ -55,6 +56,7 @@
 #include <fmt/format.h>
 #include <rex/audio/host_frame_source.h>
 #include <rex/cvar.h>
+#include <rex/session_probe.h>
 #include <rex/ppc/context.h>
 #include <rex/ppc/func.h>
 #include <rex/system/xmemory.h>
@@ -83,6 +85,13 @@ REXCVAR_DECLARE(bool, pinyon_shift_guest_native);
 // The original GetState, called from the replacement.
 extern "C" REX_FUNC(PINYON_GUEST_NATIVE_JOIN(__imp__sub_, PINYON_GUEST_NATIVE_PICK(830B0A38,
                                                                                   83171D10)));
+
+// Verification uses the scheduler's clock for host features that affect guest state.
+static inline __attribute__((always_inline)) std::chrono::steady_clock::time_point CsSemanticNow() {
+  if (rex::cs_scheduler::InActor())
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(rex::cs_scheduler::Now()));
+  return std::chrono::steady_clock::now();
+}
 
 namespace pinyon_shift::guest_native {
 namespace {
@@ -113,7 +122,7 @@ constexpr uint64_t kMaxAlignBlocks = 64;
 using Clock = std::chrono::steady_clock;
 
 int64_t NowNs() {
-  return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(CsSemanticNow().time_since_epoch())
       .count();
 }
 
@@ -508,7 +517,7 @@ void CallOriginalGetState(PPCContext& ctx, uint8_t* base) {
   ctx.lr = lr;
 }
 
-bool AnswerGetState(PPCContext& ctx, uint8_t* base) {
+bool AnswerGetStateLive(PPCContext& ctx, uint8_t* base) {
   State& s = S();
   const uint32_t voice = ctx.r3.u32;
   if (!voice || voice != s.fmod_voice.load(std::memory_order_acquire)) return false;
@@ -547,6 +556,20 @@ bool AnswerGetState(PPCContext& ctx, uint8_t* base) {
     const uint64_t offset = s.offset.load(std::memory_order_acquire);
     if (offset) Store64(base, state + 8, samples + offset);
   }
+  return true;
+}
+
+bool AnswerGetState(PPCContext& ctx, uint8_t* base) {
+  if (!rex::session_probe::Enabled()) return AnswerGetStateLive(ctx, base);
+  const uint32_t voice = ctx.r3.u32, state = ctx.r4.u32, flags = ctx.r5.u32;
+  if (!voice || !state) return false;
+  const uint64_t key = (uint64_t(voice) << 32) | state;
+  rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, flags);
+  if (!rex::session_probe::Replaying()) {
+    rex::session_probe::Suppress private_query;
+    if (!AnswerGetStateLive(ctx, base)) CallOriginalGetState(ctx, base);
+  }
+  rex::session_probe::Blob(rex::session_probe::Kind::kHostHook, key, Host(base, state), 16);
   return true;
 }
 
@@ -682,6 +705,16 @@ class FmodFrameSource final : public rex::audio::HostFrameSource {
   }
 
   bool BuildFrame(uint32_t* frame) override {
+    if (!rex::session_probe::Enabled()) return BuildFrameLive(frame);
+    const bool live = BuildFrameLive(frame);
+    const bool built = rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook,
+        UINT64_C(0x4353303141554401), live, true);
+    if (built) rex::session_probe::Bytes(rex::session_probe::Kind::kHostHook,
+        UINT64_C(0x4353303141554402), frame, kFrameWords * sizeof(uint32_t));
+    return built;
+  }
+
+  bool BuildFrameLive(uint32_t* frame) {
     State& s = S();
     Refresh();
     PendingEvent event;

@@ -11,6 +11,39 @@ The Xbox 360 GPU, Xenos, draws into 10 MB of EDRAM and copies results out to mai
 
 ## Why a game-specific renderer
 
+A standalone driver probe found that an extension name alone is not enough
+to plan a GPU-driven front end. On the reference Deck's RADV 24.3-devel,
+`VK_EXT_device_generated_commands` is available, but execution-set pipeline
+binding supports compute only. The Odin's installed Turnip V37 exposes
+neither EXT nor NV DGC. NVIDIA 581.08 supports graphics execution sets;
+the M4 Pro accepts a native Metal render ICB with per-command pipelines,
+but MoltenVK 1.4.1 exposes neither Vulkan DGC extension. This leaves the
+proposed graphics front end blocked on the yardstick drivers. Per-pipeline
+indirect draws remain unmeasured: the existing frame census aggregates
+configurations and discards the order needed to count pipeline runs. See the
+[Stage 0 device table and method](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-03-driver-capabilities).
+
+The separate placed-mapping probe succeeded on both yardsticks: a 512 MiB
+coherent Vulkan allocation mapped at a reserved fixed address, and a
+compute shader verified every CPU-written word with zero mismatches.
+Turnip's type was device local; RADV's selected type was system/GTT memory.
+This establishes placement support. Guest aliases remain untested, and the
+completion-latency result below rejects the shared-arena proposal at its gate.
+[CS-0.5 records the method and negative controls](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-05-placed-device-memory-mapping).
+
+The asynchronous completion probe failed the latency gate too. An experimental
+build (`REXGLUE_ENABLE_CS_PROBES=ON`, default OFF) provides the default-off
+mode (`gpu_async_fence_probe` at startup, `gpu_async_fence_completion` hot). It
+ends the submission at each guest fence and signals a timeline value behind
+it. A completion thread waits and publishes the guest result; the producer
+never waits on that semaphore. On the same pinned race/free-roam routes at
+1x, Odin means rise 16.666→20.942 /16.692→21.885 ms; Deck
+16.800→38.162 /16.875→37.462 ms. All p99s worsen. A/A mean shifts stay under
+0.57%. This rejects CS-4 at its stated 3%/unchanged-p99 gate; placed mapping
+support does not compensate for this cost. The earlier synchronous drain
+is separate historical evidence. The mirror remains in use.
+[Builds, timeline counts and controls](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-04-asynchronous-timeline-completion).
+
 The first step was a census of what the game actually sends the GPU, taken over 17,580 frames of scripted routes and later extended by 10,980 more ([NATIVE_FRAME_CONTRACT.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/native-renderer/NATIVE_FRAME_CONTRACT.md)):
 
 | The game uses | Count |
@@ -44,7 +77,7 @@ Almost all of the game's draws arrive as `PM4_INDIRECT_BUFFER` packets that repl
 | GPU VSync | drives the guest vblank |
 | Pipeline, shader and storage workers | build pipelines, translate shaders and write caches off the hot threads |
 
-The decoder hands the recorder register runs (already byte-swapped), single registers, draws, shader loads, and callbacks for packets the CPU can observe. Ordering is the hard part: a race frame has about 280 event writes, 25–30 fence writes, 5 interrupts and one swap. Fence writes are recorded rather than waited for, so the game sees a fence only after the recorder has consumed everything before it. Memory writes, conditional writes, register-to-memory copies and occlusion queries wait for the recorder.
+The decoder hands the recorder register runs (already byte-swapped), single registers, draws, shader loads, and callbacks for packets the CPU can observe. Ordering is the hard part: a race frame has about 280 event writes, 25–30 fence writes, 5 interrupts and one swap. By default, fence writes are recorded rather than waited for, so the game sees a fence only after the recorder has consumed everything before it. Memory writes, conditional writes, register-to-memory copies and occlusion queries wait for the recorder.
 
 **Shader loads.** The decoder remembers each shader load by guest address and size while a write watch shows the microcode pages unwritten, so a repeated load skips rehashing the microcode and, where recording is inline (Android), the shader lookup too (`gpu_d3d_shader_cache`, on by default). On the Odin race 97 % of loads hit; six in-run A/Bs measured decoder CPU -0.50 ± 0.07 ms and process CPU -0.52 ± 0.27 ms a frame, with 0 mismatches against full hashing over 25.5 M loads.
 
@@ -119,6 +152,7 @@ Renderer changes are judged against scripted routes, not by playing:
 
 - **Routes.** `tools/run-fh1-render-test.py` runs `.fh1test` scripts against a pinned save with a synthetic controller: waits on game state, key presses, setting changes, memory pokes, captures, and expectations on images (MAE, RMSE, changed-pixel ratio against a baseline) and performance. With `present_capture_readable`, each capture also saves the presented image, after the upscaler, which is what upscalers are compared on.
 - **Frame dumps.** One frame's packets, starting registers, shaders and every guest range it reads can be dumped and replayed with the game suspended. Vulkan replays are bit-exact, and the same dump replays on any device. Replaying one free-roam frame on the Odin and the desktop, with every resolve dumped, found the first difference at resolve 9, which led to a Qualcomm push-descriptor bug.
+- **Ordered frame census.** An optional Vulkan-only build (`REXGPU_FH1_ORDERED_CENSUS=ON`, default OFF) records the selected pipeline per emitted guest draw and host rendering instance. A Steam-launched 60-second Deck race contains 3,560 frames: 1,147.42 within-pass pipeline changes/frame and 2.5165 draws/run (median 1, p95 6). The stream has no overflow or missing output mappings. These counts do not establish batching legality or a saving. [Method and counts](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-03-ordered-pipeline-runs-on-the-deck).
 - **Validation.** The Khronos validation layer, including synchronization validation, found the AMD device loss in 0.4.0: the recorder waited on fences the submission worker hadn't submitted yet. It also found a query ended inside a rendering, a shared present semaphore and a wrong storage view type.
 - **Bisection switches.** Skip draws, null fetches, log draws, dump resolves, and label work for Nsight.
 

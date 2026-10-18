@@ -1,3 +1,4 @@
+#include <rex/cs_scheduler.h>
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -27,6 +28,7 @@
 
 #include <fmt/format.h>
 #include <rex/cvar.h>
+#include <rex/session_probe.h>
 #include <rex/thread.h>
 #include <rex/filesystem.h>
 #include <rex/kernel/xam/module.h>
@@ -184,6 +186,21 @@ REXCVAR_DEFINE_BOOL(disable_bloom, true, "Pinyon Shift",
                     "Disable Forza Horizon bloom contribution");
 REXCVAR_DEFINE_BOOL(disable_depth_of_field, true, "Pinyon Shift",
                     "Disable Forza Horizon depth of field");
+
+// Verification uses the scheduler's clock for host features that affect guest state.
+static inline __attribute__((always_inline)) std::chrono::steady_clock::time_point CsSemanticNow() {
+  if (rex::cs_scheduler::InActor())
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(rex::cs_scheduler::Now()));
+  return std::chrono::steady_clock::now();
+}
+static inline __attribute__((always_inline)) std::chrono::system_clock::time_point CsSystemNow() {
+  if (rex::cs_scheduler::InActor()) {
+    const auto ticks = rex::cs_scheduler::Epoch() - UINT64_C(116444736000000000);
+    return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::nanoseconds(ticks * 100 + rex::cs_scheduler::Now())));
+  }
+  return std::chrono::system_clock::now();
+}
 
 namespace {
 
@@ -602,13 +619,13 @@ void ScanLiveProfile(uint32_t address, uint32_t size) {
                                    {"result", "no_fields"}});
     return;
   }
-  const auto start = std::chrono::steady_clock::now();
+  const auto start = CsSemanticNow();
   auto candidates = pinyon_shift::save::FindLiveProfileValue(*credits, *xp, *winnings, 0x4000);
   if (candidates.empty()) {
     candidates = pinyon_shift::save::FindLiveProfileValue(*credits, 0, 0, 0, 256);
   }
   const auto elapsed = std::chrono::duration<double, std::milli>(
-                           std::chrono::steady_clock::now() - start)
+                           CsSemanticNow() - start)
                            .count();
   std::string list;
   for (const auto& candidate : candidates) {
@@ -4793,21 +4810,32 @@ void ApplyUiMutationExperiment() {
 // until the job thread catches up or two seconds pass, so the title's own
 // escape needs a real stall, as on the 360.
 void PinyonShiftThrottleRenderJobs(PPCRegister& r1) {
+  const bool trace = rex::session_probe::Enabled();
+  const uint32_t address = r1.u32 + 84;
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook,
+      UINT64_C(0x823F4B3000000000), LoadGuestU32(address));
+  auto live = [&]() {
   using Clock = std::chrono::steady_clock;
   constexpr uint32_t kIterations = 1000;
   constexpr auto kLimit = std::chrono::seconds(2);
   thread_local Clock::time_point started;
   const uint32_t counter = r1.u32 + 84;
   const uint32_t left = LoadGuestU32(counter);
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   if (left >= kIterations) {
     started = now;
     return;  // The first pass yields as before: usually that is enough.
   }
   if (now - started < kLimit) {
     if (left < 2) StoreGuestU32(counter, 2);
-    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    if (rex::cs_scheduler::InActor()) rex::cs_scheduler::Sleep(50000);
+    else std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
+
+  };
+  if (!(trace && rex::session_probe::Replaying())) live();
+  if (trace) StoreGuestU32(address, uint32_t(rex::session_probe::Scalar(
+      rex::session_probe::Kind::kHostHook, UINT64_C(0x823F4B3000000001), LoadGuestU32(address), true)));
 }
 
 // Observe the same player and finish flag as CWaitForEndCondition
@@ -5425,7 +5453,7 @@ static void ProbeRallyPace(uint32_t route, uint32_t serial, double seconds, uint
   {
     std::lock_guard lock(g_vehicle_hook_sample_mutex);
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+        CsSemanticNow().time_since_epoch()).count();
     pose_fresh = car && g_rally_pace_pose_ms && now - g_rally_pace_pose_ms <= 500;
     if (pose_fresh) position = {g_rally_pace_pose.x, g_rally_pace_pose.y, g_rally_pace_pose.z};
   }
@@ -5636,7 +5664,7 @@ static void ProfileSqlPrepare(uint32_t text) {
   using Clock = std::chrono::steady_clock;
   thread_local std::string previous;
   thread_local Clock::time_point previous_at;
-  const auto now = Clock::now();
+  const auto now = CsSemanticNow();
   if (!previous.empty()) {
     const double ms = std::chrono::duration<double, std::milli>(now - previous_at).count();
     if (ms >= 20 && ms < 1000) {
@@ -5645,7 +5673,7 @@ static void ProfileSqlPrepare(uint32_t text) {
     }
   }
   previous = ReadDlcSql(text, rex::system::kernel_state()->memory()->virtual_membase());
-  previous_at = Clock::now();
+  previous_at = CsSemanticNow();
 }
 // v4 defines Restrictions_Data_Car as Data_Car LEFT JOINed with subqueries
 // for each car's level-4 springs, level-5 tyres and level-4 transmission.
@@ -5718,7 +5746,7 @@ static std::optional<uint32_t> RunGameSql(uint32_t database, std::string_view sq
 }
 
 static void SpeedUpRestrictionsView(uint32_t database, bool v4_text) {
-  const auto start = std::chrono::steady_clock::now();
+  const auto start = CsSemanticNow();
   for (const std::string_view statement : {
            "CREATE INDEX IF NOT EXISTS PinyonShift_SpringDamper_Ordinal "
            "ON List_UpgradeSpringDamper(Ordinal)",
@@ -5762,7 +5790,7 @@ static void SpeedUpRestrictionsView(uint32_t database, bool v4_text) {
     }
   }
   const double ms = std::chrono::duration<double, std::milli>(
-      std::chrono::steady_clock::now() - start).count();
+      CsSemanticNow() - start).count();
   REXLOG_INFO("Game database: {} of 4 Restrictions_Data_Car indexes, view {} ({:.1f} ms)",
               indexes, view, ms);
   pinyon_shift::diagnostics::RecordEvent("db.restrictions_view", {
@@ -6363,7 +6391,7 @@ static void QueueRallyRaceTrace() {
     static bool hub_probe_queued = false;
     if (mode == 17 && profile_ready && PinyonShiftUseBuiltinRallyAdapter()) {
       const auto now_ms = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count());
+          CsSemanticNow().time_since_epoch()).count());
       bool live_presentation = false;
       {
         std::lock_guard lock(g_vehicle_hook_sample_mutex);
@@ -6604,7 +6632,7 @@ void PinyonShiftTraceFrameTelemetry(PPCRegister& r28, PPCRegister& r31) {
 
   const uint64_t now_ms = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
+          CsSemanticNow().time_since_epoch())
           .count());
   uint64_t previous_ms =
       g_last_frame_telemetry_ms.load(std::memory_order_relaxed);
@@ -6703,7 +6731,7 @@ static void PinyonShiftHoldTimeOfDay(double delta_seconds) {
   double seconds = held;
   if (held < 0.0) {
     if (day_minutes < 0.0) {
-      const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+      const auto now = std::chrono::system_clock::to_time_t(CsSystemNow());
       std::tm local{};
 #if defined(_WIN32)
       localtime_s(&local, &now);
@@ -6732,7 +6760,7 @@ static void PinyonShiftHoldTimeOfDay(double delta_seconds) {
           {{"seconds", fmt::format("{:.1f}", seconds)},
            {"day_minutes", fmt::format("{:g}", day_minutes)},
            {"host_ms", fmt::format("{}", std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             std::chrono::steady_clock::now().time_since_epoch())
+                                             CsSemanticNow().time_since_epoch())
                                              .count())}});
       last_logged = seconds;
     }
@@ -6918,7 +6946,7 @@ void PinyonShiftAiTraceDrive(PPCRegister& r3) {
   if (!PinyonShiftGuestRangeReadable(controller, 232)) return;
   static std::mutex mutex;
   static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> last;
-  const auto now = std::chrono::steady_clock::now();
+  const auto now = CsSemanticNow();
   {
     std::lock_guard lock(mutex);
     auto& at = last[controller];
@@ -7056,8 +7084,15 @@ struct FixedStepSite {
 };
 
 void ScaleFixedStep(FixedStepSite& site, uint32_t object, PPCRegister& step) {
+  const bool trace = rex::session_probe::Enabled();
+  const uint64_t key = trace ? (uint64_t(uint32_t(rex::session_probe::Digest(site.name, std::strlen(site.name)))) << 32) | object : 0;
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, step.u64);
+  if (trace && rex::session_probe::Replaying()) {
+    step.u64 = rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key ^ 1, 0, true); return;
+  }
+
   using Clock = FixedStepSite::Clock;
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   std::lock_guard<std::mutex> lock(site.mutex);
   FixedStepSite::ObjectClock* clock = nullptr;
   for (auto& entry : site.clocks) {
@@ -7097,6 +7132,8 @@ void ScaleFixedStep(FixedStepSite& site, uint32_t object, PPCRegister& step) {
     site.log_calls = 0;
     site.log_fixed = site.log_applied = 0.0;
   }
+
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key ^ 1, step.u64);
 }
 
 FixedStepSite animated_camera_step{"animated_camera"};
@@ -7125,7 +7162,13 @@ thread_local uint32_t crowd_call_steps = 1;
 
 // sub_82E08A00 after its prologue: r29 is the procedural models object.
 void PinyonShiftCrowdStepBegin(PPCRegister& r29) {
-  const auto now = std::chrono::steady_clock::now();
+  const bool trace = rex::session_probe::Enabled();
+  const uint64_t key = UINT64_C(0x82E08A0000000000) | r29.u32;
+  if (trace && rex::session_probe::Replaying()) {
+    crowd_call_steps = uint32_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, 0, true)); return;
+  }
+
+  const auto now = CsSemanticNow();
   std::lock_guard<std::mutex> lock(crowd_clock_mutex);
   if (crowd_clocks.size() >= 1024) crowd_clocks.clear();
   CrowdClock& clock = crowd_clocks[uint32_t(r29.u64)];
@@ -7142,6 +7185,8 @@ void PinyonShiftCrowdStepBegin(PPCRegister& r29) {
   }
   clock.last = now;
   crowd_call_steps = steps;
+
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, crowd_call_steps);
 }
 
 namespace {
@@ -7214,10 +7259,10 @@ void RaiseStepEvent() {
 // between the swaps. Logged every second as simulation.step_pacing.
 void PinyonShiftNoteTitleSwap() {
   g_title_swaps.fetch_add(1, std::memory_order_release);
+  bool raise = false;
   if (g_step_raise_held.load(std::memory_order_acquire)) {
     // A raise is held for this swap: raise it now rather than at the next
     // vblank, so a frame that missed its vblank pair still gets its step.
-    bool raise = false;
     {
       std::lock_guard lock(g_step_gate_mutex);
       if (g_step_raise_held.load(std::memory_order_relaxed) && StepLead() < 2) {
@@ -7228,10 +7273,14 @@ void PinyonShiftNoteTitleSwap() {
     // Raise after unlocking: the vblank callback takes g_step_gate_mutex
     // while it holds the global critical region, and the object lookup takes
     // that region, so raising under the gate mutex deadlocks the two threads.
-    if (raise) {
-      RaiseStepEvent();
-    }
   }
+  if (rex::session_probe::Enabled()) {
+    std::lock_guard lock(g_step_gate_mutex);
+    raise = bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000001), raise, true));
+    g_step_raise_held.store(bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000002), g_step_raise_held.load(), true)));
+    g_step_gate_base = int64_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000003), uint64_t(g_step_gate_base), true));
+  }
+  if (raise) RaiseStepEvent();
   if (!REXCVAR_GET(pinyon_shift_step_pacing_log)) {
     return;
   }
@@ -7243,7 +7292,7 @@ void PinyonShiftNoteTitleSwap() {
   static std::array<uint32_t, 4> steps_per_swap{};
   static uint32_t swaps = 0, strays = 0;
   static double stray_ms = 0.0;
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   const uint64_t steps = g_simulation_steps.load(std::memory_order_acquire);
   const int64_t step_ns = g_simulation_step_ns.load(std::memory_order_acquire);
   if (last != Clock::time_point{} && steps >= last_steps) {
@@ -7292,13 +7341,16 @@ void PinyonShiftNoteTitleSwap() {
 // that keep up stay on the vblank, so each step's time matches the vblank its
 // frame is shown on.
 void PinyonShiftGateSimulationStep(PPCRegister& r11) {
+  const bool trace = rex::session_probe::Enabled();
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000000), r11.u64);
+
   using Clock = std::chrono::steady_clock;
   // Runs on the vblank thread only.
   static Clock::time_point held_since{};
   static uint64_t raises = 0, holds = 0, swap_raises = 0, timeouts = 0;
   static double held_ms = 0.0;
   static Clock::time_point report{};
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   if (held_since != Clock::time_point{} &&
       !g_step_raise_held.load(std::memory_order_acquire)) {
     // The swap raised the held step.
@@ -7308,6 +7360,12 @@ void PinyonShiftGateSimulationStep(PPCRegister& r11) {
   }
   if ((r11.u32 & 0xFF) != 0) {
     std::lock_guard lock(g_step_gate_mutex);
+    if (trace && rex::session_probe::Replaying()) {
+      r11.u64 = rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000001), 0, true);
+      g_step_raise_held.store(bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000002), 0, true)));
+      g_step_gate_base = int64_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000003), 0, true));
+      return;
+    }
     bool hold = false;
     if (REXCVAR_GET(pinyon_shift_step_backpressure)) {
       int64_t lead = StepLead();
@@ -7342,6 +7400,11 @@ void PinyonShiftGateSimulationStep(PPCRegister& r11) {
       }
       ++raises;
     }
+    if (trace) {
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000001), r11.u64);
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000002), hold);
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000003), uint64_t(g_step_gate_base));
+    }
   }
   if (now - report >= std::chrono::seconds(10)) {
     if (report != Clock::time_point{} && REXCVAR_GET(pinyon_shift_step_backpressure)) {
@@ -7371,7 +7434,7 @@ void PinyonShiftObserveSimulationDelta(PPCRegister& f31) {
     // instead, capped, so the game runs smoothly and slows under load.
     using Clock = std::chrono::steady_clock;
     static Clock::time_point last_tick;
-    const Clock::time_point now = Clock::now();
+    const Clock::time_point now = CsSemanticNow();
     if (last_tick != Clock::time_point{}) {
       const double host_seconds = std::chrono::duration<double>(now - last_tick).count();
       const double cap = REXCVAR_GET(pinyon_shift_max_simulation_step_ms) / 1000.0;
@@ -7418,7 +7481,7 @@ void PinyonShiftTraceVehiclePose(PPCRegister& r1, PPCRegister& r30,
   const uint32_t forward_address = static_cast<uint32_t>(forward_address_64);
   const uint64_t now_ms = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
+          CsSemanticNow().time_since_epoch())
           .count());
   const uint32_t generation =
       g_title_generation.load(std::memory_order_acquire);

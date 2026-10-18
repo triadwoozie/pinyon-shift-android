@@ -1219,7 +1219,7 @@ class Fh1RenderTestRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "frame 0"):
                 MODULE.parse_scenario(path)
 
-    def test_rejects_output_waits_on_wall_time_clock_before_launch(self):
+    def test_time_clock_accepts_waits_with_output_frame_watchdogs(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.fh1test"
             script = ("pinyon-shift-fh1-render-test-v1\n"
@@ -1229,8 +1229,7 @@ class Fh1RenderTestRunnerTests(unittest.TestCase):
                 path.write_text(script.replace("input 0", directive + "input 0"))
                 self.assertEqual([(20, "scene")], MODULE.parse_scenario(path)[0])
             path.write_text(script.replace("input 0", "# clock-hz 120\nwait 10 100 vehicle\ninput 0"))
-            with self.assertRaisesRegex(ValueError, "output-frame waits"):
-                MODULE.parse_scenario(path)
+            self.assertEqual([(20, "scene")], MODULE.parse_scenario(path)[0])
 
     def test_capture_pose_fields_are_numeric(self):
         event = {

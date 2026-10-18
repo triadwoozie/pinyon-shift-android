@@ -1,0 +1,36 @@
+pinyon-shift-fh1-render-test-v1
+# CS-1: loading anchors; 60 seconds from gauntlet-driving to gauntlet-end.
+# clock-hz 60
+# expect-race-hud gauntlet-driving
+# Pinned appdata-2026-09-27; clocks pause at anchors, watchdogs count output frames.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+wait 20 60000 file pressstart.wmv
+input 420 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 540 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 660 0000 0 0 0 0 0 0
+wait 800 60000 freeroam
+capture 5300 gauntlet-ready
+input 800 1000 0 0 0 0 0 0
+input 5400 4000 0 0 0 0 0 0
+input 5412 0000 0 0 0 0 0 0
+capture 5700 gauntlet-entry
+input 5800 1000 0 0 0 0 0 0
+input 5812 0000 0 0 0 0 0 0
+capture 5900 gauntlet-choice
+input 6000 1000 0 0 0 0 0 0
+input 6012 0000 0 0 0 0 0 0
+capture 6300 gauntlet-loading
+capture 7100 gauntlet-race
+capture 7500 gauntlet-started
+capture 9400 start-menu
+input 11000 1000 0 0 0 0 0 0
+input 11012 0000 0 0 0 0 0 0
+capture 11500 pre-race
+input 12000 0000 0 255 0 0 0 0
+wait 12100 60000 vehicle-moved 5
+capture 12500 gauntlet-driving
+capture 16100 gauntlet-end
+stop 16400

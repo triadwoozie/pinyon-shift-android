@@ -298,9 +298,6 @@ def parse_scenario(
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[0] != HEADER:
         raise ValueError("unsupported FH1 render-test schema")
-    if (any(line.startswith("# clock-hz ") for line in lines) and
-            any(line.startswith("wait ") for line in lines)):
-        raise ValueError("wall-time scripts cannot use output-frame waits")
     captures: list[tuple[int, str]] = []
     stop = 0
     image_limits: dict[str, tuple[float, float, float]] = {}
@@ -2194,7 +2191,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "rally_hub_retirements": rally_hub_retirements,
         "rally_entries": rally_entries,
         "automation": (
-            "fh1_wall_time_script"
+            ("fh1_logical_time_script" if any(
+                (e.get("event") == "fh1.render_test.logical_clock" or
+                 (e.get("event") == "fh1.render_test.configured" and e.get("clock") == "logical_time"))
+                for e in events) else "fh1_wall_time_script")
             if "# clock-hz " in scenario.read_text(encoding="utf-8")
             else "fh1_guest_output_frame_script"
         ),

@@ -28,6 +28,13 @@ How Pinyon Shift changes this for 60 fps and higher is under [Above 30 fps](runt
 
 {{findings:threads/Main loop}}
 
+Session replay also depends on the instructions between kernel calls. The
+render thread polls a job state byte outside its job lock; a worker
+publishes completion under that lock. Replaying each thread's external
+results and lock grants left this read on the opposite side of the worker
+write. A deterministic runtime must order those shared-memory accesses or
+control the execution that reaches them.
+
 ## Frame pacing
 
 {{findings:threads/Frame pacing}}

@@ -19,6 +19,7 @@
 // guest_native.summary counts every call of the wrapper as declined.
 
 #include <chrono>
+#include <rex/cs_scheduler.h>
 #include <cstdint>
 
 #include <rex/cvar.h>
@@ -44,7 +45,8 @@ constexpr uint32_t kRenderIdleReturn =
 bool SleepIdle(PPCContext& ctx, uint8_t*) {
   const uint32_t sleep_us = REXCVAR_GET(pinyon_shift_render_idle_sleep_us);
   if (sleep_us && ctx.r3.u32 == 0 && static_cast<uint32_t>(ctx.lr) == kRenderIdleReturn) {
-    rex::thread::WaitUntil(std::chrono::steady_clock::now() + std::chrono::microseconds(sleep_us));
+    if (rex::cs_scheduler::InActor()) rex::cs_scheduler::Sleep(uint64_t(sleep_us)*1000);
+    else rex::thread::WaitUntil(std::chrono::steady_clock::now() + std::chrono::microseconds(sleep_us));
   }
   return false;
 }

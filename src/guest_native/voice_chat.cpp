@@ -12,6 +12,7 @@
 // from 0.146 to 0.082 ms a frame on the Odin, in-run.
 
 #include <chrono>
+#include <rex/cs_scheduler.h>
 #include <cstdint>
 
 #include <rex/cvar.h>
@@ -30,7 +31,8 @@ namespace pinyon_shift::guest_native {
 namespace {
 
 bool SkipTick(PPCContext&, uint8_t*) {
-  rex::thread::WaitUntil(std::chrono::steady_clock::now() + std::chrono::milliseconds(50));
+  if (rex::cs_scheduler::InActor()) rex::cs_scheduler::Sleep(50000000);
+  else rex::thread::WaitUntil(std::chrono::steady_clock::now() + std::chrono::milliseconds(50));
   return true;
 }
 

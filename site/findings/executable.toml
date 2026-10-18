@@ -97,13 +97,13 @@ source = """config/supported-dumps.json; config/rexglue/pinyon_shift_manifest.to
 
 [[finding]]
 group = """Imports and modules"""
-base = """XMediaFacade_default.xex"""
+base = """XMediaFacade_default.xex; worker 88069288; continuation 881EC61C"""
 v4 = """XMediaFacade_default.xex + XMediaFacade_default.xexp"""
 name = """xmedia facade module"""
-what = """`XMediaFacade_default.xex` (2,662,400 bytes, SHA-256 prefix `ED285BEEFEAFCDC9`) is the video playback module. It is loaded during front-end video playback."""
-how = """Module hash from the dump manifest; load shown by the M2 route trace."""
+what = """`XMediaFacade_default.xex` (2,662,400 bytes, SHA-256 prefix `ED285BEEFEAFCDC9`) is the video playback module. It is loaded during front-end video playback. During the base-module Press Start movie, a worker starting at `88069288` self-suspends through `NtSuspendThread` (guest continuation `881EC61C`). A serialized scheduler must park that actor and let another actor resume it; suspending its native thread while it owns the execution permit stalls every guest thread. This was not tested on the patched v4 media module."""
+how = """Module hash from the dump manifest; M2 load trace; Round 3 native stack sampling shows the media worker parked in XThread::Suspend / ZwSuspendThread, with the guest continuation in the runtime stall record."""
 confidence = """confirmed"""
-source = """config/supported-dumps.json; config/rexglue/pinyon_shift_manifest.toml M2"""
+source = """config/supported-dumps.json; config/rexglue/pinyon_shift_manifest.toml M2; docs/CLEAN_SLATE_STAGE0.md CS-1 deterministic scheduling probe"""
 
 [[finding]]
 group = """Imports and modules"""
@@ -395,3 +395,13 @@ what = """Two `bdz` branches at `82AD8138` and `82AD813C` jump outside their fun
 how = """Recompiler warnings reviewed and accepted."""
 confidence = """confirmed"""
 source = """config/rexglue/accepted-codegen-warnings.json"""
+
+[[finding]]
+group = "Analysis notes"
+id = "cs1-boot-path-split"
+base = "82C01D08; 824E5100; 82A6E848"
+name = "serialized replay reaches a different boot helper"
+what = """The same-binary Round 3 scheduler replay reaches the entry of 824E5100 where recording reaches 82C01D08, at grant 850,145 and logical 11.67161 s on guest thread 8. Static call edges show 82C01D08 taking and releasing an RTL critical section; 824E5100 calls 82A6E848, which queries XAM system version, sign-in state and privilege. These edges locate the split, not its originating state change: the trace does not establish a different privilege result or the caller task's purpose. No v4 mapping was established."""
+how = """Default-off 128-call scheduling budgets, unobserved same-binary schedule replay and generated-source call-edge inspection; no guest state is substituted to pass the comparison."""
+confidence = "confirmed"
+source = "docs/CLEAN_SLATE_STAGE0.md#cs-1-deterministic-scheduling-probe"

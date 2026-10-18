@@ -1,0 +1,52 @@
+pinyon-shift-fh1-render-test-v1
+# In-run A/B: gpu_true_fence_completion alternates false/true every 300 output frames from frame 1800 (tools/make-ab-route.py).
+# clock-hz 60
+# Boot the installed FH1 profile without depending on physical input. Captures
+# are intentionally spaced while this trace is calibrated against scene gates.
+# expect-performance 50000 55 80 500
+# expect-simulation-time 0.95 1.08 2
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 780 0000 0 0 0 0 0 0
+input 930 1000 0 0 0 0 0 0
+capture 1200 probe-1200
+capture 1500 probe-1500
+capture 1800 probe-1800
+cvar 1800 gpu_true_fence_completion false
+cvar 1801 perf_aa_toggle 0
+cvar 2100 gpu_true_fence_completion true
+cvar 2101 perf_aa_toggle 1
+cvar 2400 gpu_true_fence_completion false
+cvar 2401 perf_aa_toggle 0
+cvar 2700 gpu_true_fence_completion true
+cvar 2701 perf_aa_toggle 1
+capture 3000 free-middle
+cvar 3000 gpu_true_fence_completion false
+cvar 3001 perf_aa_toggle 0
+cvar 3300 gpu_true_fence_completion true
+cvar 3301 perf_aa_toggle 1
+cvar 3600 gpu_true_fence_completion false
+cvar 3601 perf_aa_toggle 0
+cvar 3900 gpu_true_fence_completion true
+cvar 3901 perf_aa_toggle 1
+cvar 4200 gpu_true_fence_completion false
+cvar 4201 perf_aa_toggle 0
+cvar 4500 gpu_true_fence_completion true
+cvar 4501 perf_aa_toggle 1
+cvar 4800 gpu_true_fence_completion false
+cvar 4801 perf_aa_toggle 0
+cvar 5100 gpu_true_fence_completion true
+cvar 5101 perf_aa_toggle 1
+cvar 5400 gpu_true_fence_completion false
+cvar 5401 perf_aa_toggle 0
+capture 5700 free-end
+cvar 5700 gpu_true_fence_completion true
+cvar 5701 perf_aa_toggle 1
+stop 6000
